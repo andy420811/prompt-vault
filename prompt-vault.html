@@ -1773,6 +1773,7 @@
       <div class="var-row" data-vid="${v.id}">
         <div class="vrh">
           <input class="v-label" placeholder="版本名稱，如：暖色版" value="${esc(v.label)}">
+          <button type="button" class="mini-btn v-solo" title="以此變體另存為獨立的新提示詞">獨立</button>
           <button type="button" class="mini-btn v-copy">複製</button>
           <button type="button" class="mini-btn del v-del">刪除</button>
         </div>
@@ -1791,8 +1792,36 @@
   $("#variantList").addEventListener("click", e => {
     const row = e.target.closest(".var-row"); if (!row) return;
     if (e.target.closest(".v-del")) { syncVariants(); curVariants = curVariants.filter(v => v.id !== row.dataset.vid); renderVariants(); return; }
-    if (e.target.closest(".v-copy")) { copyText($(".v-prompt", row).value, e.target.closest(".v-copy")); }
+    if (e.target.closest(".v-copy")) { copyText($(".v-prompt", row).value, e.target.closest(".v-copy")); return; }
+    if (e.target.closest(".v-solo")) { syncVariants(); const v = curVariants.find(x => x.id === row.dataset.vid); if (v) promoteVariant(v); return; }
   });
+  // 以某個變體另存為一筆獨立的新提示詞（沿用目前編輯器的類型／參數／標籤／分組／預設，但不含子變體）
+  function promoteVariant(v) {
+    const prompt = (v.prompt || "").trim();
+    if (!prompt) { toast("此變體沒有提示詞內容"); return; }
+    const params = {};
+    const ar = $("#pAr").value, seed = $("#pSeed").value.trim(), steps = $("#pSteps").value.trim(),
+      cfg = $("#pCfg").value.trim(), dur = $("#pDur").value.trim(), fps = $("#pFps").value.trim();
+    if (ar) params.ar = ar; if (seed) params.seed = seed; if (steps) params.steps = steps; if (cfg) params.cfg = cfg;
+    if (curType === "video") { if (dur) params.duration = dur; if (fps) params.fps = fps; }
+    const rec = {
+      type: curType,
+      title: (v.label || $("#fTitle").value.trim() || "").slice(0, 60),
+      prompt,
+      neg: $("#fNeg").value.trim(), model: $("#fModel").value.trim(),
+      tags: $("#fTags").value.split(",").map(s => s.trim()).filter(Boolean),
+      params,
+      camera: [...sel.camera], style: [...sel.style], light: [...sel.light], shot: [...sel.shot],
+      url: "", imgs: [], group: $("#fGroup").value.trim(),
+      notes: v.note ? v.note.trim() : "",
+      variants: [], vars: [], varsDone: false
+    };
+    const target = normalize({ ...rec, id: uid(), fav: false, created: Date.now(), edited: Date.now() });
+    data.unshift(target);
+    save(); render();
+    detectVars(target);
+    toast("已建立為獨立提示詞：" + (target.title || "未命名"));
+  }
   $("#addVarFromMain").addEventListener("click", () => {
     syncVariants();
     curVariants.push({ id: uid(), label: "", prompt: $("#fPrompt").value, note: "" });
