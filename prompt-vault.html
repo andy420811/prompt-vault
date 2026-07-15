@@ -2735,7 +2735,16 @@
   }
 
   render();
-  // 自動同步：啟動時若雲端較新則拉取
-  if (localStorage.getItem("promptvault.autosync") === "1" && cloudBase()) cloudPull(false);
+  // 啟動時：只要設定了雲端後端就先檢查雲端，雲端較新就自動把最新資料讀入
+  //（跨裝置：在別台開啟時若不是最新，一開就先載入最新；本機較新則不覆蓋。不再受「自動同步」開關限制）
+  if (cloudBase()) cloudPull(false);
+  // 切回此分頁／視窗重新取得焦點時再檢查一次：其他裝置期間有更新就先載入
+  //（編輯器／彈窗開著時略過，避免蓋掉正在編輯、尚未儲存的內容）
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && cloudBase() && !document.querySelector(".overlay.show")) cloudPull(false);
+  });
+  window.addEventListener("focus", () => {
+    if (cloudBase() && !document.querySelector(".overlay.show")) cloudPull(false);
+  });
 })();
 </script>
