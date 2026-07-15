@@ -105,6 +105,16 @@
 
   /* grid + card */
   .grid { display:grid; gap:18px; grid-template-columns:repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
+  .grid.sectioned { display:block; }
+  .grp-section { margin-bottom:26px; }
+  .grp-section > .grp-head { display:flex; align-items:center; gap:9px; cursor:pointer; padding:8px 3px; margin-bottom:14px; border-bottom:1px solid var(--line); user-select:none; }
+  .grp-section > .grp-head:hover { border-color:var(--ink-3); }
+  .grp-section .grp-name { font-size:15px; font-weight:650; color:var(--ink); letter-spacing:.01em; }
+  .grp-section .grp-count { font-size:12px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+  .grp-section .grp-chev { margin-left:auto; color:var(--ink-3); transition:transform .18s; }
+  .grp-section.untitled .grp-name { color:var(--ink-3); font-weight:600; }
+  .grp-section.closed .grp-chev { transform:rotate(-90deg); }
+  .grp-section.closed .grid { display:none; }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow);
     display:flex; flex-direction:column; overflow:hidden; transition:transform .16s, box-shadow .16s, border-color .16s; }
   .card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
@@ -444,6 +454,7 @@
     </div>
     <div class="spacer"></div>
     <button class="chip warn" id="backupNote" hidden></button>
+    <button class="chip" id="viewBtn" title="依專案／系列分區整理" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="12" width="18" height="8" rx="1"/></svg> 分區整理</button>
     <select class="sort" id="groupSel" style="display:none"><option value="">全部專案</option></select>
     <select class="sort" id="sort">
       <option value="new">最近新增</option>
@@ -994,6 +1005,8 @@
 
   let data = load();
   let filter = "all";
+  let viewMode = (localStorage.getItem("promptvault.view") === "sections") ? "sections" : "flat";
+  const collapsedGroups = new Set();
   let editingId = null;
   let curType = "image";
   let curImgs = [];
@@ -1054,11 +1067,16 @@
     const gVal = [...gSel.options].some(o => o.value === gCur) ? gCur : "";
     gSel.value = gVal;
 
+    // 分區整理檢視：依專案／系列分區顯示，隱藏單選過濾器
+    const sectioned = viewMode === "sections";
+    $("#viewBtn").setAttribute("aria-pressed", sectioned);
+    if (sectioned) gSel.style.display = "none";
+
     let list = data.filter(p => {
       if (filter === "image" && p.type !== "image") return false;
       if (filter === "video" && p.type !== "video") return false;
       if (filter === "fav" && !p.fav) return false;
-      if (gVal && p.group !== gVal) return false;
+      if (!sectioned && gVal && p.group !== gVal) return false;
       if (q) {
         const hay = [p.title, p.prompt, p.neg, p.model, p.notes, p.group, p.tags.join(" "),
           GROUPS.flatMap(g => p[g]).join(" "), Object.values(p.params).join(" "),
@@ -1085,7 +1103,36 @@
       return;
     }
     empty.style.display = "none";
-    grid.innerHTML = list.map(cardHTML).join("");
+    if (sectioned) {
+      grid.classList.add("sectioned");
+      grid.innerHTML = sectionsHTML(list);
+    } else {
+      grid.classList.remove("sectioned");
+      grid.innerHTML = list.map(cardHTML).join("");
+    }
+  }
+
+  const UNTITLED_GRP = "（未分類）";
+  function sectionsHTML(list) {
+    const buckets = new Map();
+    list.forEach(p => { const g = p.group || UNTITLED_GRP; if (!buckets.has(g)) buckets.set(g, []); buckets.get(g).push(p); });
+    const names = [...buckets.keys()].sort((a, b) => {
+      if (a === UNTITLED_GRP) return 1; if (b === UNTITLED_GRP) return -1;
+      return a.localeCompare(b, "zh-Hant");
+    });
+    return names.map(name => {
+      const items = buckets.get(name);
+      const closed = collapsedGroups.has(name) ? " closed" : "";
+      const untitled = name === UNTITLED_GRP ? " untitled" : "";
+      return `<section class="grp-section${closed}${untitled}" data-grp="${esc(name)}">
+        <div class="grp-head">
+          <span class="grp-name">${esc(name)}</span>
+          <span class="grp-count">${items.length}</span>
+          <svg class="grp-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="grid">${items.map(cardHTML).join("")}</div>
+      </section>`;
+    }).join("");
   }
 
   function paramStr(pm) {
@@ -1153,6 +1200,13 @@
 
   // ---------- card actions ----------
   $("#grid").addEventListener("click", e => {
+    const gh = e.target.closest(".grp-head");
+    if (gh) {
+      const sec = gh.closest(".grp-section"); const name = sec.dataset.grp;
+      sec.classList.toggle("closed");
+      if (sec.classList.contains("closed")) collapsedGroups.add(name); else collapsedGroups.delete(name);
+      return;
+    }
     const card = e.target.closest(".card"); if (!card) return;
     const id = card.dataset.id;
     const actEl = e.target.closest("[data-act]");
@@ -1216,6 +1270,11 @@
   $("#q").addEventListener("input", render);
   $("#sort").addEventListener("change", render);
   $("#groupSel").addEventListener("change", render);
+  $("#viewBtn").addEventListener("click", () => {
+    viewMode = viewMode === "sections" ? "flat" : "sections";
+    try { localStorage.setItem("promptvault.view", viewMode); } catch (e) {}
+    render();
+  });
 
   // ---------- preset pickers ----------
   GROUPS.forEach(g => {
