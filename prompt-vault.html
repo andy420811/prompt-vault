@@ -599,6 +599,7 @@
         <div class="block-body">
           <p class="hint">同一主題的微調版本。每個變體可有自己的提示詞、名稱與備註，方便並排比較。</p>
           <div class="var-list" id="variantList"></div>
+          <input id="aiVarHint" placeholder="✦ 給 AI 的變化方向（選填）：如 改成夜晚場景、換仰角鏡頭、更電影感、加暴雨" style="width:100%;margin:2px 0;font-size:12.5px">
           <div class="pk-actions">
             <button type="button" class="link-btn" id="addVarFromMain">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
@@ -2259,23 +2260,28 @@
 
   // ---------- AI suggested variants ----------
   const VARS_SCHEMA = { type: "OBJECT", properties: { variants: { type: "ARRAY", items: {
-    type: "OBJECT", properties: { label: { type: "STRING" }, prompt: { type: "STRING" } }, required: ["label", "prompt"]
+    type: "OBJECT", properties: { label: { type: "STRING" }, prompt: { type: "STRING" }, desc: { type: "STRING" } }, required: ["label", "prompt"]
   } } }, required: ["variants"] };
-  const VARS_SYS = "基於使用者的生成提示詞，提出 3 個方向明確不同的微調變體（例如：換色調、換情緒、換時段、換場景、換鏡頭），每個變體輸出 label（2~6 字繁體中文名稱，如「暖色版」「夜景版」）與 prompt（完整提示詞，語言與原文相同，僅改動該方向相關的部分，保留其餘內容與硬性要求）。";
+  const VARS_SYS = "基於使用者的生成提示詞，提出方向明確不同的微調變體。每個變體輸出三個欄位：\n- label：8~16 字繁體中文、具體描述這個變體的方向與特色（如「黃昏暖調＋低角度仰拍」「藍調夜景霓虹光」），不要只寫「暖色版」這種過短籠統的名稱；\n- prompt：完整提示詞，語言與原文相同，只改動該方向相關的部分，保留其餘內容與所有硬性要求；\n- desc：一句繁體中文，具體說明「相對原版改了什麼」（如「時段改黃昏、鏡頭改仰角、色調偏琥珀金」）。\n若使用者指定了想要的變化方向，就完全依其要求逐項產生對應變體（一個方向一個變體）；未指定時，自行從換色調、情緒、時段、場景、鏡頭、風格、天氣等面向挑 3 個明顯不同的方向。";
   $("#aiVarBtn").addEventListener("click", async () => {
     const raw = $("#fPrompt").value.trim();
     if (!raw) { toast("請先輸入提示詞"); return; }
     if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter）"); return; }
+    const dir = $("#aiVarHint").value.trim();
+    const userMsg = dir
+      ? `原始提示詞：\n${raw}\n\n使用者想要的變化方向（請逐項對應產生變體）：\n${dir}`
+      : `原始提示詞：\n${raw}`;
     const btn = $("#aiVarBtn"); const old = btn.innerHTML;
     btn.textContent = "生成中…"; btn.disabled = true;
     try {
-      const r = await aiCall(VARS_SYS, raw, VARS_SCHEMA);
+      const r = await aiCall(VARS_SYS, userMsg, VARS_SCHEMA);
       syncVariants();
       let n = 0;
-      (r.variants || []).slice(0, 4).forEach(v => {
-        if (v.prompt) { curVariants.push({ id: uid(), label: v.label || "變體", prompt: v.prompt, note: "AI 建議" }); n++; }
+      (r.variants || []).slice(0, 6).forEach(v => {
+        if (v.prompt) { curVariants.push({ id: uid(), label: v.label || "變體", prompt: v.prompt, note: (v.desc || "AI 建議").trim() }); n++; }
       });
       renderVariants(); $("#blkVariants").classList.remove("closed");
+      if (n) $("#aiVarHint").value = "";
       toast(n ? `已加入 ${n} 個 AI 變體` : "AI 沒有回傳變體");
     } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
     finally { btn.innerHTML = old; btn.disabled = false; }
