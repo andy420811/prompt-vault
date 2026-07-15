@@ -1,0 +1,27 @@
+# Cloudflare Worker 設定 — 供 GitHub Actions 自動部署用
+# 部署對象＝你現有的 Worker「prompt-vault-proxy」(名稱必須一致，才不會另開新的)
+name = "prompt-vault-proxy"
+main = "prompt-vault-proxy.js"
+compatibility_date = "2026-07-15"
+
+# === 雲端同步用的 KV 綁定（重要！）===========================================
+# 這一段是給 App 的「備份到雲端／從雲端還原／自動同步」用的。
+# ★ 必填：把 id 換成你 Cloudflare 上那個 KV 命名空間的 ID，否則自動部署會失敗
+#          （失敗不會弄壞現有 Worker，只是不會更新，改好再推即可）。
+# 取得方式：Cloudflare Dashboard → Storage & Databases → KV
+#           → 點你的 namespace → 複製「Namespace ID」貼到下面。
+[[kv_namespaces]]
+binding = "VAULT"
+id = "77cecf16452b4cd4903c2663a4f01c46"
+
+# === 選填：一般 Variable（覆寫預設模型）=====================================
+# 只有當你「曾在 Dashboard 手動設過這些一般 Variable」時才需要填。
+# 若你設過卻沒寫在這裡，wrangler 部署會把它們移除、回到程式碼內建預設值。
+# 需要的話把下面整段取消註解並填入你的值：
+# [vars]
+# GEMINI_MODEL = "gemini-2.5-flash"
+# OR_TEXT_MODEL = "deepseek/deepseek-chat-v3-0324:free"
+# OR_VISION_MODEL = "google/gemini-2.0-flash-exp:free"
+
+# 註：Secret 類型的 PROXY_PASSWORD / GEMINI_KEYS / OPENROUTER_KEYS
+#     不必寫在這裡，wrangler 部署會自動保留，不會被清掉。

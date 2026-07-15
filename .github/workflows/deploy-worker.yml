@@ -1,0 +1,22 @@
+name: Deploy Worker
+
+# 只有動到 Worker 相關檔案時才部署（改前端 HTML 不會觸發，省時省事）
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'prompt-vault-proxy.js'
+      - 'wrangler.toml'
+      - '.github/workflows/deploy-worker.yml'
+  workflow_dispatch: {}   # 也可在 GitHub Actions 頁面手動按一下部署
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
