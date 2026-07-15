@@ -1083,6 +1083,26 @@
       scheduleCloudPush();
     } catch (e) { toast("儲存失敗，圖片可能太多、空間已滿"); }
   }
+  // 新增／更改／刪除前：先確認雲端有沒有更新的資料，雲端較新就先取下來併入本機，
+  // 這樣這次操作是套在「其他裝置的最新資料」上，之後上傳才不會把別台的新增/修改蓋掉。
+  // 回傳是否有拉取。只在雲端「確實較新」時才併入；本機較新則不動。
+  async function syncPullBeforeChange() {
+    const base = cloudBase(); if (!base) return false;
+    try {
+      const { pw } = proxyCfg();
+      const r = await fetch(base, { headers: { "X-Proxy-Password": pw } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j || !Array.isArray(j.data)) return false;
+      const localU = +localStorage.getItem("promptvault.updated") || 0;
+      if ((j.updated || 0) > localU) {
+        data = j.data.map(normalize);
+        localStorage.setItem(KEY, JSON.stringify(data));
+        localStorage.setItem("promptvault.updated", String(j.updated || Date.now()));
+        return true;
+      }
+    } catch (e) {}
+    return false;
+  }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function esc(s) { return (s||"").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
 
@@ -2013,7 +2033,7 @@
   });
 
   // ---------- save ----------
-  $("#saveBtn").addEventListener("click", () => {
+  $("#saveBtn").addEventListener("click", async () => {
     const prompt = $("#fPrompt").value.trim();
     if (!prompt) { $("#fPrompt").focus(); toast("提示詞不能空白"); return; }
     syncVariants();
@@ -2033,14 +2053,19 @@
       vars: cleanVars(prompt, curVars),
       varsDone: curVarsAnalyzed
     };
+    // 存檔前先確認雲端有沒有更新，有就先取下來併入（避免蓋掉其他裝置的新增／修改），再套用這次變更
+    const _sb = $("#saveBtn"); _sb.disabled = true;
+    const pulled = await syncPullBeforeChange();
+    _sb.disabled = false;
     let target;
     if (editingId) {
       const p = data.find(x => x.id === editingId);
-      Object.assign(p, rec, { edited: Date.now() });
-      target = p; toast("已更新");
+      if (p) { Object.assign(p, rec, { edited: Date.now() }); target = p; }
+      else { target = normalize({ ...rec, id: editingId, fav: false, created: Date.now(), edited: Date.now() }); data.unshift(target); }  // 該筆已在別台刪除→重新加入
+      toast(pulled ? "已併入雲端更新，並更新此則" : "已更新");
     } else {
       target = normalize({ ...rec, id: uid(), fav: false, created: Date.now(), edited: Date.now() });
-      data.unshift(target); toast("已新增");
+      data.unshift(target); toast(pulled ? "已併入雲端更新，並新增" : "已新增");
     }
     save(); render(); closeEditor();
     if (!target.varsDone) detectVars(target);   // 沒在編輯器分析過的（如手動輸入）背景補辨識
@@ -2051,7 +2076,8 @@
     const b = $("#delBtn");
     if (b.dataset.arm) {
       delete b.dataset.arm; b.classList.remove("armed"); b.textContent = "刪除";
-      data = data.filter(x => x.id !== editingId); save(); render(); closeEditor(); toast("已刪除");
+      const delId = editingId; b.disabled = true;
+      (async () => { await syncPullBeforeChange(); b.disabled = false; data = data.filter(x => x.id !== delId); save(); render(); closeEditor(); toast("已刪除"); })();
     } else {
       b.dataset.arm = "1"; b.classList.add("armed"); b.textContent = "確定刪除？";
       setTimeout(() => { delete b.dataset.arm; b.classList.remove("armed"); b.textContent = "刪除"; }, 3000);
