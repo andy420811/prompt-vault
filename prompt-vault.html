@@ -498,6 +498,9 @@
     <button class="icon-btn" id="libBtn" title="Prompt 靈感搜尋器">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
     </button>
+    <button class="icon-btn" id="canvasBtn" title="專案畫布（串聯 prompt 關係）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1M8.5 15.5 16 10"/></svg>
+    </button>
     <button class="icon-btn" id="themeBtn" title="切換深／淺色">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M6 6 4.5 4.5M19.5 19.5 18 18M18 6l1.5-1.5M4.5 19.5 6 18"/><circle cx="12" cy="12" r="4"/></svg>
     </button>
@@ -928,6 +931,7 @@
 <script src="pv-vocab.js"></script>
 <script src="pv-seed.js"></script>
 <script src="pv-library.js"></script>
+<script src="pv-canvas.js"></script>
 <script>
 (function () {
   "use strict";
@@ -2422,6 +2426,7 @@
     }
   });
   $("#libBtn").addEventListener("click", () => { libOv.classList.add("show"); renderLib(); setTimeout(() => $("#libQ").focus(), 50); });
+  $("#canvasBtn").addEventListener("click", () => { if (window.PVCanvas) window.PVCanvas.open(); else toast("畫布模組未載入（請確認 pv-canvas.js 與本檔同資料夾）"); });
   $("#libClose").addEventListener("click", () => libOv.classList.remove("show"));
   libOv.addEventListener("click", e => { if (e.target === libOv) libOv.classList.remove("show"); });
 
