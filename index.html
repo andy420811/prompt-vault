@@ -138,7 +138,43 @@
   .grp-section.untitled .grp-name { color:var(--ink-3); font-weight:600; }
   .grp-section.closed .grp-chev { transform:rotate(-90deg); }
   .grp-section.closed .grid { display:none; }
-  .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow);
+  /* 堆疊 pile */
+  .card.pile { position:relative; overflow:visible; cursor:pointer; }
+  .card.pile .pile-layer { position:absolute; inset:0; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--r); box-shadow:var(--shadow); z-index:-1; }
+  .card.pile .pile-layer.l1 { transform:translate(4px,4px); }
+  .card.pile .pile-layer.l2 { transform:translate(8px,8px); }
+  .card.pile .result img { width:100%; max-height:150px; object-fit:cover; display:block; }
+  .card.pile .pile-count { margin-left:auto; font-size:11px; font-weight:700; color:var(--accent);
+    background:var(--accent-tint); border-radius:999px; padding:2px 9px; }
+  .card.pile .pile-preview { font-size:12px; color:var(--ink-3); line-height:1.5; }
+  .card.row.pile { cursor:pointer; }
+  /* 堆疊展開標頭（在 grid 內橫跨整列）*/
+  .stack-head { grid-column:1 / -1; display:flex; align-items:center; gap:9px; padding:8px 12px; margin:2px 0 -4px;
+    background:var(--accent-tint); border:1px dashed var(--accent); border-radius:10px; }
+  .grid.list .stack-head { grid-column:auto; }
+  .stack-head .sh-name { font-weight:650; color:var(--ink); }
+  .stack-head .sh-n { font-size:12px; color:var(--accent); font-variant-numeric:tabular-nums; }
+  .stack-head .sh-btn { margin-left:0; font:inherit; font-size:12px; cursor:pointer; border:1px solid var(--line);
+    background:var(--surface); color:var(--ink-2); border-radius:7px; padding:4px 10px; }
+  .stack-head .sh-btn:first-of-type { margin-left:auto; }
+  .stack-head .sh-btn.danger { color:var(--danger); border-color:var(--danger); }
+  /* 勾選模式：卡片勾選框 */
+  .grid.selecting .card { cursor:pointer; }
+  .grid.selecting .card::after { content:""; position:absolute; top:9px; left:9px; width:22px; height:22px; z-index:6;
+    border:2px solid #fff; border-radius:6px; background:rgba(10,9,16,.45); box-shadow:0 0 0 1px rgba(10,9,16,.25);
+    display:flex; align-items:center; justify-content:center; font-size:15px; color:#fff; }
+  .grid.selecting .card.sel::after { content:"✓"; background:var(--accent); border-color:var(--accent); }
+  .grid.selecting .card.sel { outline:2px solid var(--accent); outline-offset:-2px; }
+  /* 底部堆疊操作列 */
+  #selectBar { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:60;
+    display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface);
+    border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lg); }
+  #selectBar[hidden] { display:none; }
+  #selectBar .sb-count { font-size:13px; font-weight:600; color:var(--ink-2); font-variant-numeric:tabular-nums; }
+  #selectBar .btn { padding:8px 14px; }
+  #selectBar .btn:disabled { opacity:.4; cursor:not-allowed; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); position:relative;
     display:flex; flex-direction:column; overflow:hidden; transition:transform .16s, box-shadow .16s, border-color .16s; }
   .card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
   .card .accent-strip { height:3px; }
@@ -486,6 +522,7 @@
     </div>
     <div class="spacer"></div>
     <button class="chip warn" id="backupNote" hidden></button>
+    <button class="chip" id="selectBtn" title="勾選作品堆疊成同系列" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> 選取</button>
     <button class="chip" id="densityBtn" title="切換縮圖／選單模式" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg> 選單</button>
     <button class="chip" id="viewBtn" title="依專案／系列分區整理" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="12" width="18" height="8" rx="1"/></svg> 分區整理</button>
     <select class="sort" id="groupSel" style="display:none"><option value="">全部專案</option></select>
@@ -882,6 +919,15 @@
 </div>
 <div class="toast" id="toast"></div>
 
+<div id="selectBar" hidden>
+  <span class="sb-count" id="sbCount">已選 0 件</span>
+  <button class="btn primary" id="sbStack">📚 堆疊成同系列</button>
+  <button class="btn ghost" id="sbUnstack">取消堆疊</button>
+  <button class="btn ghost" id="sbDone">完成</button>
+</div>
+<script src="pv-vocab.js"></script>
+<script src="pv-seed.js"></script>
+<script src="pv-library.js"></script>
 <script>
 (function () {
   "use strict";
@@ -892,119 +938,12 @@
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
 
   // preset option lists: [中文, english keyword]
-  const PRESETS = {
-    camera: [["推進","dolly in"],["拉遠","dolly out"],["環繞","orbit shot"],["空拍","aerial drone shot"],
-      ["手持","handheld"],["橫移","panning shot"],["俯拍","top-down shot"],["仰角","low angle shot"],
-      ["跟拍","tracking shot"],["縮時","hyperlapse"],["升降鏡","crane shot"],["變焦推近","zoom in"],
-      ["第一人稱","POV shot"],["穩定運鏡","smooth gimbal movement"]],
-    style: [["電影感","cinematic"],["寫實照片","photorealistic"],["日系動漫","anime style"],["3D 渲染","3D render"],
-      ["扁平插畫","flat vector illustration"],["水彩","watercolor"],["賽博龐克","cyberpunk"],["復古底片","vintage film"],
-      ["極簡","minimalist"],["皮克斯風","Pixar style"],["吉卜力風","Studio Ghibli style"],["黑白","black and white"],
-      ["油畫","oil painting"],["像素風","pixel art"],["蒸氣波","vaporwave"],["超現實","surreal"]],
-    light: [["黃金時刻","golden hour"],["逆光","backlight"],["霓虹燈","neon lighting"],["柔光","soft lighting"],
-      ["戲劇光影","dramatic lighting"],["棚燈","studio lighting"],["體積光","volumetric light"],["藍調時刻","blue hour"],
-      ["高調","high-key lighting"],["低調","low-key lighting"],["邊緣光","rim light"],["自然光","natural light"]],
-    shot: [["特寫","close-up"],["極特寫","extreme close-up"],["中景","medium shot"],["廣角全景","wide shot"],
-      ["遠景","establishing shot"],["淺景深","shallow depth of field"],["對稱構圖","symmetrical composition"],
-      ["三分法","rule of thirds"],["中央構圖","centered composition"],["微距","macro"],["魚眼","fisheye"],["鳥瞰","bird's-eye view"]]
-  };
+  // ▼ 選項清單 PRESETS 已移至 pv-vocab.js（於本程式前以 <script src> 載入）
   const GROUPS = ["camera","style","light","shot"];
   // english -> 中文 for display
   const LABEL = {}; GROUPS.forEach(g => PRESETS[g].forEach(([zh,en]) => LABEL[en] = zh));
 
-  // ---------- offline analyzer dictionaries ----------
-  const DETECT = {
-    camera: {
-      "dolly in":["dolly in","dolly-in","push in","push-in","move closer","推進","推近鏡頭"],
-      "dolly out":["dolly out","dolly-out","pull back","pull-back","拉遠","後拉"],
-      "orbit shot":["orbit","360 spin","360 orbit","rotate around","revolve around","circling","環繞","繞著","旋轉一圈"],
-      "aerial drone shot":["aerial","drone","fly over","flyover","空拍","無人機","航拍"],
-      "handheld":["handheld","hand-held","shaky cam","手持"],
-      "panning shot":["panning","pan across","pan shot","橫移","平移","搖鏡"],
-      "top-down shot":["top-down","top down","overhead shot","flat lay","flatlay","俯拍","俯視"],
-      "low angle shot":["low angle","low-angle","worm's eye","仰角","仰拍","低角度"],
-      "tracking shot":["tracking shot","follow shot","following shot","trailing shot","跟拍","跟隨鏡頭"],
-      "hyperlapse":["hyperlapse","timelapse","time-lapse","time lapse","縮時","延時"],
-      "crane shot":["crane shot","jib shot","boom shot","rising shot","升降鏡","上升鏡頭"],
-      "zoom in":["zoom in","zoom-in","punch in","變焦推近","急推"],
-      "POV shot":["pov ","point of view","first person","first-person","第一人稱","主觀視角"],
-      "smooth gimbal movement":["gimbal","steadicam","stabilized","smooth camera","穩定器","絲滑運鏡"]
-    },
-    style: {
-      "cinematic":["cinematic","film still","movie still","filmic","電影感","電影質感"],
-      "photorealistic":["photorealistic","photo-realistic","photoreal","hyperrealistic","realistic photo","dslr","raw photo","寫實","擬真","真實照片"],
-      "anime style":["anime","manga","動漫","二次元","日漫"],
-      "3D render":["3d render","3d-render","octane","unreal engine","blender render","cgi","c4d","3d渲染","三維"],
-      "flat vector illustration":["flat vector","vector illustration","flat illustration","flat design","扁平插畫","向量插畫","扁平風"],
-      "watercolor":["watercolor","watercolour","水彩"],
-      "cyberpunk":["cyberpunk","neon noir","賽博龐克","賽博朋克"],
-      "vintage film":["vintage","retro film","film grain","analog film","kodak","polaroid","復古","底片感","膠片"],
-      "minimalist":["minimalist","minimalistic","clean design","極簡","簡約","乾淨","設計感"],
-      "Pixar style":["pixar","皮克斯"],
-      "Studio Ghibli style":["ghibli","miyazaki","吉卜力","宮崎駿"],
-      "black and white":["black and white","b&w","monochrome","grayscale","greyscale","黑白","單色"],
-      "oil painting":["oil painting","oil on canvas","油畫"],
-      "pixel art":["pixel art","8-bit","16-bit","pixelated","像素風","像素藝術"],
-      "vaporwave":["vaporwave","synthwave","蒸氣波","蒸汽波"],
-      "surreal":["surreal","dreamlike","dali","超現實","夢境感"]
-    },
-    light: {
-      "golden hour":["golden hour","sunset light","warm sunlight","黃金時刻","夕陽","日落光"],
-      "backlight":["backlight","backlit","back-lit","逆光","背光"],
-      "neon lighting":["neon","霓虹"],
-      "soft lighting":["soft light","soft lighting","diffused light","柔光","柔和光"],
-      "dramatic lighting":["dramatic light","chiaroscuro","moody light","戲劇光","戲劇性光影"],
-      "studio lighting":["studio light","softbox","studio lighting","棚燈","攝影棚燈","柔光箱"],
-      "volumetric light":["volumetric","god rays","light rays","體積光","耶穌光","丁達爾"],
-      "blue hour":["blue hour","twilight","dusk","藍調時刻","暮色","黃昏"],
-      "high-key lighting":["high-key","high key","高調光"],
-      "low-key lighting":["low-key","low key","低調光","暗調"],
-      "rim light":["rim light","rim lighting","edge light","邊緣光","輪廓光"],
-      "natural light":["natural light","daylight","ambient light","自然光","日光","窗光"]
-    },
-    shot: {
-      "close-up":["close-up","close up","closeup","特寫"],
-      "extreme close-up":["extreme close","大特寫","極特寫"],
-      "medium shot":["medium shot","waist up","half body","中景","半身"],
-      "wide shot":["wide shot","wide angle","wide-angle","廣角","全景"],
-      "establishing shot":["establishing shot","vista","遠景","大遠景"],
-      "shallow depth of field":["shallow depth","shallow dof","bokeh","depth of field","淺景深","散景","景深"],
-      "symmetrical composition":["symmetrical","symmetry","對稱"],
-      "rule of thirds":["rule of thirds","三分法"],
-      "centered composition":["centered composition","central composition","置中","居中構圖"],
-      "macro":["macro","微距"],
-      "fisheye":["fisheye","fish-eye","魚眼"],
-      "bird's-eye view":["bird's eye","birds eye","aerial view","top view","鳥瞰","俯瞰"]
-    }
-  };
-  const MOTION = new Set(["dolly in","dolly out","orbit shot","tracking shot","hyperlapse","crane shot","zoom in","panning shot","smooth gimbal movement"]);
-  const VIDEO_WORDS = ["fps"," second","seconds","loop","in motion","slow motion","slow-motion","hyperlapse","timelapse","time-lapse","cinemagraph"," footage","b-roll","broll","運鏡","慢動作","動態影片","影片素材","短片","秒的影片","動起來"];
-  const IMG_FORCE = ["封面","縮圖","海報","thumbnail","poster","一張圖","圖片","照片"];
-  const MODELS = [["midjourney","Midjourney"],["niji","Midjourney"],["flux","Flux"],["stable diffusion","Stable Diffusion"],
-    ["sdxl","Stable Diffusion"],["dall-e","DALL·E 3"],["dall·e","DALL·E 3"],["dalle","DALL·E 3"],["nano banana","Nano Banana"],
-    ["ideogram","Ideogram"],["sora","Sora"],["runway","Runway Gen-3"],["gen-3","Runway Gen-3"],["gen-2","Runway Gen-3"],
-    ["kling","Kling"],["veo","Veo"],["hailuo","Hailuo"],["minimax","Hailuo"],["pika","Pika"],["luma","Luma"],["dream machine","Luma"]];
-  const SUBJECT_TAGS = [
-    [["thumbnail","封面","縮圖"],"縮圖"],
-    [["portrait","headshot","person ","creator","selfie","people","character","人物","人像","女孩","男生"],"人物"],
-    [["product","gadget","packaging","cosmetic","bottle","產品","開箱"],"產品"],
-    [["cityscape","city ","street","urban","skyline","城市","街景"],"城市"],
-    [["landscape","mountain","forest","nature","ocean","beach","風景","山","森林","海"],"風景"],
-    [["food","dish ","cuisine","coffee","drink","美食","食物","料理","咖啡"],"美食"],
-    [["logo","emblem","brand icon"],"LOGO"],
-    [["studio desk","interior","bedroom","office","kitchen","場景","房間","室內"],"場景"],
-    [["b-roll","broll"],"B-roll"],
-    [["intro","opening scene","title card","開場","片頭"],"開場"],
-    [["sports car","vehicle","motorcycle","車輛","跑車","機車"],"車輛"],
-    [["cheerleader","啦啦隊"],"啦啦隊"],
-    [["baseball","棒球","開球","中職","cpbl"],"棒球"],
-    [["富邦","fubon angles","fubon angels"],"富邦Angels"],
-    [["台鋼","wingstars","takao"],"台鋼雄鷹"],
-    [["樂天","rakuten girls"],"樂天桃猿"],
-    [["統一","uni girls","uni-girls"],"統一獅"],
-    [["中信兄弟","passion sisters"],"中信兄弟"],
-    [["模板","template"],"模板改版"]
-  ];
+  // ▼ 離線分析字典 DETECT / MOTION / VIDEO_WORDS / IMG_FORCE / MODELS / SUBJECT_TAGS 已移至 pv-vocab.js
 
   const ICON = {
     image:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>',
@@ -1020,39 +959,16 @@
     fork:'⑂'
   };
 
-  const SEED = [
-    { type:"image", title:"YouTube 縮圖主視覺・科幻臉部特寫",
-      prompt:"cinematic close-up portrait of a young creator, dramatic rim lighting, teal and orange color grade, shocked expression, futuristic neon city bokeh background, ultra sharp, 8k",
-      neg:"blurry, low contrast, watermark, text, extra fingers", model:"Midjourney",
-      tags:["縮圖","人物"], params:{ar:"16:9",stylize:"400"},
-      camera:[], style:["cinematic"], light:["rim light","dramatic lighting"], shot:["close-up","shallow depth of field"],
-      notes:"臉部佔畫面 1/3，留右側放標題", url:"", img:"", fav:true,
-      variants:[{id:"v_seed1",label:"暖色版",prompt:"cinematic close-up portrait of a young creator, warm golden hour light, amber tones, hopeful expression, cozy studio bokeh, ultra sharp, 8k",note:"改暖色調、換情緒"}] },
-    { type:"image", title:"頻道開場・扁平插畫背景",
-      prompt:"flat vector illustration, cozy home studio desk with microphone, warm morning light, muted pastel palette, minimal shapes, clean negative space on the left",
-      neg:"3d, photorealistic, cluttered", model:"Flux",
-      tags:["背景","開場"], params:{ar:"16:9"},
-      camera:[], style:["flat vector illustration","minimalist"], light:["natural light"], shot:["centered composition"],
-      notes:"", url:"", img:"", fav:false, variants:[] },
-    { type:"video", title:"B-roll・城市縮時空拍",
-      prompt:"aerial drone hyperlapse over a neon-lit city at dusk, smooth forward motion, traffic light trails, volumetric fog, cinematic teal-orange grade",
-      neg:"shaky, jitter, warped buildings", model:"Runway Gen-3",
-      tags:["B-roll","空拍"], params:{ar:"16:9",duration:"5",fps:"24"},
-      camera:["aerial drone shot","hyperlapse"], style:["cinematic"], light:["neon lighting","volumetric light"], shot:["wide shot"],
-      notes:"接開場後 2 秒，配 whoosh 音效", url:"", img:"", fav:true, variants:[] },
-    { type:"video", title:"產品特寫・旋轉展示",
-      prompt:"slow 360 orbit around a sleek gadget on a reflective black surface, soft studio softbox lighting, subtle lens flare, macro detail, shallow depth of field",
-      neg:"fast motion, background clutter, blown highlights", model:"Kling",
-      tags:["產品"], params:{ar:"16:9",duration:"6",fps:"30"},
-      camera:["orbit shot","smooth gimbal movement"], style:["photorealistic"], light:["studio lighting"], shot:["macro","shallow depth of field"],
-      notes:"", url:"", img:"", fav:false, variants:[] }
-  ];
+  // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
 
   let data = load();
   let filter = "all";
   let viewMode = (localStorage.getItem("promptvault.view") === "sections") ? "sections" : "flat";
   let cardMode = (localStorage.getItem("promptvault.cardmode") === "list") ? "list" : "card";
   const collapsedGroups = new Set();
+  let selectMode = false;                 // 勾選模式（選要堆疊的作品）
+  const selected = new Set();             // 已勾選的記錄 id
+  const expandedStacks = new Set();       // 目前展開的堆疊 id
   let editingId = null;
   let curType = "image";
   let curImgs = [];
@@ -1082,6 +998,7 @@
     p.use = +p.use || 0; p.lastUsed = +p.lastUsed || 0;
     p.vars = Array.isArray(p.vars) ? p.vars.filter(v => v && v.token && v.label) : [];
     p.varsDone = !!p.varsDone;
+    p.stack = typeof p.stack === "string" ? p.stack : "";   // 堆疊分組 id（同一系列共用）
     p.fav = !!p.fav; p.created = p.created || Date.now(); p.edited = p.edited || p.created;
     if (!p.id) p.id = uid();
     return p;
@@ -1173,13 +1090,64 @@
     const itemHTML = listMode ? rowHTML : cardHTML;
     $("#densityBtn").setAttribute("aria-pressed", listMode);
     grid.classList.toggle("list", listMode && !sectioned);
+    grid.classList.toggle("selecting", selectMode);
+    // 勾選模式下平鋪全部（附勾選框）；一般模式下同系列堆疊收合
+    const units = seq => selectMode ? seq.map(itemHTML).join("") : renderUnits(seq, itemHTML, listMode);
     if (sectioned) {
       grid.classList.add("sectioned");
       grid.innerHTML = sectionsHTML(list, itemHTML, listMode);
     } else {
       grid.classList.remove("sectioned");
-      grid.innerHTML = list.map(itemHTML).join("");
+      grid.innerHTML = units(list);
     }
+    if (selectMode) $$("#grid .card").forEach(c => c.classList.toggle("sel", selected.has(c.dataset.id)));
+    updateSelectBar();
+  }
+
+  // 把清單依 stack 折疊成「堆疊」或展開；非堆疊者照常。回傳 HTML 字串
+  function renderUnits(list, itemHTML, listMode) {
+    const byStack = new Map();
+    list.forEach(p => { if (p.stack) { if (!byStack.has(p.stack)) byStack.set(p.stack, []); byStack.get(p.stack).push(p); } });
+    const seen = new Set(), parts = [];
+    list.forEach(p => {
+      if (!p.stack) { parts.push(itemHTML(p)); return; }
+      if (seen.has(p.stack)) return;
+      seen.add(p.stack);
+      const members = byStack.get(p.stack);
+      if (members.length < 2) { parts.push(itemHTML(members[0])); return; }   // 只剩一張就不堆疊
+      if (expandedStacks.has(p.stack)) {
+        parts.push(stackHeadHTML(p.stack, members));
+        parts.push(...members.map(itemHTML));
+      } else {
+        parts.push(pileHTML(p.stack, members));
+      }
+    });
+    return parts.join("");
+  }
+  function stackTitle(members) {
+    const g = members[0].group;
+    if (g && members.every(m => m.group === g)) return g;
+    return "堆疊系列";
+  }
+  function stackHeadHTML(stack, members) {
+    return `<div class="stack-head" data-stack="${esc(stack)}">
+      <span class="sh-ico">📚</span><span class="sh-name">${esc(stackTitle(members))}</span><span class="sh-n">${members.length} 件</span>
+      <button type="button" class="sh-btn" data-act="stackclose">收合</button>
+      <button type="button" class="sh-btn danger" data-act="unstack">取消堆疊</button>
+    </div>`;
+  }
+  function pileHTML(stack, members) {
+    const cover = members[0];
+    const cImg = members.find(m => m.imgs.length);
+    return `<article class="card pile t-${cover.type}" data-stack="${esc(stack)}" data-act="stackopen" title="展開此系列堆疊">
+      <div class="pile-layer l2"></div><div class="pile-layer l1"></div>
+      ${cImg ? `<div class="result"><img src="${cImg.imgs[0]}" alt="" loading="lazy"></div>` : ""}
+      <div class="card-body">
+        <div class="card-head"><span class="cat">📚 系列</span><span class="pile-count">${members.length} 件</span></div>
+        <h3>${esc(stackTitle(members))}</h3>
+        <div class="pile-preview">${members.slice(0, 4).map(m => esc(m.title || "未命名")).join("、")}${members.length > 4 ? " …" : ""}</div>
+      </div>
+    </article>`;
   }
 
   const UNTITLED_GRP = "（未分類）";
@@ -1200,7 +1168,7 @@
           <span class="grp-count">${items.length}</span>
           <svg class="grp-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
         </div>
-        <div class="grid${listMode ? " list" : ""}">${items.map(itemHTML).join("")}</div>
+        <div class="grid${listMode ? " list" : ""}">${selectMode ? items.map(itemHTML).join("") : renderUnits(items, itemHTML, listMode)}</div>
       </section>`;
     }).join("");
   }
@@ -1312,7 +1280,23 @@
       if (sec.classList.contains("closed")) collapsedGroups.add(name); else collapsedGroups.delete(name);
       return;
     }
+    // 堆疊標頭：收合 / 取消堆疊（不在 .card 內，需先處理）
+    const sh = e.target.closest(".stack-head");
+    if (sh) {
+      const stk = sh.dataset.stack, a = e.target.closest("[data-act]")?.dataset.act;
+      if (a === "unstack") { data.forEach(x => { if (x.stack === stk) x.stack = ""; }); save(); toast("已取消堆疊"); }
+      expandedStacks.delete(stk); render(); return;
+    }
     const card = e.target.closest(".card"); if (!card) return;
+    // 勾選模式：點卡片＝選取（堆疊本身不可選）
+    if (selectMode && !card.classList.contains("pile")) {
+      const sid = card.dataset.id;
+      if (selected.has(sid)) selected.delete(sid); else selected.add(sid);
+      card.classList.toggle("sel", selected.has(sid));
+      updateSelectBar(); return;
+    }
+    // 點整疊 → 展開
+    if (card.classList.contains("pile")) { expandedStacks.add(card.dataset.stack); render(); return; }
     const id = card.dataset.id;
     const actEl = e.target.closest("[data-act]");
     const act = actEl?.dataset.act;
@@ -1400,6 +1384,40 @@
     try { localStorage.setItem("promptvault.cardmode", cardMode); } catch (e) {}
     render();
   });
+  // ---------- 勾選 → 堆疊同系列 ----------
+  function updateSelectBar() {
+    const bar = $("#selectBar");
+    bar.hidden = !selectMode;
+    if (!selectMode) return;
+    const n = selected.size;
+    $("#sbCount").textContent = `已選 ${n} 件`;
+    $("#sbStack").disabled = n < 2;
+    const anyStacked = [...selected].some(id => { const p = data.find(x => x.id === id); return p && p.stack; });
+    $("#sbUnstack").disabled = !anyStacked;
+  }
+  function exitSelect() { selectMode = false; selected.clear(); $("#selectBtn").setAttribute("aria-pressed", "false"); render(); }
+  $("#selectBtn").addEventListener("click", () => {
+    selectMode = !selectMode; selected.clear();
+    $("#selectBtn").setAttribute("aria-pressed", selectMode);
+    if (selectMode) toast("勾選要堆疊的同系列作品，再按下方「堆疊」");
+    render();
+  });
+  $("#sbStack").addEventListener("click", () => {
+    if (selected.size < 2) return;
+    const sid = uid();
+    data.forEach(x => { if (selected.has(x.id)) { x.stack = sid; x.edited = Date.now(); } });
+    const n = selected.size;
+    save(); exitSelect(); toast(`已堆疊 ${n} 件為同系列`);
+  });
+  $("#sbUnstack").addEventListener("click", () => {
+    const ids = [...selected]; let n = 0;
+    const stacks = new Set();
+    data.forEach(x => { if (selected.has(x.id) && x.stack) { stacks.add(x.stack); x.stack = ""; x.edited = Date.now(); n++; } });
+    stacks.forEach(s => expandedStacks.delete(s));
+    if (n) { save(); toast(`已取消 ${n} 件的堆疊`); }
+    exitSelect();
+  });
+  $("#sbDone").addEventListener("click", exitSelect);
 
   // ---------- preset pickers ----------
   GROUPS.forEach(g => {
@@ -2352,60 +2370,7 @@
   });
 
   // ---------- prompt library / searcher ----------
-  const LIB = [
-    { c:"縮圖封面", ty:"image", t:"驚訝反應臉縮圖", k:"反應 臉 表情 人物",
-      p:"cinematic close-up portrait of a creator with a shocked expression, bold rim lighting, high contrast, clean solid color background with large negative space on the right for title text, ultra sharp, 16:9" },
-    { c:"縮圖封面", ty:"image", t:"對決比較式縮圖", k:"vs 比較 對決 分割",
-      p:"split-screen thumbnail composition, left side versus right side, dramatic color contrast between warm and cool halves, bold central dividing line, clean design with space for large text, 16:9" },
-    { c:"縮圖封面", ty:"image", t:"啦啦隊應援封面（母版）", k:"啦啦隊 棒球 應援 人物 中職",
-      p:"請生成一張 YouTube 影片封面，以下附圖為【球團／隊名】啦啦隊【成員名】【事件描述】，不要修改人物。整體風格要有設計感、乾淨，比例16:9，標題為「【標題文字】 【日期】」" },
-    { c:"縮圖封面", ty:"image", t:"極簡產品開箱封面", k:"開箱 產品 極簡",
-      p:"minimalist product hero shot floating on a solid pastel background, soft studio lighting, subtle shadow, large negative space for title text, clean design, 16:9" },
-    { c:"開場", ty:"video", t:"城市日出開場", k:"片頭 城市 日出 空拍",
-      p:"aerial drone shot rising over a city skyline at sunrise, golden hour light, lens flare, smooth gimbal movement, cinematic color grade, 5 seconds, 24fps" },
-    { c:"開場", ty:"video", t:"LOGO 粒子匯聚", k:"片頭 logo 動畫 粒子",
-      p:"glowing particles converging to form a logo in a dark studio space, volumetric light, slow elegant motion, shallow depth of field, 4 seconds loop" },
-    { c:"開場", ty:"video", t:"標題卡打字機", k:"片頭 標題 文字 復古",
-      p:"typewriter text animation on textured paper, warm desk lamp light, vintage film grain, macro close-up of letters appearing, 3 seconds" },
-    { c:"B-roll", ty:"video", t:"咖啡沖煮特寫", k:"咖啡 手沖 特寫 慢動作",
-      p:"macro slow motion shot of pour-over coffee brewing, steam rising, natural window light, shallow depth of field, warm tones, 6 seconds, 60fps" },
-    { c:"B-roll", ty:"video", t:"鍵盤打字特寫", k:"打字 鍵盤 工作 特寫",
-      p:"close-up of hands typing on a mechanical keyboard, moody low-key lighting with subtle neon accent, shallow depth of field, tracking shot sliding sideways, 4 seconds" },
-    { c:"B-roll", ty:"video", t:"街頭人流縮時", k:"城市 人群 縮時 街頭",
-      p:"hyperlapse of a busy pedestrian crossing at dusk, motion-blurred crowds, city neon signs, blue hour, high vantage point, 5 seconds, 24fps" },
-    { c:"B-roll", ty:"video", t:"翻書頁特寫", k:"書 閱讀 知識 特寫",
-      p:"extreme close-up of book pages flipping in soft natural light, dust particles floating, shallow depth of field, slow motion, warm cozy tones, 4 seconds" },
-    { c:"產品", ty:"video", t:"產品 360 旋轉展示", k:"產品 展示 旋轉 電商",
-      p:"slow 360 orbit around a product on a reflective black surface, soft studio softbox lighting, subtle lens flare, macro detail, shallow depth of field, 6 seconds loop" },
-    { c:"產品", ty:"image", t:"零件漂浮爆炸圖", k:"產品 拆解 科技 爆炸圖",
-      p:"exploded view of a gadget with parts floating in mid-air, studio lighting on a dark background, precise technical aesthetic, subtle blue accent light, centered composition, 16:9" },
-    { c:"產品", ty:"image", t:"生活情境使用照", k:"產品 情境 生活感",
-      p:"lifestyle photo of a person naturally using the product in a bright modern interior, natural window light, candid feel, photorealistic, shallow depth of field, 16:9" },
-    { c:"人物", ty:"image", t:"專業形象照", k:"頭像 形象照 大頭貼",
-      p:"professional headshot of a creator, soft key light with gentle rim light, blurred modern office background, confident friendly expression, photorealistic, 4:5" },
-    { c:"人物", ty:"image", t:"動漫風自畫像", k:"動漫 頭像 二次元",
-      p:"anime style portrait of a young creator, clean cel shading, expressive eyes, soft gradient background, vibrant but harmonious colors, 1:1" },
-    { c:"人物", ty:"image", t:"皮克斯風 3D 角色", k:"3d 角色 皮克斯 可愛",
-      p:"Pixar style 3D character portrait, big expressive eyes, warm smile, soft studio lighting, colorful simple background, high detail render, 1:1" },
-    { c:"背景", ty:"image", t:"直播虛擬背景", k:"直播 背景 房間 虛擬",
-      p:"cozy streaming room interior at dusk, bookshelf with warm LED accents, soft neon glow, plants and figurines, empty desk in foreground, blue hour mood, no people, 16:9" },
-    { c:"背景", ty:"image", t:"賽博龐克雨夜街景", k:"賽博 霓虹 雨 街景",
-      p:"cyberpunk alley at night in the rain, neon signs reflecting on wet pavement, volumetric fog, moody teal and magenta palette, wide shot, no people, 16:9" },
-    { c:"背景", ty:"image", t:"柔和漸層簡報底圖", k:"簡報 底圖 漸層 抽象",
-      p:"soft abstract background with gentle flowing color transitions, muted tones, subtle grain texture, minimalist, plenty of clear space for text overlay, 16:9" },
-    { c:"美食", ty:"image", t:"美食俯拍擺盤", k:"食物 俯拍 擺盤 餐廳",
-      p:"top-down flat lay of a beautifully plated dish on a marble table, natural window light, fresh ingredients scattered around, shallow shadows, appetizing colors, 4:5" },
-    { c:"美食", ty:"video", t:"起司拉絲慢動作", k:"起司 披薩 慢動作 誘人",
-      p:"slow motion cheese pull from a hot pizza slice, steam rising, warm golden light, extreme close-up, appetizing glossy texture, 4 seconds, 60fps" },
-    { c:"科技遊戲", ty:"image", t:"電競燈光房", k:"電競 rgb 房間 遊戲",
-      p:"gaming setup with RGB lighting in a dark room, ultrawide monitor glow, low-key lighting, haze in the air, cinematic wide shot, no people, 16:9" },
-    { c:"科技遊戲", ty:"video", t:"未來 HUD 介面動畫", k:"hud 介面 未來 科幻 疊加",
-      p:"futuristic holographic HUD interface animating on a dark background, glowing cyan data panels and rotating wireframe globe, subtle glitch effects, seamless loop, 6 seconds" },
-    { c:"其他", ty:"image", t:"萌寵黃金時刻特寫", k:"寵物 貓 狗 可愛",
-      p:"adorable pet close-up portrait in golden hour light, backlit fur glowing, shallow depth of field, joyful expression, photorealistic, 4:5" },
-    { c:"其他", ty:"video", t:"水墨暈染轉場素材", k:"轉場 水墨 素材 黑白",
-      p:"black ink drop blooming in clear water, macro shot, high contrast on white background, elegant slow motion, usable as transition matte, 5 seconds, 60fps" }
-  ];
+  // ▼ 靈感庫模板 LIB 已移至 pv-library.js（於本程式前載入）
   const LIB_CATS = ["全部","縮圖封面","開場","B-roll","產品","人物","背景","美食","科技遊戲","其他"];
   let libCat = "全部";
 
