@@ -685,6 +685,17 @@
           <button class="btn ghost" id="gemKeySave">儲存</button>
         </div>
         <p class="hint" style="margin:0">每行一組，額度用完或失效時<b>自動切換下一組</b>並記住。金鑰只存在此瀏覽器（取得：aistudio.google.com/apikey）。</p>
+        <div class="field" style="margin-top:4px">
+          <label for="gemModelInput" style="font-size:11.5px">Gemini 模型 <span style="font-weight:400;color:var(--ink-3)">（圖片反推／分析用・點選或自填）</span></label>
+          <input id="gemModelInput" list="gemModelList" spellcheck="false" style="font-family:var(--mono);font-size:11.5px">
+          <datalist id="gemModelList">
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash（快・預設）</option>
+            <option value="gemini-2.5-pro">Gemini 2.5 Pro（最準確・關鍵字最豐富，圖片反推推薦）</option>
+            <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite（最省）</option>
+          </datalist>
+          <p class="hint" style="margin:3px 0 0">覺得圖片反推不夠準、想要更豐富的關鍵字 → 改選 <b>gemini-2.5-pro</b>（較慢、較耗額度，但辨識最強）。</p>
+        </div>
         <label for="orKeyInput" style="font-size:12.5px;font-weight:600;color:var(--ink-2);margin-top:6px">OpenRouter API Keys <span style="font-weight:400;color:var(--ink-3)">（備援供應商，選填・可多組）</span></label>
         <textarea id="orKeyInput" rows="2" placeholder="sk-or-v1-…（每行一組）" autocomplete="off" spellcheck="false"
           style="font-family:var(--mono);font-size:12px;line-height:1.7;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--ink);resize:vertical"></textarea>
@@ -1496,6 +1507,9 @@
   const GEM_KEYS = "promptvault.geminikeys";
   const GEM_IDX = "promptvault.geminikeyidx";
   const OLD_GEM_KEY = "promptvault.geminikey";
+  const GEM_MODEL = "promptvault.geminimodel";
+  const GEM_DEF_MODEL = "gemini-2.5-flash";
+  function gemModel() { return (localStorage.getItem(GEM_MODEL) || "").trim() || GEM_DEF_MODEL; }
   function gemKeys() {
     try {
       // migrate legacy single key
@@ -1532,7 +1546,7 @@
   async function gemCall(key, sys, user, schema) {
     let resp;
     try {
-      resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent", {
+      resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + gemModel() + ":generateContent", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
@@ -1784,6 +1798,7 @@
   }
   $("#menuBtn").addEventListener("click", () => {
     $("#gemKeyInput").value = gemKeys().join("\n");
+    $("#gemModelInput").value = gemModel();
     $("#orKeyInput").value = orKeys().join("\n");
     const m = orModels();
     $("#orTextModel").value = m.text;
@@ -1808,6 +1823,8 @@
         text: $("#orTextModel").value.trim() || OR_DEF_TEXT,
         vision: $("#orVisionModel").value.trim() || OR_DEF_VISION
       }));
+      const gm = $("#gemModelInput").value.trim();
+      if (gm && gm !== GEM_DEF_MODEL) localStorage.setItem(GEM_MODEL, gm); else localStorage.removeItem(GEM_MODEL);
       const pxUrl = $("#proxyUrl").value.trim(), pxPw = $("#proxyPw").value;
       if (pxUrl) localStorage.setItem("promptvault.proxyurl", pxUrl); else localStorage.removeItem("promptvault.proxyurl");
       if (pxPw) localStorage.setItem("promptvault.proxypw", pxPw); else localStorage.removeItem("promptvault.proxypw");
@@ -1993,7 +2010,7 @@
       if (it.type.startsWith("image/")) {
         const f = it.getAsFile(); if (!f) return;
         if (editorOpen) { handleImgFile(f); e.preventDefault(); }
-        else if (revOpen) { downscale(f, 960, d => { revImg = d; renderRevDrop(); }); e.preventDefault(); }
+        else if (revOpen) { downscale(f, 1280, d => { revImg = d; renderRevDrop(); }); e.preventDefault(); }
         else if (!otherModal) { openEditor(); handleImgFile(f); toast("已建立新項目並附上圖片"); e.preventDefault(); }
         return;
       }
@@ -2499,7 +2516,7 @@
   const REV_SCHEMA = JSON.parse(JSON.stringify(AI_SCHEMA));
   REV_SCHEMA.properties.prompt = { type: "STRING" };
   REV_SCHEMA.required = ["type", "prompt"];
-  const REV_SYS = "你是資深提示詞工程師。仔細觀察使用者提供的圖片，反推出一則能重現其風格、構圖、光線與氛圍的高品質英文生成提示詞，填入 prompt 欄（具體描述主體、環境、風格、光線、構圖、色調與質感）。其餘欄位依 schema 分析：type 通常為 image；camera/style/light/shot 只從允許清單挑選明顯符合的；tags 給 2~5 個繁體中文主題標籤；title 給 12 字內的繁中標題；constraint 留空。";
+  const REV_SYS = "你是頂尖的 AI 影像分析師與提示詞工程師。請像鑑識專家一樣鉅細靡遺觀察使用者提供的圖片，反推出一則能高度重現該圖的高品質【英文】生成提示詞填入 prompt 欄。prompt 用逗號分隔、關鍵字要豐富且具體，依序涵蓋（有才寫）：主體（人數／年齡／性別／髮型髮色／表情／姿勢／視線／服裝與配件）、次要元素與前景、場景與背景細節、時間與天氣、光線（來源／方向／軟硬／色溫，如 rim light、golden hour、softbox lighting）、色調與調色（palette、teal and orange、pastel 等）、藝術風格與媒材（photorealistic、cinematic、3D render、anime、oil painting、Unreal Engine 等）、鏡頭（機位角度／景別／焦段／景深，如 low angle、close-up、85mm、shallow depth of field、bokeh）、構圖（rule of thirds、centered、symmetry）、材質與質感、氛圍情緒，最後可加畫質詞（8k、ultra detailed、sharp focus）。盡量精準辨識畫面中可見的具體對象（名人／品牌／角色／地標／可讀文字）並寫入 prompt。其餘欄位依 schema：type 通常 image（明顯為動態影格才 video）；camera/style/light/shot 從允許清單挑出【所有】明顯符合的（可多選、寧多勿漏）；tags 給【5~10】個繁體中文主題標籤（涵蓋主體、風格、色調、場景、用途等不同面向）；title 給 16 字內、具體描述畫面的繁中標題；neg 可留空；constraint 留空。只輸出符合 schema 的 JSON。";
   let revImg = "";
   const revOv = $("#revOverlay");
   function renderRevDrop() {
@@ -2522,7 +2539,7 @@
     if (proxyCfg().url) {
       chain.push("後端代理決定（Gemini 優先 → OpenRouter 的 OR_VISION_MODEL）");
     } else {
-      if (gemKeys().length) chain.push("Gemini：gemini-2.5-flash");
+      if (gemKeys().length) chain.push("Gemini：" + gemModel());
       if (orKeys().length) chain.push("OpenRouter：" + orModels().vision);
     }
     $("#revModels").textContent = chain.length ? "反推模型：" + chain.join("　→　") : "";
@@ -2539,7 +2556,7 @@
   });
   $("#revFile").addEventListener("change", e => {
     const f = e.target.files[0];
-    if (f) downscale(f, 960, d => { revImg = d; renderRevDrop(); });
+    if (f) downscale(f, 1280, d => { revImg = d; renderRevDrop(); });
     e.target.value = "";
   });
   $("#revDrop").addEventListener("dragover", e => { e.preventDefault(); $("#revDrop").classList.add("drag"); });
@@ -2547,7 +2564,7 @@
   $("#revDrop").addEventListener("drop", e => {
     e.preventDefault(); $("#revDrop").classList.remove("drag");
     const f = e.dataTransfer.files[0];
-    if (f && f.type.startsWith("image/")) downscale(f, 960, d => { revImg = d; renderRevDrop(); });
+    if (f && f.type.startsWith("image/")) downscale(f, 1280, d => { revImg = d; renderRevDrop(); });
   });
   $("#revGo").addEventListener("click", async () => {
     if (!revImg || !gemKey()) return;
@@ -2675,7 +2692,7 @@
     const chain = [];
     if (proxyCfg().url) chain.push("後端代理決定（Gemini 優先 → OpenRouter 的 OR_VISION_MODEL）");
     else {
-      if (gemKeys().length) chain.push("Gemini：gemini-2.5-flash");
+      if (gemKeys().length) chain.push("Gemini：" + gemModel());
       if (orKeys().length) chain.push("OpenRouter：" + orModels().vision);
     }
     $("#vrevModels").textContent = chain.length ? "反推模型：" + chain.join("　→　") : "";
