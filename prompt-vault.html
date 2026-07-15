@@ -286,6 +286,15 @@
   .result { position:relative; }
   .result-badge { position:absolute; right:8px; bottom:8px; font-size:11px; font-weight:700; color:#fff;
     background:rgba(10,9,16,.62); padding:2px 8px; border-radius:999px; line-height:1.5; }
+  .result .img-nav { position:absolute; top:50%; transform:translateY(-50%); width:30px; height:30px; border-radius:50%;
+    border:none; background:rgba(10,9,16,.5); color:#fff; font-size:22px; cursor:pointer; z-index:2;
+    display:flex; align-items:center; justify-content:center; padding-bottom:3px; opacity:.82; transition:opacity .15s, background .15s; }
+  .result .img-nav:hover { opacity:1; background:rgba(10,9,16,.82); }
+  .result .img-nav.prev { left:8px; }
+  .result .img-nav.next { right:8px; }
+  .result .img-default { position:absolute; left:8px; bottom:8px; font-size:11px; font-weight:600; color:#fff; z-index:2;
+    background:rgba(10,9,16,.62); border:none; border-radius:6px; padding:4px 9px; cursor:pointer; transition:background .15s; }
+  .result .img-default:hover { background:var(--accent); }
   .grp { font-size:11px; font-weight:600; color:var(--accent); background:var(--accent-tint);
     border-radius:6px; padding:3px 8px; white-space:nowrap; }
   .use-n { font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; margin-left:auto; white-space:nowrap; }
@@ -744,6 +753,7 @@
       <p class="hint" id="revModels" style="margin:0"></p>
       <div class="dropzone" id="revDrop"></div>
       <input id="revFile" type="file" accept="image/*" hidden>
+      <textarea id="revDesc" rows="2" placeholder="補充描述（選填）：告訴 AI 這張圖的重點，如 中職啦啦隊封面、人物是呱呱、想強調的氛圍與風格…" style="width:100%;font-size:12.5px;resize:vertical;min-height:46px;margin-top:2px"></textarea>
     </div>
     <div class="modal-foot">
       <button class="btn ghost" id="revCancel">取消</button>
@@ -1167,7 +1177,11 @@
         </div>`).join("")}</div>` : "";
     return `<article class="card t-${p.type}" data-id="${p.id}">
       <div class="accent-strip"></div>
-      ${p.imgs.length ? `<div class="result" data-act="light"><img src="${p.imgs[0]}" alt="${esc(p.title)} 生成結果" loading="lazy">${p.imgs.length > 1 ? `<span class="result-badge">${p.imgs.length} 張</span>` : ""}</div>` : ""}
+      ${p.imgs.length ? `<div class="result" data-act="light" data-idx="0"><img src="${p.imgs[0]}" alt="${esc(p.title)} 生成結果" loading="lazy">${p.imgs.length > 1 ? `
+        <button class="img-nav prev" data-act="imgprev" title="上一張" aria-label="上一張">‹</button>
+        <button class="img-nav next" data-act="imgnext" title="下一張" aria-label="下一張">›</button>
+        <span class="result-badge img-count">1 / ${p.imgs.length}</span>
+        <button class="img-default" data-act="imgdefault" title="設為預設封面" style="display:none">設為預設</button>` : ""}</div>` : ""}
       <div class="card-body">
         <div class="card-head">
           <span class="cat">${ICON[p.type]}${catLabel}</span>
@@ -1214,7 +1228,22 @@
     const p = data.find(x => x.id === id); if (!p) return;
 
     if (act === "expand") { e.target.closest(".prompt-text").classList.toggle("open"); return; }
-    if (act === "light") { openLight(p.imgs, 0); return; }
+    if (act === "light") { const rdiv = card.querySelector(".result"); openLight(p.imgs, +(rdiv?.dataset.idx || 0)); return; }
+    if (act === "imgprev" || act === "imgnext") {
+      const rdiv = actEl.closest(".result"); if (!rdiv || p.imgs.length < 2) return;
+      let idx = +(rdiv.dataset.idx || 0);
+      idx = (idx + (act === "imgnext" ? 1 : -1) + p.imgs.length) % p.imgs.length;
+      rdiv.dataset.idx = idx;
+      rdiv.querySelector("img").src = p.imgs[idx];
+      const cnt = rdiv.querySelector(".img-count"); if (cnt) cnt.textContent = (idx + 1) + " / " + p.imgs.length;
+      const defb = rdiv.querySelector(".img-default"); if (defb) defb.style.display = idx === 0 ? "none" : "";
+      return;
+    }
+    if (act === "imgdefault") {
+      const rdiv = actEl.closest(".result"); const idx = +(rdiv?.dataset.idx || 0);
+      if (idx > 0) { const [pick] = p.imgs.splice(idx, 1); p.imgs.unshift(pick); p.edited = Date.now(); save(); render(); toast("已設為預設封面"); }
+      return;
+    }
     if (act === "vartoggle") { const pop = card.querySelector(".var-pop"); if (pop) pop.hidden = !pop.hidden; return; }
     if (act === "varcopy") {
       const v = p.variants.find(x => x.id === actEl.dataset.vp);
@@ -2434,11 +2463,15 @@
     const btn = $("#revGo"); btn.textContent = "反推中…"; btn.disabled = true;
     try {
       const mime = (revImg.match(/^data:([^;]+);/) || [])[1] || "image/jpeg";
+      const desc = $("#revDesc").value.trim();
+      const ask = desc
+        ? "請分析這張圖片並反推提示詞。以下是使用者對圖片內容的補充說明，請據此提高反推準確度：\n" + desc
+        : "請分析這張圖片並反推提示詞。";
       const parts = [{ inlineData: { mimeType: mime, data: revImg.split(",")[1] } },
-        { text: "請分析這張圖片並反推提示詞。" }];
+        { text: ask }];
       const r = await aiCall(REV_SYS, parts, REV_SCHEMA);
       const img = revImg;
-      closeRev(); revImg = "";
+      closeRev(); revImg = ""; $("#revDesc").value = "";
       openEditor();
       $("#fPrompt").value = r.prompt || "";
       applyAIResult(r);
