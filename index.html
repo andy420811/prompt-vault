@@ -190,6 +190,8 @@
   .stack-head .sh-btn.danger { color:var(--danger); border-color:var(--danger); }
   .stack-head.nested { border-style:solid; }
   .stack-head.nested .sh-ico::after { content:" ↳"; color:var(--accent); }
+  /* 展開堆疊尾端的整列斷行：強制後面的項目換到下一列，避免與本疊成員混排 */
+  .stack-end { grid-column:1 / -1; height:0; margin:0; padding:0; }
   /* 勾選模式：卡片勾選框 */
   .grid.selecting .card { cursor:pointer; }
   .grid.selecting .card::after { content:""; position:absolute; top:9px; left:9px; width:22px; height:22px; z-index:6;
@@ -1033,6 +1035,8 @@
   const selected = new Set();             // 已勾選的記錄 id
   const expandedStacks = new Set();       // 目前展開的堆疊 id
   let stackClickT = null;                 // 堆疊單擊防抖（讓雙擊改名可攔截）
+  const railSel = new Set();              // 左側已選取（要在右側顯示）的系列／堆疊；空＝全部作品。token：堆疊 prefix 或 "g:"+散裝group名
+  let railClickT = null;                  // 左側單擊防抖（讓雙擊改名可攔截）
   let editingId = null;
   let curType = "image";
   let curImgs = [];
@@ -1144,6 +1148,40 @@
   }
   // 任何堆疊異動後統一收尾：補名稱、同步系列、存檔、重繪
   function commitStacks(msg) { ensureNames(); syncGroups(); save(); render(); if (msg) toast(msg); }
+  // 左側篩選：某作品是否落在任一已選取的系列／堆疊內（railSel 為空＝全部）
+  function railSelMatch(p) {
+    for (const t of railSel) {
+      if (t.startsWith("g:")) { if (!p.stack && p.group === t.slice(2)) return true; }
+      else if (p.stack === t || p.stack.startsWith(t + "/")) return true;
+    }
+    return false;
+  }
+  // 只有單選一個系列時，讓工具列的下拉選單同步顯示該系列名（多選或選子堆疊則顯示「全部專案」）
+  function railSelDropdownValue() {
+    if (railSel.size !== 1) return "";
+    const t = [...railSel][0];
+    if (t.startsWith("g:")) return t.slice(2);
+    if (t.indexOf("/") === -1) return stackName(t);   // 根堆疊
+    return "";
+  }
+  // 點左側系列／堆疊：切換選取（再點取消）；選取時順便展開它與祖先並捲到節點
+  function toggleRailFilter(key, isStack) {
+    if (key == null) return;
+    const token = isStack ? key : ("g:" + key);
+    if (railSel.has(token)) {
+      railSel.delete(token);
+      if (isStack) { const segs = key.split("/"); expandedStacks.delete(segs[segs.length - 1]); }
+    } else {
+      railSel.add(token);
+      if (isStack) {
+        const segs = key.split("/");
+        segs.forEach(s => { expandedStacks.add(s); railOpen.add(s); });
+        saveRailOpen();
+        pendingScrollSeg = segs[segs.length - 1];
+      }
+    }
+    render();
+  }
   // 把某個堆疊節點（含其整棵子樹）巢狀搬進另一個堆疊之下
   function nestStack(srcPrefix, destParentPrefix) {
     if (!srcPrefix) return;
@@ -1200,14 +1238,13 @@
     $("#n-all").textContent = counts.all; $("#n-image").textContent = counts.image;
     $("#n-video").textContent = counts.video; $("#n-fav").textContent = counts.fav;
 
-    // group selector
+    // group selector（下拉單選；桌機主要用左側多選，下拉會反映單選狀態）
     const groups = [...new Set(data.map(p => p.group).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-Hant"));
-    const gSel = $("#groupSel"); const gCur = gSel.value;
-    gSel.innerHTML = `<option value="">全部專案</option>` + groups.map(g => `<option value="${esc(g)}"${g === gCur ? " selected" : ""}>${esc(g)}</option>`).join("");
+    const gSel = $("#groupSel");
+    gSel.innerHTML = `<option value="">全部專案</option>` + groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
     gSel.style.display = groups.length ? "" : "none";
-    const gVal = [...gSel.options].some(o => o.value === gCur) ? gCur : "";
-    gSel.value = gVal;
-    renderProjRail(groups, gVal);
+    gSel.value = railSelDropdownValue();
+    renderProjRail(groups);
     document.documentElement.classList.toggle("has-rail", data.some(p => p.group || p.stack));
 
     // 分區整理檢視：依專案／系列分區顯示，隱藏單選過濾器
@@ -1219,7 +1256,7 @@
       if (filter === "image" && p.type !== "image") return false;
       if (filter === "video" && p.type !== "video") return false;
       if (filter === "fav" && !p.fav) return false;
-      if (gVal && p.group !== gVal) return false;
+      if (railSel.size && !railSelMatch(p)) return false;
       if (q) {
         const hay = [p.title, p.prompt, p.neg, p.model, p.notes, p.group, p.tags.join(" "),
           GROUPS.flatMap(g => p[g]).join(" "), Object.values(p.params).join(" "),
@@ -1314,6 +1351,7 @@
         html += itemHTML(p);
       }
     });
+    html += `<div class="stack-end"></div>`;   // 整列斷行：讓後面被淡化的其他項目換到下一行，不跟本疊成員混在同一列
     return html;
   }
   // 雙擊改堆疊名稱：就地輸入，改的是這個 seg 的名稱（根堆疊會連帶更新成員系列）
@@ -1366,7 +1404,7 @@
   }
 
   // 電腦版左側浮動專案列：全部作品 + 堆疊樹（可多層展開／收合）+ 未堆疊的散裝系列
-  function renderProjRail(groups, gVal) {
+  function renderProjRail(groups) {
     const list = $("#prList"); if (!list) return;
     // 由所有作品的堆疊路徑建出樹（node.count = 子樹作品數）
     const root = { children: new Map() };
@@ -1378,14 +1416,14 @@
       });
     });
     const byName = (a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant");
-    let html = `<button class="pr-item${gVal === "" ? " active" : ""}" data-all="1" data-g=""><span class="pr-lbl">全部作品</span><span class="pr-n">${data.length}</span></button>`;
+    let html = `<button class="pr-item${railSel.size === 0 ? " active" : ""}" data-all="1" data-g=""><span class="pr-lbl">全部作品</span><span class="pr-n">${data.length}</span></button>`;
     [...root.children.values()].sort(byName).forEach(n => html += railNodeHTML(n, "", 0));
     // 未堆疊但有系列名稱的散裝作品，維持原本的篩選項
     const stackedGroups = new Set([...root.children.values()].map(n => stackName(n.seg)));
     const loose = [...new Set(data.filter(p => !p.stack && p.group).map(p => p.group))].filter(g => !stackedGroups.has(g)).sort((a, b) => a.localeCompare(b, "zh-Hant"));
     loose.forEach(g => {
       const n = data.filter(p => !p.stack && p.group === g).length;
-      html += `<button class="pr-item${gVal === g ? " active" : ""}" data-g="${esc(g)}"><span class="pr-lbl">${esc(g)}</span><span class="pr-n">${n}</span></button>`;
+      html += `<button class="pr-item${railSel.has("g:" + g) ? " active" : ""}" data-g="${esc(g)}"><span class="pr-lbl">${esc(g)}</span><span class="pr-n">${n}</span></button>`;
     });
     list.innerHTML = html;
   }
@@ -1393,23 +1431,10 @@
     const prefix = (parentPrefix ? parentPrefix + "/" : "") + node.seg;
     const hasKids = node.children.size > 0, open = railOpen.has(node.seg);
     const chev = hasKids ? `<span class="pr-chev${open ? " open" : ""}" data-chev="${esc(node.seg)}">▸</span>` : `<span class="pr-chev blank">▸</span>`;
-    const active = expandedStacks.has(node.seg) ? " active" : "";
+    const active = railSel.has(prefix) ? " active" : "";   // 已選取（會在右側顯示）者高亮
     let html = `<div class="pr-item pr-stack${active}" data-prefix="${esc(prefix)}" data-seg="${esc(node.seg)}" style="padding-left:${10 + depth * 14}px">${chev}<span class="pr-lbl">${esc(stackName(node.seg))}</span><span class="pr-n">${node.count}</span></div>`;
     if (hasKids && open) [...node.children.values()].sort((a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant")).forEach(c => html += railNodeHTML(c, prefix, depth + 1));
     return html;
-  }
-  // 從左側樹點開一個堆疊：右側只篩選出「該系列」、展開它與所有祖先，並把畫面捲到該節點
-  function openStackFromRail(prefix) {
-    if (!prefix) return;
-    filter = "all"; $("#q").value = "";
-    $$(".chip", $("#chips")).forEach(c => c.setAttribute("aria-pressed", c.dataset.f === "all"));
-    const segs = prefix.split("/");
-    $("#groupSel").value = stackName(segs[0]);   // 右側只顯示此系列（根堆疊名稱＝成員 group）
-    if (viewMode === "sections") { viewMode = "flat"; try { localStorage.setItem("promptvault.view", "flat"); } catch (e) {} }
-    segs.forEach(s => { expandedStacks.add(s); railOpen.add(s); });
-    saveRailOpen();
-    pendingScrollSeg = segs[segs.length - 1];
-    render();
   }
 
   const UNTITLED_GRP = "（未分類）";
@@ -1653,7 +1678,16 @@
   });
   $("#q").addEventListener("input", render);
   $("#sort").addEventListener("change", render);
-  $("#groupSel").addEventListener("change", render);
+  $("#groupSel").addEventListener("change", () => {   // 下拉單選 → 同步到 railSel
+    railSel.clear();
+    const v = $("#groupSel").value;
+    if (v) {
+      const rootSegs = [...new Set(data.map(rootSeg).filter(Boolean))];
+      const m = rootSegs.find(s => stackName(s) === v);
+      railSel.add(m || ("g:" + v));
+    }
+    render();
+  });
   $("#prList").addEventListener("click", e => {
     const chev = e.target.closest(".pr-chev");
     if (chev && chev.dataset.chev) {   // 點三角形＝展開／收合左側樹的子節點
@@ -1662,10 +1696,21 @@
       saveRailOpen(); render(); return;
     }
     const stackEl = e.target.closest(".pr-stack");
-    if (stackEl) { openStackFromRail(stackEl.dataset.prefix); return; }   // 點堆疊節點＝開啟並捲到該疊
+    if (stackEl) {   // 點堆疊節點＝切換選取（防抖，讓雙擊改名可攔截）
+      clearTimeout(railClickT);
+      const prefix = stackEl.dataset.prefix;
+      railClickT = setTimeout(() => toggleRailFilter(prefix, true), 230);
+      return;
+    }
     const b = e.target.closest(".pr-item"); if (!b) return;
-    if (b.dataset.all !== undefined) { expandedStacks.clear(); }   // 「全部作品」順便收起所有展開的堆疊
-    $("#groupSel").value = b.dataset.g || ""; render();
+    if (b.dataset.all !== undefined) { railSel.clear(); expandedStacks.clear(); render(); return; }   // 全部作品＝清空選取＋收起
+    toggleRailFilter(b.dataset.g, false);   // 散裝系列（即時切換）
+  });
+  $("#prList").addEventListener("dblclick", e => {   // 左側節點點兩下＝就地改名
+    const stackEl = e.target.closest(".pr-stack"); if (!stackEl) return;
+    clearTimeout(railClickT);
+    const lbl = stackEl.querySelector(".pr-lbl");
+    if (lbl) { e.preventDefault(); editStackTheme(stackEl.dataset.seg, lbl); }
   });
   const setHdrH = () => document.documentElement.style.setProperty("--hdr-h", (($("header.top") || {}).offsetHeight || 66) + "px");
   setHdrH(); window.addEventListener("resize", setHdrH);
