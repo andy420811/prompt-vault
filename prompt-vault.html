@@ -1008,6 +1008,19 @@
   // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
 
   let data = load();
+  // 啟動時：把所有現有堆疊都套上系列主題（舊版沒命名的堆疊 → 自動命名，才會出現在左側專案列）
+  function themeAllStacks() {
+    const stacks = [...new Set(data.map(p => p.stack).filter(Boolean))];
+    let changed = false;
+    stacks.forEach(sid => {
+      const members = data.filter(p => p.stack === sid);
+      const before = members.map(m => m.group).join("");
+      applyStackTheme(sid);
+      if (members.map(m => m.group).join("") !== before) changed = true;
+    });
+    if (changed) { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+  }
+  themeAllStacks();
   let filter = "all";
   let viewMode = (localStorage.getItem("promptvault.view") === "sections") ? "sections" : "flat";
   let cardMode = (localStorage.getItem("promptvault.cardmode") === "list") ? "list" : "card";
