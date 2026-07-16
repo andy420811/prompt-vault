@@ -163,7 +163,9 @@
     border-radius:var(--r); box-shadow:var(--shadow); z-index:-1; }
   .card.pile .pile-layer.l1 { transform:translate(4px,4px); }
   .card.pile .pile-layer.l2 { transform:translate(8px,8px); }
-  .card.pile .result img { width:100%; max-height:150px; object-fit:cover; display:block; }
+  .card.pile .result img { width:100%; max-height:220px; object-fit:cover; display:block; }
+  .stack-head input.stack-rename, .card.pile input.stack-rename { font:inherit; font-size:14px; font-weight:600; padding:3px 8px;
+    border:1px solid var(--accent); border-radius:7px; background:var(--surface); color:var(--ink); outline:none; min-width:120px; max-width:220px; }
   .card.pile .pile-count { margin-left:auto; font-size:11px; font-weight:700; color:var(--accent);
     background:var(--accent-tint); border-radius:999px; padding:2px 9px; }
   .card.pile .pile-preview { font-size:12px; color:var(--ink-3); line-height:1.5; }
@@ -1013,6 +1015,7 @@
   let selectMode = false;                 // 勾選模式（選要堆疊的作品）
   const selected = new Set();             // 已勾選的記錄 id
   const expandedStacks = new Set();       // 目前展開的堆疊 id
+  let stackClickT = null;                 // 堆疊單擊防抖（讓雙擊改名可攔截）
   let editingId = null;
   let curType = "image";
   let curImgs = [];
@@ -1179,9 +1182,53 @@
     return parts.join("");
   }
   function stackTitle(members) {
-    const g = members[0].group;
-    if (g && members.every(m => m.group === g)) return g;
-    return "堆疊系列";
+    const g = members.map(m => m.group).find(Boolean);
+    return g || suggestStackName(members);
+  }
+  // 幫沒有名稱的堆疊自動想一個合適的系列名（優先：既有 group → 最常見標籤 → 第一個標題）
+  function suggestStackName(members) {
+    const g = members.map(m => m.group).find(Boolean);
+    if (g) return g;
+    const tc = {};
+    members.forEach(m => (m.tags || []).forEach(t => { tc[t] = (tc[t] || 0) + 1; }));
+    const top = Object.entries(tc).sort((a, b) => b[1] - a[1])[0];
+    if (top) return top[0];
+    const t = members.map(m => (m.title || "").trim()).find(Boolean);
+    if (t) return t.length > 12 ? t.slice(0, 12) : t;
+    return "新系列";
+  }
+  // 讓某堆疊全部成員共用同一個主題(group)；沒名稱就自動命名。回傳主題名
+  function applyStackTheme(stackId) {
+    const members = data.filter(p => p.stack === stackId);
+    if (!members.length) return "";
+    const g = members.map(m => m.group).find(Boolean) || suggestStackName(members);
+    members.forEach(m => { if (m.group !== g) { m.group = g; m.edited = Date.now(); } });
+    return g;
+  }
+  // 雙擊改堆疊主題：就地輸入，套用到裡面所有內容
+  function editStackTheme(stackId, titleEl) {
+    const members = data.filter(p => p.stack === stackId);
+    if (!members.length || !titleEl) return;
+    const input = document.createElement("input");
+    input.className = "stack-rename";
+    input.value = members[0].group || "";
+    input.placeholder = "輸入系列主題名稱";
+    titleEl.replaceWith(input);
+    input.focus(); input.select();
+    let done = false;
+    const commit = () => {
+      if (done) return; done = true;
+      const g = input.value.trim();
+      members.forEach(m => { m.group = g; m.edited = Date.now(); });
+      save(); render();
+      toast(g ? `系列已命名為「${g}」` : "已清除系列名稱");
+    };
+    input.addEventListener("blur", commit);
+    input.addEventListener("keydown", ev => {
+      if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
+      else if (ev.key === "Escape") { done = true; render(); }
+    });
+    input.addEventListener("click", ev => ev.stopPropagation());
   }
   function stackHeadHTML(stack, members) {
     return `<div class="stack-head" data-stack="${esc(stack)}">
@@ -1336,6 +1383,13 @@
   }
 
   // ---------- card actions ----------
+  // 雙擊堆疊（pile 或展開的標頭）→ 就地編輯系列主題、套用到所有成員
+  $("#grid").addEventListener("dblclick", e => {
+    const pile = e.target.closest(".card.pile");
+    if (pile) { clearTimeout(stackClickT); const h = pile.querySelector("h3"); if (h) { e.preventDefault(); editStackTheme(pile.dataset.stack, h); } return; }
+    const head = e.target.closest(".stack-head");
+    if (head) { clearTimeout(stackClickT); const n = head.querySelector(".sh-name"); if (n) { e.preventDefault(); editStackTheme(head.dataset.stack, n); } return; }
+  });
   $("#grid").addEventListener("click", e => {
     if (Date.now() < suppressClickUntil) { e.stopPropagation(); return; }   // 剛結束觸控拖曳，忽略這次點擊
     const gh = e.target.closest(".grp-head");
@@ -1349,8 +1403,11 @@
     const sh = e.target.closest(".stack-head");
     if (sh) {
       const stk = sh.dataset.stack, a = e.target.closest("[data-act]")?.dataset.act;
-      if (a === "unstack") { data.forEach(x => { if (x.stack === stk) x.stack = ""; }); save(); toast("已取消堆疊"); }
-      expandedStacks.delete(stk); render(); return;
+      clearTimeout(stackClickT);
+      if (a === "unstack") { data.forEach(x => { if (x.stack === stk) { x.stack = ""; x.group = ""; } }); save(); expandedStacks.delete(stk); render(); toast("已取消堆疊"); return; }
+      if (a === "stackclose") { expandedStacks.delete(stk); render(); return; }
+      stackClickT = setTimeout(() => { expandedStacks.delete(stk); render(); }, 250);   // 空白處單擊收合，防抖讓雙擊改名
+      return;
     }
     const card = e.target.closest(".card"); if (!card) return;
     // 電腦版：按住 Ctrl／⌘ 點卡片＝直接進入勾選並選取（免先按「選取」）
@@ -1368,7 +1425,7 @@
       updateSelectBar(); return;
     }
     // 點整疊 → 展開
-    if (card.classList.contains("pile")) { expandedStacks.add(card.dataset.stack); render(); return; }
+    if (card.classList.contains("pile")) { const stk = card.dataset.stack; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(stk); render(); }, 250); return; }
     const id = card.dataset.id;
     const actEl = e.target.closest("[data-act]");
     const act = actEl?.dataset.act;
@@ -1484,13 +1541,14 @@
     if (selected.size < 2) return;
     const sid = uid();
     data.forEach(x => { if (selected.has(x.id)) { x.stack = sid; x.edited = Date.now(); } });
+    const g = applyStackTheme(sid);   // 自動套用/命名系列主題
     const n = selected.size;
-    save(); exitSelect(); toast(`已堆疊 ${n} 件為同系列`);
+    save(); exitSelect(); toast(`已堆疊 ${n} 件為「${g}」系列`);
   });
   $("#sbUnstack").addEventListener("click", () => {
     const ids = [...selected]; let n = 0;
     const stacks = new Set();
-    data.forEach(x => { if (selected.has(x.id) && x.stack) { stacks.add(x.stack); x.stack = ""; x.edited = Date.now(); n++; } });
+    data.forEach(x => { if (selected.has(x.id) && x.stack) { stacks.add(x.stack); x.stack = ""; x.group = ""; x.edited = Date.now(); n++; } });
     stacks.forEach(s => expandedStacks.delete(s));
     if (n) { save(); toast(`已取消 ${n} 件的堆疊`); }
     exitSelect();
@@ -1504,7 +1562,7 @@
   function commitDrop(dragId, targetEl) {
     if (!dragId || !targetEl || !targetEl.closest) return;
     const dp = data.find(x => x.id === dragId); if (!dp) return;
-    if (targetEl.closest("#removeZone")) { if (dp.stack) { dp.stack = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); } return; }
+    if (targetEl.closest("#removeZone")) { if (dp.stack) { dp.stack = ""; dp.group = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); } return; }
     const pile = targetEl.closest(".card.pile"), head = targetEl.closest(".stack-head"), tcard = targetEl.closest(".card:not(.pile)");
     let sid = null;
     if (pile) sid = pile.dataset.stack;
@@ -1513,7 +1571,7 @@
       const tp = data.find(x => x.id === tcard.dataset.id);
       if (tp) { sid = tp.stack || uid(); if (!tp.stack) { tp.stack = sid; tp.edited = Date.now(); } }
     }
-    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); save(); render(); toast("已加入堆疊"); }
+    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); applyStackTheme(sid); save(); render(); toast("已加入堆疊"); }
   }
   function endDrag() {
     dragCardId = null;
@@ -1550,7 +1608,7 @@
     rz.addEventListener("drop", e => {
       if (!dragCardId) return; e.preventDefault();
       const dp = data.find(x => x.id === dragCardId);
-      if (dp && dp.stack) { dp.stack = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); }
+      if (dp && dp.stack) { dp.stack = ""; dp.group = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); }
       endDrag();
     });
   })();
