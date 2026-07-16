@@ -174,6 +174,17 @@
   #selectBar .sb-count { font-size:13px; font-weight:600; color:var(--ink-2); font-variant-numeric:tabular-nums; }
   #selectBar .btn { padding:8px 14px; }
   #selectBar .btn:disabled { opacity:.4; cursor:not-allowed; }
+  /* 拖放堆疊 */
+  .grid .card img { -webkit-user-drag:none; user-drag:none; }
+  .card.dragging { opacity:.4; }
+  .card.pile.drop-over, .stack-head.drop-over { outline:2px dashed var(--accent); outline-offset:2px; background:var(--accent-tint); }
+  .card.drop-over { outline:2px dashed var(--accent); outline-offset:-2px; }
+  .card.dimmed { opacity:.3; filter:grayscale(.4); transition:opacity .15s, filter .15s; }
+  .card.dimmed:hover { opacity:.9; filter:none; }
+  #removeZone { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:61; padding:12px 22px;
+    background:var(--danger); color:#fff; border-radius:14px; box-shadow:var(--shadow-lg); font-size:14px; font-weight:600; pointer-events:auto; }
+  #removeZone[hidden] { display:none; }
+  #removeZone.over { outline:3px solid #fff; outline-offset:-5px; transform:translateX(-50%) scale(1.06); }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); position:relative;
     display:flex; flex-direction:column; overflow:hidden; transition:transform .16s, box-shadow .16s, border-color .16s; }
   .card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
@@ -928,6 +939,7 @@
   <button class="btn ghost" id="sbUnstack">取消堆疊</button>
   <button class="btn ghost" id="sbDone">完成</button>
 </div>
+<div id="removeZone" hidden>🗑 拖到這裡移出堆疊</div>
 <script src="pv-vocab.js"></script>
 <script src="pv-seed.js"></script>
 <script src="pv-library.js"></script>
@@ -1105,6 +1117,14 @@
       grid.innerHTML = units(list);
     }
     if (selectMode) $$("#grid .card").forEach(c => c.classList.toggle("sel", selected.has(c.dataset.id)));
+    // 開啟堆疊時：不在展開堆疊裡的卡片／其他堆疊淡化，聚焦目前這疊
+    if (!selectMode && expandedStacks.size) {
+      $$("#grid .card").forEach(c => {
+        const rec = c.classList.contains("pile") ? null : data.find(x => x.id === c.dataset.id);
+        const inFocus = rec && rec.stack && expandedStacks.has(rec.stack);
+        c.classList.toggle("dimmed", !inFocus);
+      });
+    }
     updateSelectBar();
   }
 
@@ -1207,7 +1227,7 @@
           <span class="vp">${esc(v.prompt)}</span>
           <button data-act="varcopy" data-vp="${v.id}">複製</button>
         </div>`).join("")}</div>` : "";
-    return `<article class="card t-${p.type}" data-id="${p.id}">
+    return `<article class="card t-${p.type}" data-id="${p.id}" draggable="true">
       <div class="accent-strip"></div>
       ${p.imgs.length ? `<div class="result" data-act="light" data-idx="0"><img src="${p.imgs[0]}" alt="${esc(p.title)} 生成結果" loading="lazy">${p.imgs.length > 1 ? `
         <button class="img-nav prev" data-act="imgprev" title="上一張" aria-label="上一張">‹</button>
@@ -1248,7 +1268,7 @@
   function rowHTML(p) {
     const catLabel = p.type === "image" ? "圖像" : "影片";
     const tags = p.tags.slice(0, 4).map(t => `<span class="tag">${esc(t)}</span>`).join("");
-    return `<article class="card row t-${p.type}" data-id="${p.id}">
+    return `<article class="card row t-${p.type}" data-id="${p.id}" draggable="true">
       ${p.imgs.length
         ? `<div class="row-thumb" data-act="light"><img src="${p.imgs[0]}" alt="" loading="lazy">${p.imgs.length > 1 ? `<span class="row-imgn">${p.imgs.length}</span>` : ""}</div>`
         : `<div class="row-thumb ph">${ICON[p.type]}</div>`}
@@ -1292,6 +1312,13 @@
       expandedStacks.delete(stk); render(); return;
     }
     const card = e.target.closest(".card"); if (!card) return;
+    // 電腦版：按住 Ctrl／⌘ 點卡片＝直接進入勾選並選取（免先按「選取」）
+    if ((e.ctrlKey || e.metaKey) && !card.classList.contains("pile")) {
+      if (!selectMode) { selectMode = true; $("#selectBtn").setAttribute("aria-pressed", "true"); }
+      const sid = card.dataset.id;
+      if (selected.has(sid)) selected.delete(sid); else selected.add(sid);
+      render(); return;
+    }
     // 勾選模式：點卡片＝選取（堆疊本身不可選）
     if (selectMode && !card.classList.contains("pile")) {
       const sid = card.dataset.id;
@@ -1422,6 +1449,58 @@
     exitSelect();
   });
   $("#sbDone").addEventListener("click", exitSelect);
+  // ---------- 拖放：加入／建立／移出堆疊 ----------
+  let dragCardId = null;
+  function endDrag() {
+    dragCardId = null;
+    $$("#grid .dragging, #grid .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
+    const rz = $("#removeZone"); rz.hidden = true; rz.classList.remove("over");
+  }
+  $("#grid").addEventListener("dragstart", e => {
+    const card = e.target.closest(".card");
+    if (!card || card.classList.contains("pile") || selectMode) { e.preventDefault(); return; }
+    dragCardId = card.dataset.id;
+    card.classList.add("dragging");
+    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragCardId); } catch (_) {}
+    const p = data.find(x => x.id === dragCardId);
+    $("#removeZone").hidden = !(p && p.stack);   // 有在堆疊裡才顯示「移出」區
+  });
+  $("#grid").addEventListener("dragover", e => {
+    if (!dragCardId) return;
+    const t = e.target.closest(".card.pile, .stack-head, .card");
+    $$("#grid .drop-over").forEach(el => el.classList.remove("drop-over"));
+    if (t && !(t.classList.contains("card") && t.dataset.id === dragCardId)) {
+      e.preventDefault(); e.dataTransfer.dropEffect = "move"; t.classList.add("drop-over");
+    }
+  });
+  $("#grid").addEventListener("drop", e => {
+    if (!dragCardId) return;
+    const dp = data.find(x => x.id === dragCardId); if (!dp) { endDrag(); return; }
+    const pile = e.target.closest(".card.pile");
+    const head = e.target.closest(".stack-head");
+    const tcard = e.target.closest(".card:not(.pile)");
+    let sid = null;
+    if (pile) sid = pile.dataset.stack;
+    else if (head) sid = head.dataset.stack;
+    else if (tcard && tcard.dataset.id !== dragCardId) {
+      const tp = data.find(x => x.id === tcard.dataset.id);
+      if (tp) { sid = tp.stack || uid(); if (!tp.stack) { tp.stack = sid; tp.edited = Date.now(); } }   // 拖到另一張卡→建立新堆疊
+    }
+    if (sid && dp.stack !== sid) { e.preventDefault(); dp.stack = sid; dp.edited = Date.now(); save(); render(); toast("已加入堆疊"); }
+    endDrag();
+  });
+  $("#grid").addEventListener("dragend", endDrag);
+  (() => {
+    const rz = $("#removeZone");
+    rz.addEventListener("dragover", e => { if (dragCardId) { e.preventDefault(); rz.classList.add("over"); } });
+    rz.addEventListener("dragleave", () => rz.classList.remove("over"));
+    rz.addEventListener("drop", e => {
+      if (!dragCardId) return; e.preventDefault();
+      const dp = data.find(x => x.id === dragCardId);
+      if (dp && dp.stack) { dp.stack = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); }
+      endDrag();
+    });
+  })();
 
   // ---------- preset pickers ----------
   GROUPS.forEach(g => {

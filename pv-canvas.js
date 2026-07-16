@@ -57,15 +57,19 @@ window.PVCanvas = (function () {
   .pvc-node.t-image { border-top:3px solid var(--img,#0e8c7e); }
   .pvc-node.t-video { border-top:3px solid var(--vid,#c46a16); }
   .pvc-node.note { border-top:3px solid var(--gold,#b0870f); background:#fffdf5; }
-  .pvc-node-head { display:flex; align-items:center; gap:6px; padding:7px 9px; cursor:grab; user-select:none; border-bottom:1px solid var(--line-soft,#eae7dc); }
+  .pvc-node-head { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:5px 8px; cursor:grab; user-select:none; }
   .pvc-node-head:active { cursor:grabbing; }
-  .pvc-node-type { font-size:11px; color:var(--ink-3,#8a8794); white-space:nowrap; }
-  .pvc-node-title { flex:1; font-size:12.5px; font-weight:600; color:var(--ink,#1d1c22); outline:none; min-width:0; overflow:hidden; }
-  .pvc-node-title:empty::before { content:"（點此命名）"; color:var(--ink-3,#8a8794); font-weight:400; }
-  .pvc-node-del { border:none; background:none; color:var(--ink-3,#8a8794); font-size:17px; line-height:1; cursor:pointer; padding:0 2px; }
+  .pvc-node-type { font-size:10.5px; color:var(--ink-3,#8a8794); white-space:nowrap; }
+  .pvc-node-img { width:100%; height:140px; background:var(--surface-2,#efede4); overflow:hidden; cursor:grab; }
+  .pvc-node-img:active { cursor:grabbing; }
+  .pvc-node-img img { width:100%; height:100%; object-fit:cover; display:block; }
+  .pvc-node-title { padding:7px 11px 3px; font-size:15px; font-weight:700; line-height:1.25; color:var(--ink,#1d1c22); outline:none; word-break:break-word; }
+  .pvc-node-title:empty::before { content:"（點此命名）"; color:var(--ink-3,#8a8794); font-weight:400; font-size:12px; }
+  .pvc-node-del { border:none; background:none; color:var(--ink-3,#8a8794); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
   .pvc-node-del:hover { color:var(--danger,#b23b45); }
-  .pvc-node-body { padding:8px 10px; font-size:11.5px; line-height:1.5; color:var(--ink-2,#55535e); max-height:120px; overflow:auto; white-space:pre-wrap; word-break:break-word; outline:none; }
-  .pvc-node.note .pvc-node-body { min-height:44px; color:var(--ink,#1d1c22); }
+  .pvc-node-body { padding:2px 11px 9px; font-size:11px; line-height:1.5; color:var(--ink-3,#8a8794); max-height:64px; overflow:auto; white-space:pre-wrap; word-break:break-word; outline:none; }
+  .pvc-node.note .pvc-node-body { padding:8px 10px; min-height:48px; font-size:12.5px; color:var(--ink,#1d1c22); }
+  .pvc-node.note .pvc-node-title { font-size:13px; }
   .pvc-node-copy { display:block; width:100%; border:none; border-top:1px solid var(--line-soft,#eae7dc); background:var(--surface-2,#efede4);
       color:var(--ink-2,#55535e); font:inherit; font-size:11px; padding:5px; cursor:pointer; }
   .pvc-node-copy:hover { background:var(--accent-tint,#e7e5f7); color:var(--accent,#4b45c6); }
@@ -164,11 +168,11 @@ window.PVCanvas = (function () {
     });
     ui.nodes.addEventListener("pointerdown", e => {
       const port = e.target.closest(".pvc-port");
-      const head = e.target.closest(".pvc-node-head");
+      const handle = e.target.closest(".pvc-node-head, .pvc-node-img");
       const nodeEl = e.target.closest(".pvc-node"); if (!nodeEl) return;
       const n = cur.nodes.find(x => x.id === nodeEl.dataset.id); if (!n) return;
       if (port) { e.preventDefault(); startEdge(n, e); }
-      else if (head && !e.target.closest(".pvc-node-del")) { e.preventDefault(); startNodeDrag(n, nodeEl, e); }
+      else if (handle && !e.target.closest(".pvc-node-del")) { e.preventDefault(); startNodeDrag(n, nodeEl, e); }
     });
     // 背景平移
     ui.vp.addEventListener("pointerdown", e => {
@@ -256,7 +260,7 @@ window.PVCanvas = (function () {
     const c = viewCenter();
     // 稍微錯開避免疊在一起
     const off = cur.nodes.length % 5 * 26;
-    addNode({ kind: "prompt", ref: p.id, ttype: p.type === "video" ? "video" : "image", title: p.title || "（未命名）", text: p.prompt || "", x: Math.round(c.x - NODE_W / 2 + off), y: Math.round(c.y - 60 + off) });
+    addNode({ kind: "prompt", ref: p.id, ttype: p.type === "video" ? "video" : "image", title: p.title || "（未命名）", text: p.prompt || "", img: (p.imgs && p.imgs[0]) || "", x: Math.round(c.x - NODE_W / 2 + off), y: Math.round(c.y - 60 + off) });
     renderNodes(); drawEdges(); ui.emptyMsg.hidden = cur.nodes.length > 0;   // 保持 picker 開著，方便連續匯入
   }
 
@@ -267,13 +271,15 @@ window.PVCanvas = (function () {
   function nodeHTML(n) {
     const isNote = n.kind === "note";
     const typeLabel = isNote ? "📝 筆記" : (n.ttype === "video" ? "🎬 影片" : "🖼 圖像");
-    const cls = isNote ? "note" : "t-" + (n.ttype || "image");
+    const cls = (isNote ? "note" : "t-" + (n.ttype || "image")) + (!isNote && n.img ? " has-img" : "");
+    const img = (!isNote && n.img) ? `<div class="pvc-node-img"><img src="${n.img}" alt="" draggable="false"></div>` : "";
     return `<div class="pvc-node ${cls}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px">
       <div class="pvc-node-head">
         <span class="pvc-node-type">${typeLabel}</span>
-        <span class="pvc-node-title" contenteditable="true" spellcheck="false">${esc(n.title)}</span>
         <button class="pvc-node-del" title="刪除節點">×</button>
       </div>
+      ${img}
+      <div class="pvc-node-title" contenteditable="true" spellcheck="false">${esc(n.title)}</div>
       <div class="pvc-node-body"${isNote ? ' contenteditable="true" spellcheck="false"' : ""}>${esc(n.text)}</div>
       ${isNote ? "" : `<button class="pvc-node-copy">複製 prompt</button>`}
       <div class="pvc-port" title="從這裡拖曳連到另一個節點"></div>
