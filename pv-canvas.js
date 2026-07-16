@@ -14,6 +14,7 @@ window.PVCanvas = (function () {
   let cur = null;            // 目前專案
   let ui = null;             // DOM 參照
   let drag = null;           // 進行中的拖曳狀態
+  let pinching = false;      // 雙指縮放進行中（暫停平移/拖曳）
 
   function loadStore() {
     try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.projects)) return s; } catch (e) {}
@@ -24,7 +25,7 @@ window.PVCanvas = (function () {
   function curProject() { return store.projects.find(p => p.id === store.currentId) || store.projects[0] || null; }
 
   function newProject(name) {
-    const p = { id: uid(), name: name || "未命名專案", nodes: [], edges: [], panX: 0, panY: 0, created: Date.now(), edited: Date.now() };
+    const p = { id: uid(), name: name || "未命名專案", nodes: [], edges: [], panX: 0, panY: 0, zoom: 1, created: Date.now(), edited: Date.now() };
     store.projects.push(p); store.currentId = p.id; save(); return p;
   }
 
@@ -104,7 +105,11 @@ window.PVCanvas = (function () {
         <span class="pvc-spacer"></span>
         <button class="pvc-b primary" id="pvcImport">＋ 匯入 Prompt</button>
         <button class="pvc-b" id="pvcAddNote">＋ 文字節點</button>
-        <span class="pvc-hint">拖節點排列 · 拖右側藍點連線 · 點連線標籤可命名關係</span>
+        <span class="pvc-hint">拖節點 · 拖藍點連線 · 滾輪／雙指縮放</span>
+        <button class="pvc-b" id="pvcZoomOut" title="縮小">－</button>
+        <span class="pvc-hint" id="pvcZoomLbl" style="min-width:40px;text-align:center">100%</span>
+        <button class="pvc-b" id="pvcZoomIn" title="放大">＋</button>
+        <button class="pvc-b" id="pvcZoomReset" title="重設縮放">100%</button>
         <button class="pvc-b" id="pvcClose">關閉</button>
       </div>
       <div class="pvc-vp" id="pvcVp">
@@ -179,6 +184,27 @@ window.PVCanvas = (function () {
       if (e.target.closest(".pvc-node") || e.target.closest(".pvc-picker") || e.target.closest(".pvc-elabel")) return;
       startPan(e);
     });
+    // 滾輪縮放（桌機）
+    ui.vp.addEventListener("wheel", e => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }, { passive: false });
+    // 雙指捏合縮放（手機）
+    const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+    let pinchD = 0;
+    ui.vp.addEventListener("touchstart", e => { if (e.touches.length === 2) { pinching = true; pinchD = dist(e.touches[0], e.touches[1]); } }, { passive: false });
+    ui.vp.addEventListener("touchmove", e => {
+      if (pinching && e.touches.length === 2) {
+        e.preventDefault();
+        const d = dist(e.touches[0], e.touches[1]), m = mid(e.touches[0], e.touches[1]);
+        if (pinchD > 0) zoomAt(d / pinchD, m.x, m.y);
+        pinchD = d;
+      }
+    }, { passive: false });
+    ui.vp.addEventListener("touchend", e => { if (e.touches.length < 2) { pinching = false; pinchD = 0; } });
+    ui.vp.addEventListener("touchcancel", () => { pinching = false; pinchD = 0; });
+    // 縮放按鈕
+    ui.overlay.querySelector("#pvcZoomIn").addEventListener("click", () => zoomCenter(1.2));
+    ui.overlay.querySelector("#pvcZoomOut").addEventListener("click", () => zoomCenter(1 / 1.2));
+    ui.overlay.querySelector("#pvcZoomReset").addEventListener("click", () => { cur.zoom = 1; cur.edited = Date.now(); applyPan(); updateZoomLabel(); saveSoon(); });
     // 連線標籤：點擊編輯
     ui.labels.addEventListener("click", e => {
       const lab = e.target.closest(".pvc-elabel"); if (!lab) return;
@@ -194,11 +220,12 @@ window.PVCanvas = (function () {
     const finish = e => { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", finish); up(e); };
     document.addEventListener("pointermove", mv); document.addEventListener("pointerup", finish);
   }
-  function toWorld(e) { const r = ui.vp.getBoundingClientRect(); return { x: e.clientX - r.left - cur.panX, y: e.clientY - r.top - cur.panY }; }
+  function toWorld(e) { const r = ui.vp.getBoundingClientRect(); const z = cur.zoom || 1; return { x: (e.clientX - r.left - cur.panX) / z, y: (e.clientY - r.top - cur.panY) / z }; }
 
   function startNodeDrag(n, nodeEl, e) {
     const w = toWorld(e); const offX = w.x - n.x, offY = w.y - n.y;
     docListen(ev => {
+      if (pinching) return;
       const p = toWorld(ev); n.x = Math.round(p.x - offX); n.y = Math.round(p.y - offY);
       nodeEl.style.left = n.x + "px"; nodeEl.style.top = n.y + "px"; drawEdges();
     }, () => { cur.edited = Date.now(); save(); });
@@ -224,10 +251,25 @@ window.PVCanvas = (function () {
   function startPan(e) {
     ui.vp.classList.add("panning");
     const sx = e.clientX, sy = e.clientY, px = cur.panX, py = cur.panY;
-    docListen(ev => { cur.panX = px + (ev.clientX - sx); cur.panY = py + (ev.clientY - sy); applyPan(); },
+    docListen(ev => { if (pinching) return; cur.panX = px + (ev.clientX - sx); cur.panY = py + (ev.clientY - sy); applyPan(); },
       () => { ui.vp.classList.remove("panning"); cur.edited = Date.now(); save(); });
   }
-  function applyPan() { ui.world.style.transform = `translate(${cur.panX}px, ${cur.panY}px)`; }
+  function applyPan() { ui.world.style.transform = `translate(${cur.panX}px, ${cur.panY}px) scale(${cur.zoom || 1})`; }
+  let saveT = null;
+  function saveSoon() { clearTimeout(saveT); saveT = setTimeout(save, 400); }
+  function updateZoomLabel() { const el = ui.overlay && ui.overlay.querySelector("#pvcZoomLbl"); if (el) el.textContent = Math.round((cur.zoom || 1) * 100) + "%"; }
+  // 以 (clientX,clientY) 為中心縮放：讓游標／捏合中心底下的點保持不動
+  function zoomAt(factor, clientX, clientY) {
+    const r = ui.vp.getBoundingClientRect();
+    const px = clientX - r.left, py = clientY - r.top;
+    const z0 = cur.zoom || 1, z1 = Math.min(2.5, Math.max(0.3, z0 * factor));
+    if (Math.abs(z1 - z0) < 0.0001) return;
+    cur.panX = px - (px - cur.panX) * (z1 / z0);
+    cur.panY = py - (py - cur.panY) * (z1 / z0);
+    cur.zoom = z1; cur.edited = Date.now();
+    applyPan(); updateZoomLabel(); saveSoon();
+  }
+  function zoomCenter(f) { const r = ui.vp.getBoundingClientRect(); zoomAt(f, r.left + r.width / 2, r.top + r.height / 2); }
 
   // ---------- 幾何 ----------
   function nodeEl(id) { return ui.nodes.querySelector(`.pvc-node[data-id="${id}"]`); }
@@ -240,7 +282,7 @@ window.PVCanvas = (function () {
     const dx = Math.abs(x2 - x1) * 0.4 + 20;
     return `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`;
   }
-  function viewCenter() { const r = ui.vp.getBoundingClientRect(); return { x: r.width / 2 - cur.panX, y: r.height / 2 - cur.panY }; }
+  function viewCenter() { const r = ui.vp.getBoundingClientRect(); const z = cur.zoom || 1; return { x: (r.width / 2 - cur.panX) / z, y: (r.height / 2 - cur.panY) / z }; }
 
   // ---------- 節點資料操作 ----------
   function addNode(n) { n.id = uid(); cur.nodes.push(n); cur.edited = Date.now(); save(); return n; }
@@ -310,7 +352,8 @@ window.PVCanvas = (function () {
   }
   function renderAll() {
     if (!cur) cur = curProject() || newProject("我的專案");
-    renderProjSel(); applyPan(); renderNodes(); drawEdges();
+    if (!cur.zoom) cur.zoom = 1;
+    renderProjSel(); applyPan(); updateZoomLabel(); renderNodes(); drawEdges();
     ui.emptyMsg.hidden = cur.nodes.length > 0;
     ui.emptyMsg.textContent = cur.nodes.length ? "" : "空白畫布 — 按上方「＋ 匯入 Prompt」把庫裡的提示詞拉進來，或加文字節點，再拖右側藍點連線。";
     ui.picker.classList.remove("show");

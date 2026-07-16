@@ -185,6 +185,10 @@
     background:var(--danger); color:#fff; border-radius:14px; box-shadow:var(--shadow-lg); font-size:14px; font-weight:600; pointer-events:auto; }
   #removeZone[hidden] { display:none; }
   #removeZone.over { outline:3px solid #fff; outline-offset:-5px; transform:translateX(-50%) scale(1.06); }
+  .grid .card { -webkit-touch-callout:none; }
+  .drag-ghost { position:fixed; z-index:70; transform:translate(-50%,-50%); pointer-events:none; opacity:.96;
+    background:var(--accent); color:#fff; font-size:12.5px; font-weight:600; padding:8px 14px; border-radius:10px;
+    box-shadow:var(--shadow-lg); max-width:220px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); position:relative;
     display:flex; flex-direction:column; overflow:hidden; transition:transform .16s, box-shadow .16s, border-color .16s; }
   .card:hover { transform:translateY(-2px); box-shadow:var(--shadow-lg); }
@@ -1297,6 +1301,7 @@
 
   // ---------- card actions ----------
   $("#grid").addEventListener("click", e => {
+    if (Date.now() < suppressClickUntil) { e.stopPropagation(); return; }   // 剛結束觸控拖曳，忽略這次點擊
     const gh = e.target.closest(".grp-head");
     if (gh) {
       const sec = gh.closest(".grp-section"); const name = sec.dataset.grp;
@@ -1449,14 +1454,32 @@
     exitSelect();
   });
   $("#sbDone").addEventListener("click", exitSelect);
-  // ---------- 拖放：加入／建立／移出堆疊 ----------
+  // ---------- 拖放：加入／建立／移出堆疊（桌機 HTML5 DnD + 手機長按觸控）----------
   let dragCardId = null;
+  let touchDrag = null;
+  let suppressClickUntil = 0;
+  // 共用落點判定：把 dragId 這張卡放到 targetEl 上 → 加入/建立/移出堆疊
+  function commitDrop(dragId, targetEl) {
+    if (!dragId || !targetEl || !targetEl.closest) return;
+    const dp = data.find(x => x.id === dragId); if (!dp) return;
+    if (targetEl.closest("#removeZone")) { if (dp.stack) { dp.stack = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); } return; }
+    const pile = targetEl.closest(".card.pile"), head = targetEl.closest(".stack-head"), tcard = targetEl.closest(".card:not(.pile)");
+    let sid = null;
+    if (pile) sid = pile.dataset.stack;
+    else if (head) sid = head.dataset.stack;
+    else if (tcard && tcard.dataset.id !== dragId) {
+      const tp = data.find(x => x.id === tcard.dataset.id);
+      if (tp) { sid = tp.stack || uid(); if (!tp.stack) { tp.stack = sid; tp.edited = Date.now(); } }
+    }
+    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); save(); render(); toast("已加入堆疊"); }
+  }
   function endDrag() {
     dragCardId = null;
     $$("#grid .dragging, #grid .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
     const rz = $("#removeZone"); rz.hidden = true; rz.classList.remove("over");
   }
   $("#grid").addEventListener("dragstart", e => {
+    if (touchDrag && touchDrag.active) { e.preventDefault(); return; }   // 觸控拖曳進行中，讓觸控處理
     const card = e.target.closest(".card");
     if (!card || card.classList.contains("pile") || selectMode) { e.preventDefault(); return; }
     dragCardId = card.dataset.id;
@@ -1475,19 +1498,7 @@
   });
   $("#grid").addEventListener("drop", e => {
     if (!dragCardId) return;
-    const dp = data.find(x => x.id === dragCardId); if (!dp) { endDrag(); return; }
-    const pile = e.target.closest(".card.pile");
-    const head = e.target.closest(".stack-head");
-    const tcard = e.target.closest(".card:not(.pile)");
-    let sid = null;
-    if (pile) sid = pile.dataset.stack;
-    else if (head) sid = head.dataset.stack;
-    else if (tcard && tcard.dataset.id !== dragCardId) {
-      const tp = data.find(x => x.id === tcard.dataset.id);
-      if (tp) { sid = tp.stack || uid(); if (!tp.stack) { tp.stack = sid; tp.edited = Date.now(); } }   // 拖到另一張卡→建立新堆疊
-    }
-    if (sid && dp.stack !== sid) { e.preventDefault(); dp.stack = sid; dp.edited = Date.now(); save(); render(); toast("已加入堆疊"); }
-    endDrag();
+    e.preventDefault(); commitDrop(dragCardId, e.target); endDrag();
   });
   $("#grid").addEventListener("dragend", endDrag);
   (() => {
@@ -1501,6 +1512,65 @@
       endDrag();
     });
   })();
+  // 手機：長按 ~0.4 秒啟動拖曳（觸控無原生 DnD），跟桌機共用 commitDrop
+  $("#grid").addEventListener("touchstart", e => {
+    if (selectMode || dragCardId || e.touches.length !== 1) return;
+    const card = e.target.closest && e.target.closest(".card:not(.pile)"); if (!card) return;
+    const t = e.touches[0];
+    const timer = setTimeout(() => activateTouchDrag(card), 420);
+    touchDrag = { id: card.dataset.id, card, x: t.clientX, y: t.clientY, timer, active: false, ghost: null };
+  }, { passive: true });
+  $("#grid").addEventListener("touchmove", e => {
+    if (!touchDrag) return;
+    const t = e.touches[0];
+    if (!touchDrag.active) {
+      if (Math.hypot(t.clientX - touchDrag.x, t.clientY - touchDrag.y) > 12) { clearTimeout(touchDrag.timer); touchDrag = null; }  // 移動＝捲動，取消長按
+      return;
+    }
+    e.preventDefault();
+    moveGhost(t.clientX, t.clientY);
+    highlightTouchTarget(t.clientX, t.clientY);
+  }, { passive: false });
+  function endTouch(e) {
+    if (!touchDrag) return;
+    clearTimeout(touchDrag.timer);
+    if (touchDrag.active) {
+      const t = e.changedTouches && e.changedTouches[0];
+      if (touchDrag.ghost) touchDrag.ghost.style.display = "none";
+      const el = t ? document.elementFromPoint(t.clientX, t.clientY) : null;
+      commitDrop(touchDrag.id, el || document.body);
+      cleanupTouch();
+      suppressClickUntil = Date.now() + 500;   // 避免拖曳後又觸發一次點擊
+    }
+    touchDrag = null;
+  }
+  $("#grid").addEventListener("touchend", endTouch);
+  $("#grid").addEventListener("touchcancel", () => { if (touchDrag) { clearTimeout(touchDrag.timer); if (touchDrag.active) cleanupTouch(); touchDrag = null; } });
+  function activateTouchDrag(card) {
+    if (!touchDrag || dragCardId) return;
+    touchDrag.active = true;
+    card.classList.add("dragging");
+    const p = data.find(r => r.id === touchDrag.id);
+    $("#removeZone").hidden = !(p && p.stack);
+    const g = document.createElement("div"); g.className = "drag-ghost"; g.textContent = "📇 " + ((p && p.title) || "未命名");
+    document.body.appendChild(g); touchDrag.ghost = g;
+    moveGhost(touchDrag.x, touchDrag.y);
+    if (navigator.vibrate) { try { navigator.vibrate(15); } catch (_) {} }
+  }
+  function moveGhost(x, y) { if (touchDrag && touchDrag.ghost) { touchDrag.ghost.style.left = x + "px"; touchDrag.ghost.style.top = (y - 26) + "px"; } }
+  function highlightTouchTarget(x, y) {
+    $$("#grid .drop-over").forEach(el => el.classList.remove("drop-over"));
+    const rz = $("#removeZone"); rz.classList.remove("over");
+    const el = document.elementFromPoint(x, y); if (!el || !el.closest) return;
+    if (!rz.hidden && el.closest("#removeZone")) { rz.classList.add("over"); return; }
+    const tt = el.closest(".card.pile, .stack-head, .card:not(.pile)");
+    if (tt && !(tt.dataset && tt.dataset.id === touchDrag.id)) tt.classList.add("drop-over");
+  }
+  function cleanupTouch() {
+    if (touchDrag && touchDrag.ghost) touchDrag.ghost.remove();
+    $$("#grid .dragging, #grid .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
+    const rz = $("#removeZone"); rz.hidden = true; rz.classList.remove("over");
+  }
 
   // ---------- preset pickers ----------
   GROUPS.forEach(g => {
