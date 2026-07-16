@@ -53,22 +53,25 @@ window.PVCanvas = (function () {
       border-radius:999px; padding:2px 9px; font-size:11.5px; color:var(--ink-2,#55535e); white-space:nowrap; cursor:text; max-width:200px; overflow:hidden; text-overflow:ellipsis; }
   .pvc-elabel .pvc-edel { margin-left:6px; color:var(--danger,#b23b45); cursor:pointer; font-weight:700; }
   .pvc-elabel.empty { color:var(--ink-3,#8a8794); font-style:italic; }
-  .pvc-node { position:absolute; width:${NODE_W}px; background:var(--surface,#fff); border:1px solid var(--line,#e0ddd1);
+  .pvc-node { position:absolute; width:${NODE_W}px; display:flex; flex-direction:column; background:var(--surface,#fff); border:1px solid var(--line,#e0ddd1);
       border-radius:12px; box-shadow:0 6px 20px -10px rgba(24,22,30,.3); overflow:hidden; }
+  .pvc-resize { position:absolute; right:0; bottom:0; width:18px; height:18px; z-index:4; cursor:nwse-resize;
+      background:linear-gradient(135deg, transparent 0 45%, var(--ink-3,#8a8794) 45% 55%, transparent 55% 66%, var(--ink-3,#8a8794) 66% 76%, transparent 76%); opacity:.5; }
+  .pvc-resize:hover { opacity:1; }
   .pvc-node.t-image { border-top:3px solid var(--img,#0e8c7e); }
   .pvc-node.t-video { border-top:3px solid var(--vid,#c46a16); }
   .pvc-node.note { border-top:3px solid var(--gold,#b0870f); background:#fffdf5; }
   .pvc-node-head { display:flex; align-items:center; justify-content:space-between; gap:6px; padding:5px 8px; cursor:grab; user-select:none; }
   .pvc-node-head:active { cursor:grabbing; }
   .pvc-node-type { font-size:10.5px; color:var(--ink-3,#8a8794); white-space:nowrap; }
-  .pvc-node-img { width:100%; height:140px; background:var(--surface-2,#efede4); overflow:hidden; cursor:grab; }
+  .pvc-node-img { width:100%; aspect-ratio:16/10; height:auto; flex:0 0 auto; background:var(--surface-2,#efede4); overflow:hidden; cursor:grab; }
   .pvc-node-img:active { cursor:grabbing; }
   .pvc-node-img img { width:100%; height:100%; object-fit:cover; display:block; }
   .pvc-node-title { padding:7px 11px 3px; font-size:15px; font-weight:700; line-height:1.25; color:var(--ink,#1d1c22); outline:none; word-break:break-word; }
   .pvc-node-title:empty::before { content:"（點此命名）"; color:var(--ink-3,#8a8794); font-weight:400; font-size:12px; }
   .pvc-node-del { border:none; background:none; color:var(--ink-3,#8a8794); font-size:18px; line-height:1; cursor:pointer; padding:0 2px; }
   .pvc-node-del:hover { color:var(--danger,#b23b45); }
-  .pvc-node-body { padding:2px 11px 9px; font-size:11px; line-height:1.5; color:var(--ink-3,#8a8794); max-height:64px; overflow:auto; white-space:pre-wrap; word-break:break-word; outline:none; }
+  .pvc-node-body { padding:2px 11px 9px; font-size:11px; line-height:1.5; color:var(--ink-3,#8a8794); flex:1 1 auto; min-height:0; overflow:auto; white-space:pre-wrap; word-break:break-word; outline:none; }
   .pvc-node.note .pvc-node-body { padding:8px 10px; min-height:48px; font-size:12.5px; color:var(--ink,#1d1c22); }
   .pvc-node.note .pvc-node-title { font-size:13px; }
   .pvc-node-copy { display:block; width:100%; border:none; border-top:1px solid var(--line-soft,#eae7dc); background:var(--surface-2,#efede4);
@@ -173,10 +176,12 @@ window.PVCanvas = (function () {
     });
     ui.nodes.addEventListener("pointerdown", e => {
       const port = e.target.closest(".pvc-port");
+      const resize = e.target.closest(".pvc-resize");
       const handle = e.target.closest(".pvc-node-head, .pvc-node-img");
       const nodeEl = e.target.closest(".pvc-node"); if (!nodeEl) return;
       const n = cur.nodes.find(x => x.id === nodeEl.dataset.id); if (!n) return;
-      if (port) { e.preventDefault(); startEdge(n, e); }
+      if (resize) { e.preventDefault(); startResize(n, nodeEl, e); }
+      else if (port) { e.preventDefault(); startEdge(n, e); }
       else if (handle && !e.target.closest(".pvc-node-del")) { e.preventDefault(); startNodeDrag(n, nodeEl, e); }
     });
     // 背景平移
@@ -184,8 +189,11 @@ window.PVCanvas = (function () {
       if (e.target.closest(".pvc-node") || e.target.closest(".pvc-picker") || e.target.closest(".pvc-elabel")) return;
       startPan(e);
     });
-    // 滾輪縮放（桌機）
-    ui.vp.addEventListener("wheel", e => { e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY); }, { passive: false });
+    // 滾輪縮放（桌機）；在匯入面板／節點內文上滾動則交給它們自己捲動、不縮放
+    ui.vp.addEventListener("wheel", e => {
+      if (e.target.closest(".pvc-picker") || e.target.closest(".pvc-node-body")) return;
+      e.preventDefault(); zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY);
+    }, { passive: false });
     // 雙指捏合縮放（手機）
     const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
@@ -228,6 +236,18 @@ window.PVCanvas = (function () {
       if (pinching) return;
       const p = toWorld(ev); n.x = Math.round(p.x - offX); n.y = Math.round(p.y - offY);
       nodeEl.style.left = n.x + "px"; nodeEl.style.top = n.y + "px"; drawEdges();
+    }, () => { cur.edited = Date.now(); save(); });
+  }
+  function startResize(n, nodeEl, e) {
+    const w0 = toWorld(e);
+    const startW = n.w || nodeEl.offsetWidth, startH = n.h || nodeEl.offsetHeight;
+    docListen(ev => {
+      if (pinching) return;
+      const w = toWorld(ev);
+      n.w = Math.round(Math.max(150, Math.min(500, startW + (w.x - w0.x))));
+      n.h = Math.round(Math.max(110, Math.min(660, startH + (w.y - w0.y))));
+      nodeEl.style.width = n.w + "px"; nodeEl.style.height = n.h + "px";
+      drawEdges();   // 尺寸改變→連線端點位置改變
     }, () => { cur.edited = Date.now(); save(); });
   }
   function startEdge(from, e) {
@@ -315,7 +335,9 @@ window.PVCanvas = (function () {
     const typeLabel = isNote ? "📝 筆記" : (n.ttype === "video" ? "🎬 影片" : "🖼 圖像");
     const cls = (isNote ? "note" : "t-" + (n.ttype || "image")) + (!isNote && n.img ? " has-img" : "");
     const img = (!isNote && n.img) ? `<div class="pvc-node-img"><img src="${n.img}" alt="" draggable="false"></div>` : "";
-    return `<div class="pvc-node ${cls}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px">
+    const w = n.w || NODE_W;
+    const h = n.h || (isNote ? 150 : (n.img ? 264 : 168));
+    return `<div class="pvc-node ${cls}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
       <div class="pvc-node-head">
         <span class="pvc-node-type">${typeLabel}</span>
         <button class="pvc-node-del" title="刪除節點">×</button>
@@ -325,6 +347,7 @@ window.PVCanvas = (function () {
       <div class="pvc-node-body"${isNote ? ' contenteditable="true" spellcheck="false"' : ""}>${esc(n.text)}</div>
       ${isNote ? "" : `<button class="pvc-node-copy">複製 prompt</button>`}
       <div class="pvc-port" title="從這裡拖曳連到另一個節點"></div>
+      <div class="pvc-resize" title="拖曳改變節點大小"></div>
     </div>`;
   }
   function renderNodes() { ui.nodes.innerHTML = cur.nodes.map(nodeHTML).join(""); }
