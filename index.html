@@ -53,6 +53,24 @@
     line-height:1.5; -webkit-font-smoothing:antialiased; }
   ::selection { background: var(--accent-tint); }
   .wrap { max-width:1180px; margin:0 auto; padding:0 24px 96px; }
+  /* 電腦版：左側浮動專案列 + 頁面用滿寬度 */
+  :root { --rail-w:210px; }
+  #projRail { display:none; }
+  .pr-head { font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); padding:12px 16px 6px; }
+  .pr-item { display:flex; align-items:center; gap:8px; width:100%; text-align:left; border:none; background:none; cursor:pointer;
+    font:inherit; font-size:13px; color:var(--ink-2); padding:8px 16px; border-left:3px solid transparent; }
+  .pr-item:hover { background:var(--surface-2); color:var(--ink); }
+  .pr-item.active { background:var(--accent-tint); color:var(--accent); font-weight:600; border-left-color:var(--accent); }
+  .pr-item .pr-lbl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .pr-item .pr-n { margin-left:auto; font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
+  .pr-item.active .pr-n { color:var(--accent); }
+  @media (min-width:1024px) {
+    .top-inner { max-width:none; }
+    .wrap { max-width:none; padding-left:32px; padding-right:32px; }
+    :root.has-rail #projRail { display:flex; flex-direction:column; position:fixed; left:0; top:var(--hdr-h,66px); bottom:0;
+      width:var(--rail-w); background:var(--surface); border-right:1px solid var(--line); overflow-y:auto; z-index:20; padding-bottom:20px; }
+    :root.has-rail .wrap { padding-left:calc(var(--rail-w) + 34px); }
+  }
 
   /* header */
   header.top { position:sticky; top:0; z-index:30;
@@ -530,6 +548,11 @@
     </button>
   </div>
 </header>
+
+<aside id="projRail" aria-label="專案列">
+  <div class="pr-head">專案／系列</div>
+  <div class="pr-list" id="prList"></div>
+</aside>
 
 <div class="wrap">
   <div class="toolbar">
@@ -1070,6 +1093,8 @@
     gSel.style.display = groups.length ? "" : "none";
     const gVal = [...gSel.options].some(o => o.value === gCur) ? gCur : "";
     gSel.value = gVal;
+    renderProjRail(groups, gVal);
+    document.documentElement.classList.toggle("has-rail", groups.length > 0);
 
     // 分區整理檢視：依專案／系列分區顯示，隱藏單選過濾器
     const sectioned = viewMode === "sections";
@@ -1080,7 +1105,7 @@
       if (filter === "image" && p.type !== "image") return false;
       if (filter === "video" && p.type !== "video") return false;
       if (filter === "fav" && !p.fav) return false;
-      if (!sectioned && gVal && p.group !== gVal) return false;
+      if (gVal && p.group !== gVal) return false;
       if (q) {
         const hay = [p.title, p.prompt, p.neg, p.model, p.notes, p.group, p.tags.join(" "),
           GROUPS.flatMap(g => p[g]).join(" "), Object.values(p.params).join(" "),
@@ -1177,6 +1202,16 @@
         <div class="pile-preview">${members.slice(0, 4).map(m => esc(m.title || "未命名")).join("、")}${members.length > 4 ? " …" : ""}</div>
       </div>
     </article>`;
+  }
+
+  // 電腦版左側浮動專案列：全部作品 + 各專案／系列，點了篩選、highlight 目前選中
+  function renderProjRail(groups, gVal) {
+    const list = $("#prList"); if (!list) return;
+    const rows = [{ v: "", label: "全部作品", n: data.length }]
+      .concat(groups.map(g => ({ v: g, label: g, n: data.filter(p => p.group === g).length })));
+    list.innerHTML = rows.map(it =>
+      `<button class="pr-item${it.v === gVal ? " active" : ""}" data-g="${esc(it.v)}"><span class="pr-lbl">${esc(it.label)}</span><span class="pr-n">${it.n}</span></button>`
+    ).join("");
   }
 
   const UNTITLED_GRP = "（未分類）";
@@ -1411,6 +1446,12 @@
   $("#q").addEventListener("input", render);
   $("#sort").addEventListener("change", render);
   $("#groupSel").addEventListener("change", render);
+  $("#prList").addEventListener("click", e => {
+    const b = e.target.closest(".pr-item"); if (!b) return;
+    $("#groupSel").value = b.dataset.g; render();
+  });
+  const setHdrH = () => document.documentElement.style.setProperty("--hdr-h", (($("header.top") || {}).offsetHeight || 66) + "px");
+  setHdrH(); window.addEventListener("resize", setHdrH);
   $("#viewBtn").addEventListener("click", () => {
     viewMode = viewMode === "sections" ? "flat" : "sections";
     try { localStorage.setItem("promptvault.view", viewMode); } catch (e) {}
