@@ -1261,12 +1261,18 @@
       grid.innerHTML = units(list);
     }
     if (selectMode) $$("#grid .card").forEach(c => c.classList.toggle("sel", selected.has(c.dataset.id)));
-    // 開啟堆疊時：不在展開堆疊子樹內的卡片淡化，聚焦目前這疊（堆疊本身不淡化）
+    // 開啟堆疊時：不在展開堆疊子樹內的卡片／其他未開啟的堆疊都淡化，聚焦目前這疊
     if (!selectMode && expandedStacks.size) {
       $$("#grid .card").forEach(c => {
-        if (c.classList.contains("pile")) { c.classList.remove("dimmed"); return; }
-        const rec = data.find(x => x.id === c.dataset.id);
-        const inFocus = rec && stackPath(rec).some(s => expandedStacks.has(s));
+        let inFocus;
+        if (c.classList.contains("pile")) {
+          // 未展開的整疊：只有其祖先堆疊已展開（＝顯示在某個開啟的堆疊內）才算聚焦，其餘淡化
+          const anc = (c.dataset.stack || "").split("/").slice(0, -1);
+          inFocus = anc.some(s => expandedStacks.has(s));
+        } else {
+          const rec = data.find(x => x.id === c.dataset.id);
+          inFocus = rec && stackPath(rec).some(s => expandedStacks.has(s));
+        }
         c.classList.toggle("dimmed", !inFocus);
       });
     }
@@ -1392,14 +1398,14 @@
     if (hasKids && open) [...node.children.values()].sort((a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant")).forEach(c => html += railNodeHTML(c, prefix, depth + 1));
     return html;
   }
-  // 從左側樹點開一個堆疊：展開它與所有祖先、清掉篩選，並把畫面捲到該節點
+  // 從左側樹點開一個堆疊：右側只篩選出「該系列」、展開它與所有祖先，並把畫面捲到該節點
   function openStackFromRail(prefix) {
     if (!prefix) return;
     filter = "all"; $("#q").value = "";
     $$(".chip", $("#chips")).forEach(c => c.setAttribute("aria-pressed", c.dataset.f === "all"));
-    $("#groupSel").value = "";
-    if (viewMode === "sections") { viewMode = "flat"; try { localStorage.setItem("promptvault.view", "flat"); } catch (e) {} }
     const segs = prefix.split("/");
+    $("#groupSel").value = stackName(segs[0]);   // 右側只顯示此系列（根堆疊名稱＝成員 group）
+    if (viewMode === "sections") { viewMode = "flat"; try { localStorage.setItem("promptvault.view", "flat"); } catch (e) {} }
     segs.forEach(s => { expandedStacks.add(s); railOpen.add(s); });
     saveRailOpen();
     pendingScrollSeg = segs[segs.length - 1];
