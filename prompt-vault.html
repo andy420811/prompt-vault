@@ -64,6 +64,15 @@
   .pr-item .pr-lbl { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .pr-item .pr-n { margin-left:auto; font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; }
   .pr-item.active .pr-n { color:var(--accent); }
+  /* 左側堆疊樹：可展開／收合的多層節點 */
+  .pr-item.pr-stack { display:flex; align-items:center; gap:6px; }
+  .pr-item.pr-stack.active { background:var(--accent-tint); color:var(--accent); font-weight:600; border-left-color:var(--accent); }
+  .pr-item.pr-stack.active .pr-n { color:var(--accent); }
+  .pr-chev { flex:0 0 auto; width:13px; text-align:center; color:var(--ink-3); font-size:10px;
+    transition:transform .12s; transform:rotate(0deg); }
+  .pr-chev.open { transform:rotate(90deg); }
+  .pr-chev.empty { visibility:hidden; }
+  .pr-item.pr-stack .pr-lbl::before { content:"📚 "; }
   @media (min-width:1024px) {
     .top-inner { max-width:none; }
     .wrap { max-width:none; padding-left:32px; padding-right:32px; }
@@ -180,6 +189,8 @@
     background:var(--surface); color:var(--ink-2); border-radius:7px; padding:4px 10px; }
   .stack-head .sh-btn:first-of-type { margin-left:auto; }
   .stack-head .sh-btn.danger { color:var(--danger); border-color:var(--danger); }
+  .stack-head.nested { border-style:solid; }
+  .stack-head.nested .sh-ico::after { content:" ↳"; color:var(--accent); }
   /* 勾選模式：卡片勾選框 */
   .grid.selecting .card { cursor:pointer; }
   .grid.selecting .card::after { content:""; position:absolute; top:9px; left:9px; width:22px; height:22px; z-index:6;
@@ -1008,19 +1019,12 @@
   // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
 
   let data = load();
-  // 啟動時：把所有現有堆疊都套上系列主題（舊版沒命名的堆疊 → 自動命名，才會出現在左側專案列）
-  function themeAllStacks() {
-    const stacks = [...new Set(data.map(p => p.stack).filter(Boolean))];
-    let changed = false;
-    stacks.forEach(sid => {
-      const members = data.filter(p => p.stack === sid);
-      const before = members.map(m => m.group).join("");
-      applyStackTheme(sid);
-      if (members.map(m => m.group).join("") !== before) changed = true;
-    });
-    if (changed) { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
-  }
-  themeAllStacks();
+  let stackNames = loadStackNames();          // { segId: 名稱 } 堆疊層級名稱登錄表
+  const railOpen = new Set(loadRailOpen());   // 左側堆疊樹目前展開的節點 seg
+  let pendingScrollSeg = null;                // render 後要捲動到的堆疊節點 seg
+  // 補齊所有堆疊節點名稱，並把「根堆疊名稱」同步為成員系列(group)，相容舊版單層堆疊
+  ensureNames();
+  if (syncGroups()) { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
   let filter = "all";
   let viewMode = (localStorage.getItem("promptvault.view") === "sections") ? "sections" : "flat";
   let cardMode = (localStorage.getItem("promptvault.cardmode") === "list") ? "list" : "card";
@@ -1094,6 +1098,101 @@
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
   function esc(s) { return (s||"").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
 
+  // ---------- 堆疊（可多層巢狀）----------
+  // 資料模型：p.stack 是一條「/」分隔的路徑（各段為堆疊 seg id，最內層在最後）；空字串＝未堆疊。
+  //           每個 seg 的顯示名稱存在 stackNames 登錄表。根堆疊名稱會同步到成員的 group（系列）。
+  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen";
+  function loadStackNames() { try { return JSON.parse(localStorage.getItem(SN_KEY)) || {}; } catch (e) { return {}; } }
+  function saveStackNames() { try { localStorage.setItem(SN_KEY, JSON.stringify(stackNames)); } catch (e) {} }
+  function loadRailOpen() { try { return JSON.parse(localStorage.getItem(RO_KEY)) || []; } catch (e) { return []; } }
+  function saveRailOpen() { try { localStorage.setItem(RO_KEY, JSON.stringify([...railOpen])); } catch (e) {} }
+  function stackPath(p) { return p && p.stack ? p.stack.split("/") : []; }
+  function rootSeg(p) { const a = stackPath(p); return a[0] || ""; }
+  function itemsUnder(prefix, list) { list = list || data; return list.filter(p => p.stack === prefix || p.stack.startsWith(prefix + "/")); }
+  function stackName(seg, members) { return stackNames[seg] || (members ? suggestStackName(members) : "新系列"); }
+  // 幫沒有名稱的堆疊自動想一個合適的系列名（優先：既有 group → 最常見標籤 → 第一個標題）
+  function suggestStackName(members) {
+    const g = members.map(m => m.group).find(Boolean);
+    if (g) return g;
+    const tc = {};
+    members.forEach(m => (m.tags || []).forEach(t => { tc[t] = (tc[t] || 0) + 1; }));
+    const top = Object.entries(tc).sort((a, b) => b[1] - a[1])[0];
+    if (top) return top[0];
+    const t = members.map(m => (m.title || "").trim()).find(Boolean);
+    if (t) return t.length > 12 ? t.slice(0, 12) : t;
+    return "新系列";
+  }
+  // 為所有出現過的 seg 補上名稱，並清掉不再使用的孤兒名稱
+  function ensureNames() {
+    let changed = false;
+    const segs = new Set();
+    data.forEach(p => stackPath(p).forEach(s => segs.add(s)));
+    segs.forEach(seg => {
+      if (!stackNames[seg]) { stackNames[seg] = suggestStackName(data.filter(p => stackPath(p).includes(seg))); changed = true; }
+    });
+    Object.keys(stackNames).forEach(seg => { if (!segs.has(seg)) { delete stackNames[seg]; changed = true; } });
+    if (changed) saveStackNames();
+    return changed;
+  }
+  // 把每個堆疊成員的 group 同步為其「根堆疊」名稱（未堆疊者不動）。回傳是否有變動
+  function syncGroups() {
+    let changed = false;
+    data.forEach(p => {
+      const r = rootSeg(p);
+      if (r) { const g = stackName(r); if (p.group !== g) { p.group = g; p.edited = Date.now(); changed = true; } }
+    });
+    return changed;
+  }
+  // 任何堆疊異動後統一收尾：補名稱、同步系列、存檔、重繪
+  function commitStacks(msg) { ensureNames(); syncGroups(); save(); render(); if (msg) toast(msg); }
+  // 把某個堆疊節點（含其整棵子樹）巢狀搬進另一個堆疊之下
+  function nestStack(srcPrefix, destParentPrefix) {
+    if (!srcPrefix) return;
+    if (destParentPrefix === srcPrefix || (destParentPrefix + "/").startsWith(srcPrefix + "/")) return;   // 不能丟進自己或子孫
+    const srcSeg = srcPrefix.split("/").pop();
+    const srcParent = srcPrefix.split("/").slice(0, -1).join("/");
+    const newPrefix = (destParentPrefix ? destParentPrefix + "/" : "") + srcSeg;
+    if (newPrefix === srcPrefix) return;
+    itemsUnder(srcPrefix, data).forEach(p => { p.stack = newPrefix + p.stack.slice(srcPrefix.length); p.edited = Date.now(); });
+    destParentPrefix.split("/").forEach(s => expandedStacks.add(s));
+    if (srcParent) dissolveIfLonely(srcParent);
+    pendingScrollSeg = srcSeg;
+    commitStacks("已巢狀堆疊");
+  }
+  // 移除某個堆疊層級：把該 seg 從所有子孫路徑中抽掉，子堆疊與直屬成員上移一層
+  function removeStackLevel(prefix) {
+    if (!prefix) return;
+    const segs = prefix.split("/"), seg = segs[segs.length - 1], idx = segs.length - 1;
+    const parent = segs.slice(0, -1).join("/");
+    itemsUnder(prefix, data).forEach(p => { const a = stackPath(p); a.splice(idx, 1); p.stack = a.join("/"); p.edited = Date.now(); });
+    delete stackNames[seg]; expandedStacks.delete(seg);
+    if (parent) dissolveIfLonely(parent);
+  }
+  // 把一個作品移出堆疊（完全脫離），並檢查原堆疊是否只剩一項
+  function moveItemOut(dp) {
+    if (!dp || !dp.stack) return;
+    const old = dp.stack;
+    dp.stack = ""; dp.group = ""; dp.edited = Date.now();
+    dissolveIfLonely(old);
+    commitStacks("已移出堆疊");
+  }
+  // 堆疊節點的子樹只剩一項 → 自動解除該層；若是根堆疊則詢問是否一併移除系列。會往上遞迴檢查
+  function dissolveIfLonely(prefix) {
+    if (!prefix) return;
+    const members = itemsUnder(prefix, data);
+    if (members.length === 1) {
+      const lone = members[0], segs = prefix.split("/"), seg = segs[segs.length - 1];
+      const isRoot = segs.length === 1, parent = segs.slice(0, -1).join("/");
+      const g = stackNames[seg] || lone.group;
+      lone.stack = parent; lone.edited = Date.now();
+      delete stackNames[seg]; expandedStacks.delete(seg);
+      if (isRoot && g && confirm(`「${g}」堆疊只剩一項，已自動解除堆疊。\n要一併移除「${g}」這個系列分類嗎？（按取消則保留系列）`)) {
+        lone.group = "";
+      }
+      if (parent) dissolveIfLonely(parent);
+    }
+  }
+
   // ---------- render ----------
   function render() {
     const q = $("#q").value.trim().toLowerCase();
@@ -1110,7 +1209,7 @@
     const gVal = [...gSel.options].some(o => o.value === gCur) ? gCur : "";
     gSel.value = gVal;
     renderProjRail(groups, gVal);
-    document.documentElement.classList.toggle("has-rail", groups.length > 0);
+    document.documentElement.classList.toggle("has-rail", data.some(p => p.group || p.stack));
 
     // 分區整理檢視：依專案／系列分區顯示，隱藏單選過濾器
     const sectioned = viewMode === "sections";
@@ -1163,80 +1262,61 @@
       grid.innerHTML = units(list);
     }
     if (selectMode) $$("#grid .card").forEach(c => c.classList.toggle("sel", selected.has(c.dataset.id)));
-    // 開啟堆疊時：不在展開堆疊裡的卡片／其他堆疊淡化，聚焦目前這疊
+    // 開啟堆疊時：不在展開堆疊子樹內的卡片淡化，聚焦目前這疊（堆疊本身不淡化）
     if (!selectMode && expandedStacks.size) {
       $$("#grid .card").forEach(c => {
-        const rec = c.classList.contains("pile") ? null : data.find(x => x.id === c.dataset.id);
-        const inFocus = rec && rec.stack && expandedStacks.has(rec.stack);
+        if (c.classList.contains("pile")) { c.classList.remove("dimmed"); return; }
+        const rec = data.find(x => x.id === c.dataset.id);
+        const inFocus = rec && stackPath(rec).some(s => expandedStacks.has(s));
         c.classList.toggle("dimmed", !inFocus);
       });
+    }
+    // 展開／巢狀後把畫面直接捲動到該堆疊節點上
+    if (pendingScrollSeg) {
+      const el = $(`#grid .stack-head[data-seg="${pendingScrollSeg}"]`) || $(`#grid .card[data-seg="${pendingScrollSeg}"]`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      pendingScrollSeg = null;
     }
     updateSelectBar();
   }
 
-  // 把清單依 stack 折疊成「堆疊」或展開；非堆疊者照常。回傳 HTML 字串
+  // 把清單依堆疊路徑折疊成多層樹狀「堆疊」；非堆疊者照常。回傳 HTML 字串
   function renderUnits(list, itemHTML, listMode) {
-    const byStack = new Map();
-    list.forEach(p => { if (p.stack) { if (!byStack.has(p.stack)) byStack.set(p.stack, []); byStack.get(p.stack).push(p); } });
-    const seen = new Set(), parts = [];
+    const parts = [], seenRoot = new Set();
     list.forEach(p => {
       if (!p.stack) { parts.push(itemHTML(p)); return; }
-      if (seen.has(p.stack)) return;
-      seen.add(p.stack);
-      const members = byStack.get(p.stack);
-      if (members.length < 2) { parts.push(itemHTML(members[0])); return; }   // 只剩一張就不堆疊
-      if (expandedStacks.has(p.stack)) {
-        parts.push(stackHeadHTML(p.stack, members));
-        parts.push(...members.map(itemHTML));
-      } else {
-        parts.push(pileHTML(p.stack, members));
-      }
+      const root = rootSeg(p);
+      if (seenRoot.has(root)) return;
+      seenRoot.add(root);
+      parts.push(renderStackNode(root, list, itemHTML, 0));
     });
     return parts.join("");
   }
-  function stackTitle(members) {
-    const g = members.map(m => m.group).find(Boolean);
-    return g || suggestStackName(members);
-  }
-  // 幫沒有名稱的堆疊自動想一個合適的系列名（優先：既有 group → 最常見標籤 → 第一個標題）
-  function suggestStackName(members) {
-    const g = members.map(m => m.group).find(Boolean);
-    if (g) return g;
-    const tc = {};
-    members.forEach(m => (m.tags || []).forEach(t => { tc[t] = (tc[t] || 0) + 1; }));
-    const top = Object.entries(tc).sort((a, b) => b[1] - a[1])[0];
-    if (top) return top[0];
-    const t = members.map(m => (m.title || "").trim()).find(Boolean);
-    if (t) return t.length > 12 ? t.slice(0, 12) : t;
-    return "新系列";
-  }
-  // 讓某堆疊全部成員共用同一個主題(group)；沒名稱就自動命名。回傳主題名
-  function applyStackTheme(stackId) {
-    const members = data.filter(p => p.stack === stackId);
-    if (!members.length) return "";
-    const g = members.map(m => m.group).find(Boolean) || suggestStackName(members);
-    members.forEach(m => { if (m.group !== g) { m.group = g; m.edited = Date.now(); } });
-    return g;
-  }
-  // 堆疊移出後只剩一項 → 自動解除堆疊，並詢問是否一併移除系列
-  function dissolveIfLonely(stackId) {
-    if (!stackId) return;
-    const members = data.filter(p => p.stack === stackId);
-    if (members.length === 1) {
-      const lone = members[0], g = lone.group;
-      lone.stack = ""; lone.edited = Date.now();
-      if (g && confirm(`「${g}」堆疊只剩一項，已自動解除堆疊。\n要一併移除「${g}」這個系列分類嗎？（按取消則保留系列）`)) {
-        lone.group = "";
+  // 遞迴渲染一個堆疊節點：未展開→整疊 pile；展開→標頭＋（子堆疊 pile／直屬成員）
+  function renderStackNode(prefix, list, itemHTML, depth) {
+    const seg = prefix.split("/").pop();
+    const members = itemsUnder(prefix, list);
+    if (members.length < 2) return members.map(itemHTML).join("");   // 子樹只剩一項就不堆疊
+    if (!expandedStacks.has(seg)) return pileHTML(prefix, members);
+    let html = stackHeadHTML(prefix, members, depth);
+    const plen = prefix.split("/").length, seen = new Set();
+    members.forEach(p => {
+      const path = stackPath(p);
+      if (path.length > plen) {
+        const childPrefix = path.slice(0, plen + 1).join("/");
+        if (!seen.has(childPrefix)) { seen.add(childPrefix); html += renderStackNode(childPrefix, list, itemHTML, depth + 1); }
+      } else {
+        html += itemHTML(p);
       }
-    }
+    });
+    return html;
   }
-  // 雙擊改堆疊主題：就地輸入，套用到裡面所有內容
-  function editStackTheme(stackId, titleEl) {
-    const members = data.filter(p => p.stack === stackId);
-    if (!members.length || !titleEl) return;
+  // 雙擊改堆疊名稱：就地輸入，改的是這個 seg 的名稱（根堆疊會連帶更新成員系列）
+  function editStackTheme(seg, titleEl) {
+    if (!seg || !titleEl) return;
     const input = document.createElement("input");
     input.className = "stack-rename";
-    input.value = members[0].group || "";
+    input.value = stackNames[seg] || "";
     input.placeholder = "輸入系列主題名稱";
     titleEl.replaceWith(input);
     input.focus(); input.select();
@@ -1244,9 +1324,9 @@
     const commit = () => {
       if (done) return; done = true;
       const g = input.value.trim();
-      members.forEach(m => { m.group = g; m.edited = Date.now(); });
-      save(); render();
-      toast(g ? `系列已命名為「${g}」` : "已清除系列名稱");
+      if (g) stackNames[seg] = g; else delete stackNames[seg];
+      saveStackNames(); ensureNames(); syncGroups(); save(); render();
+      toast(g ? `系列已命名為「${g}」` : "已改回自動命名");
     };
     input.addEventListener("blur", commit);
     input.addEventListener("keydown", ev => {
@@ -1255,35 +1335,76 @@
     });
     input.addEventListener("click", ev => ev.stopPropagation());
   }
-  function stackHeadHTML(stack, members) {
-    return `<div class="stack-head" data-stack="${esc(stack)}">
-      <span class="sh-ico">📚</span><span class="sh-name">${esc(stackTitle(members))}</span><span class="sh-n">${members.length} 件</span>
+  function stackHeadHTML(prefix, members, depth) {
+    const seg = prefix.split("/").pop();
+    const style = depth ? ` style="margin-left:${depth * 18}px"` : "";
+    return `<div class="stack-head${depth ? " nested" : ""}" data-stack="${esc(prefix)}" data-seg="${esc(seg)}"${style}>
+      <span class="sh-ico">📚</span><span class="sh-name">${esc(stackName(seg, members))}</span><span class="sh-n">${members.length} 件</span>
       <button type="button" class="sh-btn" data-act="stackclose">收合</button>
       <button type="button" class="sh-btn danger" data-act="unstack">取消堆疊</button>
     </div>`;
   }
-  function pileHTML(stack, members) {
+  function pileHTML(prefix, members) {
+    const seg = prefix.split("/").pop(), plen = prefix.split("/").length;
     const cover = members[0];
     const cImg = members.find(m => m.imgs.length);
-    return `<article class="card pile t-${cover.type}" data-stack="${esc(stack)}" data-act="stackopen" title="展開此系列堆疊">
+    const hasSub = members.some(m => stackPath(m).length > plen);
+    return `<article class="card pile t-${cover.type}" data-stack="${esc(prefix)}" data-seg="${esc(seg)}" data-act="stackopen" draggable="true" title="展開此系列堆疊">
       <div class="pile-layer l2"></div><div class="pile-layer l1"></div>
       ${cImg ? `<div class="result"><img src="${cImg.imgs[0]}" alt="" loading="lazy"></div>` : ""}
       <div class="card-body">
-        <div class="card-head"><span class="cat">📚 系列</span><span class="pile-count">${members.length} 件</span></div>
-        <h3>${esc(stackTitle(members))}</h3>
+        <div class="card-head"><span class="cat">📚 ${hasSub ? "多層系列" : "系列"}</span><span class="pile-count">${members.length} 件</span></div>
+        <h3>${esc(stackName(seg, members))}</h3>
         <div class="pile-preview">${members.slice(0, 4).map(m => esc(m.title || "未命名")).join("、")}${members.length > 4 ? " …" : ""}</div>
       </div>
     </article>`;
   }
 
-  // 電腦版左側浮動專案列：全部作品 + 各專案／系列，點了篩選、highlight 目前選中
+  // 電腦版左側浮動專案列：全部作品 + 堆疊樹（可多層展開／收合）+ 未堆疊的散裝系列
   function renderProjRail(groups, gVal) {
     const list = $("#prList"); if (!list) return;
-    const rows = [{ v: "", label: "全部作品", n: data.length }]
-      .concat(groups.map(g => ({ v: g, label: g, n: data.filter(p => p.group === g).length })));
-    list.innerHTML = rows.map(it =>
-      `<button class="pr-item${it.v === gVal ? " active" : ""}" data-g="${esc(it.v)}"><span class="pr-lbl">${esc(it.label)}</span><span class="pr-n">${it.n}</span></button>`
-    ).join("");
+    // 由所有作品的堆疊路徑建出樹（node.count = 子樹作品數）
+    const root = { children: new Map() };
+    data.forEach(p => {
+      let cur = root;
+      stackPath(p).forEach(seg => {
+        if (!cur.children.has(seg)) cur.children.set(seg, { seg, count: 0, children: new Map() });
+        const n = cur.children.get(seg); n.count++; cur = n;
+      });
+    });
+    const byName = (a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant");
+    let html = `<button class="pr-item${gVal === "" ? " active" : ""}" data-all="1" data-g=""><span class="pr-lbl">全部作品</span><span class="pr-n">${data.length}</span></button>`;
+    [...root.children.values()].sort(byName).forEach(n => html += railNodeHTML(n, "", 0));
+    // 未堆疊但有系列名稱的散裝作品，維持原本的篩選項
+    const stackedGroups = new Set([...root.children.values()].map(n => stackName(n.seg)));
+    const loose = [...new Set(data.filter(p => !p.stack && p.group).map(p => p.group))].filter(g => !stackedGroups.has(g)).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+    loose.forEach(g => {
+      const n = data.filter(p => !p.stack && p.group === g).length;
+      html += `<button class="pr-item${gVal === g ? " active" : ""}" data-g="${esc(g)}"><span class="pr-lbl">${esc(g)}</span><span class="pr-n">${n}</span></button>`;
+    });
+    list.innerHTML = html;
+  }
+  function railNodeHTML(node, parentPrefix, depth) {
+    const prefix = (parentPrefix ? parentPrefix + "/" : "") + node.seg;
+    const hasKids = node.children.size > 0, open = railOpen.has(node.seg);
+    const chev = hasKids ? `<span class="pr-chev${open ? " open" : ""}" data-chev="${esc(node.seg)}">▸</span>` : `<span class="pr-chev empty">▸</span>`;
+    const active = expandedStacks.has(node.seg) ? " active" : "";
+    let html = `<div class="pr-item pr-stack${active}" data-prefix="${esc(prefix)}" data-seg="${esc(node.seg)}" style="padding-left:${10 + depth * 14}px">${chev}<span class="pr-lbl">${esc(stackName(node.seg))}</span><span class="pr-n">${node.count}</span></div>`;
+    if (hasKids && open) [...node.children.values()].sort((a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant")).forEach(c => html += railNodeHTML(c, prefix, depth + 1));
+    return html;
+  }
+  // 從左側樹點開一個堆疊：展開它與所有祖先、清掉篩選，並把畫面捲到該節點
+  function openStackFromRail(prefix) {
+    if (!prefix) return;
+    filter = "all"; $("#q").value = "";
+    $$(".chip", $("#chips")).forEach(c => c.setAttribute("aria-pressed", c.dataset.f === "all"));
+    $("#groupSel").value = "";
+    if (viewMode === "sections") { viewMode = "flat"; try { localStorage.setItem("promptvault.view", "flat"); } catch (e) {} }
+    const segs = prefix.split("/");
+    segs.forEach(s => { expandedStacks.add(s); railOpen.add(s); });
+    saveRailOpen();
+    pendingScrollSeg = segs[segs.length - 1];
+    render();
   }
 
   const UNTITLED_GRP = "（未分類）";
@@ -1411,9 +1532,9 @@
   // 雙擊堆疊（pile 或展開的標頭）→ 就地編輯系列主題、套用到所有成員
   $("#grid").addEventListener("dblclick", e => {
     const pile = e.target.closest(".card.pile");
-    if (pile) { clearTimeout(stackClickT); const h = pile.querySelector("h3"); if (h) { e.preventDefault(); editStackTheme(pile.dataset.stack, h); } return; }
+    if (pile) { clearTimeout(stackClickT); const h = pile.querySelector("h3"); if (h) { e.preventDefault(); editStackTheme(pile.dataset.seg, h); } return; }
     const head = e.target.closest(".stack-head");
-    if (head) { clearTimeout(stackClickT); const n = head.querySelector(".sh-name"); if (n) { e.preventDefault(); editStackTheme(head.dataset.stack, n); } return; }
+    if (head) { clearTimeout(stackClickT); const n = head.querySelector(".sh-name"); if (n) { e.preventDefault(); editStackTheme(head.dataset.seg, n); } return; }
   });
   $("#grid").addEventListener("click", e => {
     if (Date.now() < suppressClickUntil) { e.stopPropagation(); return; }   // 剛結束觸控拖曳，忽略這次點擊
@@ -1427,11 +1548,11 @@
     // 堆疊標頭：收合 / 取消堆疊（不在 .card 內，需先處理）
     const sh = e.target.closest(".stack-head");
     if (sh) {
-      const stk = sh.dataset.stack, a = e.target.closest("[data-act]")?.dataset.act;
+      const prefix = sh.dataset.stack, seg = sh.dataset.seg, a = e.target.closest("[data-act]")?.dataset.act;
       clearTimeout(stackClickT);
-      if (a === "unstack") { data.forEach(x => { if (x.stack === stk) { x.stack = ""; x.group = ""; } }); save(); expandedStacks.delete(stk); render(); toast("已取消堆疊"); return; }
-      if (a === "stackclose") { expandedStacks.delete(stk); render(); return; }
-      stackClickT = setTimeout(() => { expandedStacks.delete(stk); render(); }, 250);   // 空白處單擊收合，防抖讓雙擊改名
+      if (a === "unstack") { removeStackLevel(prefix); commitStacks("已取消堆疊"); return; }
+      if (a === "stackclose") { expandedStacks.delete(seg); render(); return; }
+      stackClickT = setTimeout(() => { expandedStacks.delete(seg); render(); }, 250);   // 空白處單擊收合，防抖讓雙擊改名
       return;
     }
     const card = e.target.closest(".card"); if (!card) return;
@@ -1449,8 +1570,8 @@
       card.classList.toggle("sel", selected.has(sid));
       updateSelectBar(); return;
     }
-    // 點整疊 → 展開
-    if (card.classList.contains("pile")) { const stk = card.dataset.stack; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(stk); render(); }, 250); return; }
+    // 點整疊 → 展開，並把畫面捲到該堆疊節點
+    if (card.classList.contains("pile")) { const seg = card.dataset.seg; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(seg); pendingScrollSeg = seg; render(); }, 250); return; }
     const id = card.dataset.id;
     const actEl = e.target.closest("[data-act]");
     const act = actEl?.dataset.act;
@@ -1529,8 +1650,17 @@
   $("#sort").addEventListener("change", render);
   $("#groupSel").addEventListener("change", render);
   $("#prList").addEventListener("click", e => {
+    const chev = e.target.closest(".pr-chev");
+    if (chev && chev.dataset.chev) {   // 點三角形＝展開／收合左側樹的子節點
+      const seg = chev.dataset.chev;
+      if (railOpen.has(seg)) railOpen.delete(seg); else railOpen.add(seg);
+      saveRailOpen(); render(); return;
+    }
+    const stackEl = e.target.closest(".pr-stack");
+    if (stackEl) { openStackFromRail(stackEl.dataset.prefix); return; }   // 點堆疊節點＝開啟並捲到該疊
     const b = e.target.closest(".pr-item"); if (!b) return;
-    $("#groupSel").value = b.dataset.g; render();
+    if (b.dataset.all !== undefined) { expandedStacks.clear(); }   // 「全部作品」順便收起所有展開的堆疊
+    $("#groupSel").value = b.dataset.g || ""; render();
   });
   const setHdrH = () => document.documentElement.style.setProperty("--hdr-h", (($("header.top") || {}).offsetHeight || 66) + "px");
   setHdrH(); window.addEventListener("resize", setHdrH);
@@ -1566,84 +1696,101 @@
     if (selected.size < 2) return;
     const sid = uid();
     data.forEach(x => { if (selected.has(x.id)) { x.stack = sid; x.edited = Date.now(); } });
-    const g = applyStackTheme(sid);   // 自動套用/命名系列主題
-    const n = selected.size;
-    save(); exitSelect(); toast(`已堆疊 ${n} 件為「${g}」系列`);
+    ensureNames(); syncGroups(); save();
+    const g = stackNames[sid], n = selected.size;
+    exitSelect(); toast(`已堆疊 ${n} 件為「${g}」系列`);
   });
   $("#sbUnstack").addEventListener("click", () => {
-    const ids = [...selected]; let n = 0;
-    const stacks = new Set();
-    data.forEach(x => { if (selected.has(x.id) && x.stack) { stacks.add(x.stack); x.stack = ""; x.group = ""; x.edited = Date.now(); n++; } });
-    stacks.forEach(s => expandedStacks.delete(s));
-    if (n) { save(); toast(`已取消 ${n} 件的堆疊`); }
+    let n = 0; const olds = new Set();
+    data.forEach(x => { if (selected.has(x.id) && x.stack) { olds.add(x.stack); x.stack = ""; x.group = ""; x.edited = Date.now(); n++; } });
+    olds.forEach(o => dissolveIfLonely(o));
+    if (n) { ensureNames(); syncGroups(); save(); toast(`已取消 ${n} 件的堆疊`); }
     exitSelect();
   });
   $("#sbDone").addEventListener("click", exitSelect);
-  // ---------- 拖放：加入／建立／移出堆疊（桌機 HTML5 DnD + 手機長按觸控）----------
-  let dragCardId = null;
+  // ---------- 拖放：加入／建立／巢狀／移出堆疊（桌機 HTML5 DnD + 手機長按觸控）----------
+  let dragCardId = null;      // 正在拖的作品 id
+  let dragStackPrefix = null; // 正在拖的整個堆疊路徑
   let touchDrag = null;
   let suppressClickUntil = 0;
-  // 共用落點判定：把 dragId 這張卡放到 targetEl 上 → 加入/建立/移出堆疊
-  function commitDrop(dragId, targetEl) {
-    if (!dragId || !targetEl || !targetEl.closest) return;
-    const dp = data.find(x => x.id === dragId); if (!dp) return;
-    if (targetEl.closest("#removeZone")) { if (dp.stack) { dp.stack = ""; dp.group = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); } return; }
+  // 共用落點判定：把目前拖曳中的東西放到 targetEl 上
+  function commitDrop(targetEl) {
+    if (!targetEl || !targetEl.closest) return;
+    const onRemove = !!targetEl.closest("#removeZone");
     const pile = targetEl.closest(".card.pile"), head = targetEl.closest(".stack-head"), tcard = targetEl.closest(".card:not(.pile)");
+    if (dragStackPrefix) {   // 拖曳整個堆疊 → 解散 or 巢狀進另一疊
+      if (onRemove) { removeStackLevel(dragStackPrefix); commitStacks("已解散堆疊"); return; }
+      let dest = null;
+      if (pile) dest = pile.dataset.stack;
+      else if (head) dest = head.dataset.stack;
+      else if (tcard) { const tp = data.find(x => x.id === tcard.dataset.id); if (tp) { if (!tp.stack) { tp.stack = uid(); tp.edited = Date.now(); } dest = tp.stack; } }
+      if (dest != null) nestStack(dragStackPrefix, dest);
+      return;
+    }
+    const dp = data.find(x => x.id === dragCardId); if (!dp) return;
+    if (onRemove) { moveItemOut(dp); return; }
     let sid = null;
     if (pile) sid = pile.dataset.stack;
     else if (head) sid = head.dataset.stack;
-    else if (tcard && tcard.dataset.id !== dragId) {
+    else if (tcard && tcard.dataset.id !== dragCardId) {
       const tp = data.find(x => x.id === tcard.dataset.id);
       if (tp) { sid = tp.stack || uid(); if (!tp.stack) { tp.stack = sid; tp.edited = Date.now(); } }
     }
-    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); applyStackTheme(sid); save(); render(); toast("已加入堆疊"); }
+    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); commitStacks("已加入堆疊"); }
   }
   function endDrag() {
-    dragCardId = null;
+    dragCardId = null; dragStackPrefix = null;
     $$("#grid .dragging, #grid .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
     const rz = $("#removeZone"); rz.hidden = true; rz.classList.remove("over");
   }
   $("#grid").addEventListener("dragstart", e => {
     if (touchDrag && touchDrag.active) { e.preventDefault(); return; }   // 觸控拖曳進行中，讓觸控處理
     const card = e.target.closest(".card");
-    if (!card || card.classList.contains("pile") || selectMode) { e.preventDefault(); return; }
-    dragCardId = card.dataset.id;
+    if (!card || selectMode) { e.preventDefault(); return; }
+    dragCardId = null; dragStackPrefix = null;
+    const rz = $("#removeZone");
+    if (card.classList.contains("pile")) {   // 拖曳整疊
+      dragStackPrefix = card.dataset.stack;
+      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragStackPrefix); } catch (_) {}
+      rz.hidden = false; rz.textContent = "🗑 拖到這裡解散此堆疊";
+    } else {
+      dragCardId = card.dataset.id;
+      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragCardId); } catch (_) {}
+      const p = data.find(x => x.id === dragCardId);
+      rz.hidden = !(p && p.stack); rz.textContent = "🗑 拖到這裡移出堆疊";   // 有在堆疊裡才顯示「移出」區
+    }
     card.classList.add("dragging");
-    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragCardId); } catch (_) {}
-    const p = data.find(x => x.id === dragCardId);
-    $("#removeZone").hidden = !(p && p.stack);   // 有在堆疊裡才顯示「移出」區
   });
   $("#grid").addEventListener("dragover", e => {
-    if (!dragCardId) return;
+    if (!dragCardId && !dragStackPrefix) return;
     const t = e.target.closest(".card.pile, .stack-head, .card");
     $$("#grid .drop-over").forEach(el => el.classList.remove("drop-over"));
-    if (t && !(t.classList.contains("card") && t.dataset.id === dragCardId)) {
-      e.preventDefault(); e.dataTransfer.dropEffect = "move"; t.classList.add("drop-over");
-    }
+    if (!t) return;
+    if (dragCardId && t.classList.contains("card") && !t.classList.contains("pile") && t.dataset.id === dragCardId) return;
+    if (dragStackPrefix) { const tp = t.dataset.stack; if (tp && (tp + "/").startsWith(dragStackPrefix + "/")) return; }   // 不能丟進自己或子孫
+    e.preventDefault(); e.dataTransfer.dropEffect = "move"; t.classList.add("drop-over");
   });
   $("#grid").addEventListener("drop", e => {
-    if (!dragCardId) return;
-    e.preventDefault(); commitDrop(dragCardId, e.target); endDrag();
+    if (!dragCardId && !dragStackPrefix) return;
+    e.preventDefault(); commitDrop(e.target); endDrag();
   });
   $("#grid").addEventListener("dragend", endDrag);
   (() => {
     const rz = $("#removeZone");
-    rz.addEventListener("dragover", e => { if (dragCardId) { e.preventDefault(); rz.classList.add("over"); } });
+    rz.addEventListener("dragover", e => { if (dragCardId || dragStackPrefix) { e.preventDefault(); rz.classList.add("over"); } });
     rz.addEventListener("dragleave", () => rz.classList.remove("over"));
     rz.addEventListener("drop", e => {
-      if (!dragCardId) return; e.preventDefault();
-      const dp = data.find(x => x.id === dragCardId);
-      if (dp && dp.stack) { dp.stack = ""; dp.group = ""; dp.edited = Date.now(); save(); render(); toast("已移出堆疊"); }
-      endDrag();
+      if (!dragCardId && !dragStackPrefix) return; e.preventDefault();
+      commitDrop(rz); endDrag();
     });
   })();
   // 手機：長按 ~0.4 秒啟動拖曳（觸控無原生 DnD），跟桌機共用 commitDrop
   $("#grid").addEventListener("touchstart", e => {
-    if (selectMode || dragCardId || e.touches.length !== 1) return;
-    const card = e.target.closest && e.target.closest(".card:not(.pile)"); if (!card) return;
+    if (selectMode || dragCardId || dragStackPrefix || e.touches.length !== 1) return;
+    const card = e.target.closest && e.target.closest(".card"); if (!card) return;
     const t = e.touches[0];
     const timer = setTimeout(() => activateTouchDrag(card), 420);
-    touchDrag = { id: card.dataset.id, card, x: t.clientX, y: t.clientY, timer, active: false, ghost: null };
+    touchDrag = { id: card.dataset.id, prefix: card.classList.contains("pile") ? card.dataset.stack : null, seg: card.dataset.seg, card, x: t.clientX, y: t.clientY, timer, active: false, ghost: null };
   }, { passive: true });
   $("#grid").addEventListener("touchmove", e => {
     if (!touchDrag) return;
@@ -1663,7 +1810,9 @@
       const t = e.changedTouches && e.changedTouches[0];
       if (touchDrag.ghost) touchDrag.ghost.style.display = "none";
       const el = t ? document.elementFromPoint(t.clientX, t.clientY) : null;
-      commitDrop(touchDrag.id, el || document.body);
+      if (touchDrag.prefix) { dragStackPrefix = touchDrag.prefix; dragCardId = null; } else { dragCardId = touchDrag.id; dragStackPrefix = null; }
+      commitDrop(el || document.body);
+      dragCardId = null; dragStackPrefix = null;
       cleanupTouch();
       suppressClickUntil = Date.now() + 500;   // 避免拖曳後又觸發一次點擊
     }
@@ -1672,12 +1821,14 @@
   $("#grid").addEventListener("touchend", endTouch);
   $("#grid").addEventListener("touchcancel", () => { if (touchDrag) { clearTimeout(touchDrag.timer); if (touchDrag.active) cleanupTouch(); touchDrag = null; } });
   function activateTouchDrag(card) {
-    if (!touchDrag || dragCardId) return;
+    if (!touchDrag || dragCardId || dragStackPrefix) return;
     touchDrag.active = true;
     card.classList.add("dragging");
-    const p = data.find(r => r.id === touchDrag.id);
-    $("#removeZone").hidden = !(p && p.stack);
-    const g = document.createElement("div"); g.className = "drag-ghost"; g.textContent = "📇 " + ((p && p.title) || "未命名");
+    const rz = $("#removeZone");
+    let label;
+    if (touchDrag.prefix) { rz.hidden = false; rz.textContent = "🗑 拖到這裡解散此堆疊"; label = "📚 " + stackName(touchDrag.seg); }
+    else { const p = data.find(r => r.id === touchDrag.id); rz.hidden = !(p && p.stack); rz.textContent = "🗑 拖到這裡移出堆疊"; label = "📇 " + ((p && p.title) || "未命名"); }
+    const g = document.createElement("div"); g.className = "drag-ghost"; g.textContent = label;
     document.body.appendChild(g); touchDrag.ghost = g;
     moveGhost(touchDrag.x, touchDrag.y);
     if (navigator.vibrate) { try { navigator.vibrate(15); } catch (_) {} }
@@ -1689,7 +1840,9 @@
     const el = document.elementFromPoint(x, y); if (!el || !el.closest) return;
     if (!rz.hidden && el.closest("#removeZone")) { rz.classList.add("over"); return; }
     const tt = el.closest(".card.pile, .stack-head, .card:not(.pile)");
-    if (tt && !(tt.dataset && tt.dataset.id === touchDrag.id)) tt.classList.add("drop-over");
+    if (!tt) return;
+    if (touchDrag.prefix) { const tp = tt.dataset.stack; if (tp && (tp + "/").startsWith(touchDrag.prefix + "/")) return; tt.classList.add("drop-over"); }
+    else if (!(tt.dataset && tt.dataset.id === touchDrag.id)) tt.classList.add("drop-over");
   }
   function cleanupTouch() {
     if (touchDrag && touchDrag.ghost) touchDrag.ghost.remove();
