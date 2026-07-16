@@ -1218,6 +1218,18 @@
     members.forEach(m => { if (m.group !== g) { m.group = g; m.edited = Date.now(); } });
     return g;
   }
+  // 堆疊移出後只剩一項 → 自動解除堆疊，並詢問是否一併移除系列
+  function dissolveIfLonely(stackId) {
+    if (!stackId) return;
+    const members = data.filter(p => p.stack === stackId);
+    if (members.length === 1) {
+      const lone = members[0], g = lone.group;
+      lone.stack = ""; lone.edited = Date.now();
+      if (g && confirm(`「${g}」堆疊只剩一項，已自動解除堆疊。\n要一併移除「${g}」這個系列分類嗎？（按取消則保留系列）`)) {
+        lone.group = "";
+      }
+    }
+  }
   // 雙擊改堆疊主題：就地輸入，套用到裡面所有內容
   function editStackTheme(stackId, titleEl) {
     const members = data.filter(p => p.stack === stackId);
