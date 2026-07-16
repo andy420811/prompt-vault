@@ -71,8 +71,7 @@
   .pr-chev { flex:0 0 auto; width:13px; text-align:center; color:var(--ink-3); font-size:10px;
     transition:transform .12s; transform:rotate(0deg); }
   .pr-chev.open { transform:rotate(90deg); }
-  .pr-chev.empty { visibility:hidden; }
-  .pr-item.pr-stack .pr-lbl::before { content:"📚 "; }
+  .pr-chev.blank { visibility:hidden; }
   @media (min-width:1024px) {
     .top-inner { max-width:none; }
     .wrap { max-width:none; padding-left:32px; padding-right:32px; }
@@ -1019,6 +1018,7 @@
   // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
 
   let data = load();
+  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen";   // 需在下面 load*() 呼叫前先定義（避免 TDZ）
   let stackNames = loadStackNames();          // { segId: 名稱 } 堆疊層級名稱登錄表
   const railOpen = new Set(loadRailOpen());   // 左側堆疊樹目前展開的節點 seg
   let pendingScrollSeg = null;                // render 後要捲動到的堆疊節點 seg
@@ -1101,7 +1101,6 @@
   // ---------- 堆疊（可多層巢狀）----------
   // 資料模型：p.stack 是一條「/」分隔的路徑（各段為堆疊 seg id，最內層在最後）；空字串＝未堆疊。
   //           每個 seg 的顯示名稱存在 stackNames 登錄表。根堆疊名稱會同步到成員的 group（系列）。
-  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen";
   function loadStackNames() { try { return JSON.parse(localStorage.getItem(SN_KEY)) || {}; } catch (e) { return {}; } }
   function saveStackNames() { try { localStorage.setItem(SN_KEY, JSON.stringify(stackNames)); } catch (e) {} }
   function loadRailOpen() { try { return JSON.parse(localStorage.getItem(RO_KEY)) || []; } catch (e) { return []; } }
@@ -1387,7 +1386,7 @@
   function railNodeHTML(node, parentPrefix, depth) {
     const prefix = (parentPrefix ? parentPrefix + "/" : "") + node.seg;
     const hasKids = node.children.size > 0, open = railOpen.has(node.seg);
-    const chev = hasKids ? `<span class="pr-chev${open ? " open" : ""}" data-chev="${esc(node.seg)}">▸</span>` : `<span class="pr-chev empty">▸</span>`;
+    const chev = hasKids ? `<span class="pr-chev${open ? " open" : ""}" data-chev="${esc(node.seg)}">▸</span>` : `<span class="pr-chev blank">▸</span>`;
     const active = expandedStacks.has(node.seg) ? " active" : "";
     let html = `<div class="pr-item pr-stack${active}" data-prefix="${esc(prefix)}" data-seg="${esc(node.seg)}" style="padding-left:${10 + depth * 14}px">${chev}<span class="pr-lbl">${esc(stackName(node.seg))}</span><span class="pr-n">${node.count}</span></div>`;
     if (hasKids && open) [...node.children.values()].sort((a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant")).forEach(c => html += railNodeHTML(c, prefix, depth + 1));
