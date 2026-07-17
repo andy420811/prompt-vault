@@ -412,6 +412,14 @@
   .result .img-default { position:absolute; left:8px; bottom:8px; font-size:11px; font-weight:600; color:#fff; z-index:2;
     background:rgba(10,9,16,.62); border:none; border-radius:6px; padding:4px 9px; cursor:pointer; transition:background .15s; }
   .result .img-default:hover { background:var(--accent); }
+  /* 設為堆疊封面（滑過圖片才浮現；勾選模式下隱藏避免與勾選框重疊） */
+  .result .img-stackcover { position:absolute; left:8px; top:8px; font-size:11px; font-weight:600; color:#fff; z-index:2;
+    background:rgba(10,9,16,.62); border:none; border-radius:6px; padding:4px 9px; cursor:pointer;
+    opacity:0; transition:opacity .15s, background .15s; }
+  .card:hover .result .img-stackcover { opacity:.92; }
+  .result .img-stackcover:hover { opacity:1; background:var(--accent); }
+  .grid.selecting .img-stackcover { display:none; }
+  @media (hover:none) { .result .img-stackcover { opacity:.85; } }
   .grp { font-size:11px; font-weight:600; color:var(--accent); background:var(--accent-tint);
     border-radius:6px; padding:3px 8px; white-space:nowrap; }
   .use-n { font-size:11px; color:var(--ink-3); font-variant-numeric:tabular-nums; margin-left:auto; white-space:nowrap; }
@@ -1092,8 +1100,9 @@
   // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
 
   let data = load();
-  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen";   // 需在下面 load*() 呼叫前先定義（避免 TDZ）
+  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen", SC_KEY = "promptvault.stackcovers";   // 需在下面 load*() 呼叫前先定義（避免 TDZ）
   let stackNames = loadStackNames();          // { segId: 名稱 } 堆疊層級名稱登錄表
+  let stackCovers = loadStackCovers();        // { segId: {id, idx} } 堆疊封面登錄表（指定用哪張卡的第幾張圖當 pile 封面）
   const railOpen = new Set(loadRailOpen());   // 左側堆疊樹目前展開的節點 seg
   let pendingScrollSeg = null;                // render 後要捲動到的堆疊節點 seg
   const needHydrate = HAS_IDB && localStorage.getItem(FMT_KEY) === "idb";   // localStorage 是去圖版，需從 IDB 補圖
@@ -1163,7 +1172,7 @@
     refreshUndoRedo();
   }
   // ---------- 復原 / 重做（上一步 Ctrl+Z、重做 Ctrl+Shift+Z / Ctrl+Y）----------
-  function snapshot() { return JSON.stringify({ d: data, n: stackNames }); }
+  function snapshot() { return JSON.stringify({ d: data, n: stackNames, c: stackCovers }); }
   function resetUndoBaseline() { lastSnapshot = snapshot(); }   // 雲端整包覆蓋後重設基準，避免復原到別台的舊資料
   function refreshUndoRedo() {
     const u = $("#undoBtn"), r = $("#redoBtn");
@@ -1175,11 +1184,12 @@
     const snap = JSON.parse(str);
     data = (snap.d || []).map(normalize);
     stackNames = snap.n || {};
+    stackCovers = snap.c || {};
     lastSnapshot = snapshot();   // 套用後把基準對齊到這個狀態
     try {
       persistData();
       localStorage.setItem("promptvault.updated", String(Date.now()));
-      saveStackNames(); bumpDirty(); scheduleCloudPush();
+      saveStackNames(); saveStackCovers(); bumpDirty(); scheduleCloudPush();
     } catch (e) {}
     render(); refreshUndoRedo();
   }
@@ -1224,6 +1234,8 @@
   // 資料模型：p.stack 是一條「/」分隔的路徑（各段為堆疊 seg id，最內層在最後）；空字串＝未堆疊。
   //           每個 seg 的顯示名稱存在 stackNames 登錄表。根堆疊名稱會同步到成員的 group（系列）。
   function loadStackNames() { try { return JSON.parse(localStorage.getItem(SN_KEY)) || {}; } catch (e) { return {}; } }
+  function loadStackCovers() { try { return JSON.parse(localStorage.getItem(SC_KEY)) || {}; } catch (e) { return {}; } }
+  function saveStackCovers() { try { localStorage.setItem(SC_KEY, JSON.stringify(stackCovers)); } catch (e) {} }
   function saveStackNames() { try { localStorage.setItem(SN_KEY, JSON.stringify(stackNames)); } catch (e) {} }
   function loadRailOpen() { try { return JSON.parse(localStorage.getItem(RO_KEY)) || []; } catch (e) { return []; } }
   function saveRailOpen() { try { localStorage.setItem(RO_KEY, JSON.stringify([...railOpen])); } catch (e) {} }
@@ -1253,6 +1265,16 @@
     });
     Object.keys(stackNames).forEach(seg => { if (!segs.has(seg)) { delete stackNames[seg]; changed = true; } });
     if (changed) saveStackNames();
+    // 封面登錄清理：seg 已不存在、或指定的卡已刪／已無圖 → 移除（pile 會自動回退成第一張有圖的成員）。
+    // ⚠ 補圖完成前不清（idb 格式啟動時 data 是去圖輕量版，imgs 全空會誤刪登錄；hydrateImages 後會再跑一次）
+    if (imagesHydrated) {
+      let cChanged = false;
+      Object.keys(stackCovers).forEach(seg => {
+        const c = stackCovers[seg], rec = c && data.find(p => p.id === c.id);
+        if (!segs.has(seg) || !rec || !rec.imgs.length || !stackPath(rec).includes(seg)) { delete stackCovers[seg]; cChanged = true; }
+      });
+      if (cChanged) saveStackCovers();
+    }
     return changed;
   }
   // 把每個堆疊成員的 group 同步為其「根堆疊」名稱（未堆疊者不動）。回傳是否有變動
@@ -1320,7 +1342,7 @@
     const segs = prefix.split("/"), seg = segs[segs.length - 1], idx = segs.length - 1;
     const parent = segs.slice(0, -1).join("/");
     itemsUnder(prefix, data).forEach(p => { const a = stackPath(p); a.splice(idx, 1); p.stack = a.join("/"); p.edited = Date.now(); });
-    delete stackNames[seg]; expandedStacks.delete(seg);
+    delete stackNames[seg]; delete stackCovers[seg]; expandedStacks.delete(seg);
     if (parent) dissolveIfLonely(parent);
   }
   // 把一個作品移出堆疊（完全脫離），並檢查原堆疊是否只剩一項
@@ -1340,7 +1362,7 @@
       const isRoot = segs.length === 1, parent = segs.slice(0, -1).join("/");
       const g = stackNames[seg] || lone.group;
       lone.stack = parent; lone.edited = Date.now();
-      delete stackNames[seg]; expandedStacks.delete(seg);
+      delete stackNames[seg]; delete stackCovers[seg]; expandedStacks.delete(seg);
       if (isRoot && g && confirm(`「${g}」堆疊只剩一項，已自動解除堆疊。\n要一併移除「${g}」這個系列分類嗎？（按取消則保留系列）`)) {
         lone.group = "";
       }
@@ -1527,14 +1549,24 @@
       <button type="button" class="sh-btn danger" data-act="unstack">取消堆疊</button>
     </div>`;
   }
+  // 取某堆疊節點的封面圖：優先用登錄表指定的（卡＋第幾張圖），失效則回退第一張有圖的成員
+  function stackCoverSrc(seg, members) {
+    const c = stackCovers[seg];
+    if (c) {
+      const rec = members.find(m => m.id === c.id);
+      if (rec && rec.imgs.length) return rec.imgs[Math.min(c.idx || 0, rec.imgs.length - 1)];
+    }
+    const cImg = members.find(m => m.imgs.length);
+    return cImg ? cImg.imgs[0] : null;
+  }
   function pileHTML(prefix, members) {
     const seg = prefix.split("/").pop(), plen = prefix.split("/").length;
     const cover = members[0];
-    const cImg = members.find(m => m.imgs.length);
+    const cSrc = stackCoverSrc(seg, members);
     const hasSub = members.some(m => stackPath(m).length > plen);
     return `<article class="card pile t-${cover.type}" data-stack="${esc(prefix)}" data-seg="${esc(seg)}" data-act="stackopen" draggable="true" title="展開此系列堆疊">
       <div class="pile-layer l2"></div><div class="pile-layer l1"></div>
-      ${cImg ? `<div class="result"><img src="${cImg.imgs[0]}" alt="" loading="lazy"></div>` : ""}
+      ${cSrc ? `<div class="result"><img src="${cSrc}" alt="" loading="lazy"></div>` : ""}
       <div class="card-body">
         <div class="card-head"><span class="cat">📚 ${hasSub ? "多層系列" : "系列"}</span><span class="pile-count">${members.length} 件</span></div>
         <h3>${esc(stackName(seg, members))}</h3>
@@ -1636,7 +1668,8 @@
         <button class="img-nav prev" data-act="imgprev" title="上一張" aria-label="上一張">‹</button>
         <button class="img-nav next" data-act="imgnext" title="下一張" aria-label="下一張">›</button>
         <span class="result-badge img-count">1 / ${p.imgs.length}</span>
-        <button class="img-default" data-act="imgdefault" title="設為預設封面" style="display:none">設為預設</button>` : ""}</div>` : ""}
+        <button class="img-default" data-act="imgdefault" title="設為預設封面" style="display:none">設為預設</button>` : ""}${p.stack ? `
+        <button class="img-stackcover" data-act="stackcover" title="把目前這張圖設為此堆疊的封面">📚 設為封面</button>` : ""}</div>` : ""}
       <div class="card-body">
         <div class="card-head">
           <span class="cat">${ICON[p.type]}${catLabel}</span>
@@ -1764,6 +1797,14 @@
       if (idx > 0) { const [pick] = p.imgs.splice(idx, 1); p.imgs.unshift(pick); p.edited = Date.now(); save(); render(); toast("已設為預設封面"); }
       return;
     }
+    if (act === "stackcover") {   // 把目前顯示的這張圖設為所屬各層堆疊的封面
+      if (!p.stack || !p.imgs.length) return;
+      const rdiv = actEl.closest(".result"); const idx = +(rdiv?.dataset.idx || 0);
+      stackPath(p).forEach(seg => { stackCovers[seg] = { id: p.id, idx }; });
+      saveStackCovers(); save(); render();
+      toast(`已把「${p.title || "未命名"}」設為堆疊封面`);
+      return;
+    }
     if (act === "vartoggle") { const pop = card.querySelector(".var-pop"); if (pop) pop.hidden = !pop.hidden; scheduleMasonry(); return; }   // 變體彈出改變高度→重排
     if (act === "varcopy") {
       const v = p.variants.find(x => x.id === actEl.dataset.vp);
@@ -1774,7 +1815,7 @@
     if (act === "edit") { openEditor(p); return; }
     if (act === "del") {
       const btn = actEl;
-      if (btn.dataset.arm) { data = data.filter(x => x.id !== id); save(); render(); toast("已刪除"); }
+      if (btn.dataset.arm) { data = data.filter(x => x.id !== id); ensureNames(); save(); render(); toast("已刪除"); }   // ensureNames 順便清理失效的堆疊名稱/封面登錄
       else {
         btn.dataset.arm = "1"; btn.classList.add("armed"); btn.innerHTML = ICON.del + "確定？";
         setTimeout(() => {
