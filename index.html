@@ -789,6 +789,7 @@
       <button class="btn ghost" id="mPaste" style="justify-content:flex-start">貼上 JSON 匯入（合併）</button>
       <button class="btn ghost" id="mFile" style="justify-content:flex-start">匯入 JSON 檔（合併）</button>
       <button class="btn ghost" id="mExport" style="justify-content:flex-start">匯出 JSON 備份</button>
+      <button class="btn ghost" id="mTags" style="justify-content:flex-start">🏷 標籤管理</button>
       <div style="border-top:1px solid var(--line-soft);padding-top:14px;display:flex;flex-direction:column;gap:8px">
         <label for="gemKeyInput" style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Gemini API Keys <span style="font-weight:400;color:var(--ink-3)">（AI 智慧分析，選填・可多組）</span></label>
         <textarea id="gemKeyInput" rows="3" placeholder="每行貼一組金鑰，例如：&#10;AIza…&#10;AIza…" autocomplete="off" spellcheck="false"
@@ -1094,7 +1095,8 @@
     starO:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.3 6.8 19l1-5.8-4.2-4.1 5.8-.8z"/></svg>',
     starF:'<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="m12 3 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.3 6.8 19l1-5.8-4.2-4.1 5.8-.8z"/></svg>',
     wand:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5z"/></svg>',
-    fork:'⑂'
+    fork:'⑂',
+    ep:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 13.5v5M9.5 16h5"/></svg>'
   };
 
   // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
@@ -1579,6 +1581,30 @@
     const setb = rdiv.querySelector(".img-default");
     if (setb) setb.style.display = i === pileCoverIndex(seg, covers) ? "none" : "";   // 翻到非目前封面才顯示「設為封面」
   }
+  // ---------- 一鍵新一集 ----------
+  // 把文字中的日期換成今天（保留原格式：2026-07-17 / 2026/7/17 / 2026年7月17日 / 7月17日）
+  function replaceDates(s) {
+    if (!s) return s;
+    const d = new Date(), y = d.getFullYear(), m = d.getMonth() + 1, dd = d.getDate();
+    const p2 = n => String(n).padStart(2, "0");
+    return s
+      .replace(/\d{4}年\s?\d{1,2}月\s?\d{1,2}日/g, `${y}年${m}月${dd}日`)
+      .replace(/(?<!\d)\d{1,2}月\s?\d{1,2}日/g, `${m}月${dd}日`)
+      .replace(/\d{4}([-\/.])\d{1,2}\1\d{1,2}/g, (_, sep) => `${y}${sep}${p2(m)}${sep}${p2(dd)}`);
+  }
+  // 以某卡為底建立「新一集」：同系列/堆疊、日期換今天、清空結果圖與使用統計
+  function newEpisodeFrom(p) {
+    const copy = JSON.parse(JSON.stringify(p));
+    copy.id = uid();
+    copy.title = replaceDates(copy.title || "");
+    copy.prompt = replaceDates(copy.prompt || "");
+    copy.notes = replaceDates(copy.notes || "");
+    copy.variants = (copy.variants || []).map(v => ({ ...v, id: uid(), prompt: replaceDates(v.prompt || "") }));
+    copy.imgs = []; copy.url = "";
+    copy.use = 0; copy.lastUsed = 0; copy.fav = false;
+    copy.created = Date.now(); copy.edited = Date.now();
+    return copy;
+  }
   // 卡片多圖 ‹ › / 滑動翻閱（點擊與觸控滑動共用）
   function navCardImg(card, dir) {
     const p = data.find(x => x.id === card.dataset.id); if (!p || p.imgs.length < 2) return;
@@ -1731,6 +1757,7 @@
         <button class="foot-btn copy" data-act="copy">${ICON.copy}複製</button>
         <button class="foot-btn" data-act="edit">${ICON.edit}編輯</button>
         <button class="foot-btn" data-act="dup">${ICON.dup}副本</button>
+        <button class="foot-btn" data-act="episode" title="以此為底建立新一集（日期自動換成今天）">${ICON.ep}新一集</button>
         <button class="foot-btn del" data-act="del">${ICON.del}刪除</button>
       </div>
     </article>`;
@@ -1762,6 +1789,7 @@
         <button class="foot-btn apply" data-act="apply" title="套用">${ICON.wand}</button>
         <button class="foot-btn copy" data-act="copy" title="複製">${ICON.copy}</button>
         <button class="foot-btn" data-act="edit" title="編輯">${ICON.edit}</button>
+        <button class="foot-btn" data-act="episode" title="新一集">${ICON.ep}</button>
         <button class="foot-btn del" data-act="del" title="刪除">${ICON.del}</button>
       </div>
     </article>`;
@@ -1864,6 +1892,13 @@
           if (btn.isConnected) { delete btn.dataset.arm; btn.classList.remove("armed"); btn.innerHTML = ICON.del + "刪除"; }
         }, 3000);
       }
+      return;
+    }
+    if (act === "episode") {   // 以此卡為底建立新一集：日期換今天、同系列、開編輯器快改事件/標題
+      const copy = newEpisodeFrom(p);
+      data.unshift(copy); save(); render();
+      openEditor(copy);
+      toast("已建立新一集，日期已更新為今天");
       return;
     }
     if (act === "dup") {
