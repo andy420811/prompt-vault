@@ -139,7 +139,7 @@
   /* 瀑布流：卡片依圖片原始比例決定高度、緊密堆疊（JS 依內容算 grid-row span，避免各列留白） */
   .grid.masonry { grid-auto-rows:1px; row-gap:0; column-gap:18px; align-items:start; }
   .grid.masonry > * { grid-row-end:span 220; }   /* JS 未跑前的預設高度，避免重疊 */
-  .grid.masonry .card:not(.pile) .result img { height:auto; max-height:none; object-fit:contain; }
+  .grid.masonry .card .result img { height:auto; max-height:none; object-fit:contain; }   /* 一般卡片與堆疊封面都依原始比例、不裁切 */
   .card.row { flex-direction:row; align-items:stretch; border-left:3px solid transparent; }
   .card.row:hover { transform:none; box-shadow:var(--shadow-lg); }
   .card.row.t-image { border-left-color:var(--img); }
