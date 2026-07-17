@@ -1549,24 +1549,60 @@
       <button type="button" class="sh-btn danger" data-act="unstack">取消堆疊</button>
     </div>`;
   }
-  // 取某堆疊節點的封面圖：優先用登錄表指定的（卡＋第幾張圖），失效則回退第一張有圖的成員
-  function stackCoverSrc(seg, members) {
+  // 堆疊封面輪播清單：每個有圖成員出一張（被指定為封面的成員用其指定的那張，其餘用第一張）
+  function pileCoversFor(seg, members) {
     const c = stackCovers[seg];
-    if (c) {
-      const rec = members.find(m => m.id === c.id);
-      if (rec && rec.imgs.length) return rec.imgs[Math.min(c.idx || 0, rec.imgs.length - 1)];
-    }
-    const cImg = members.find(m => m.imgs.length);
-    return cImg ? cImg.imgs[0] : null;
+    return members.filter(m => m.imgs.length).map(m => {
+      const idx = (c && c.id === m.id) ? Math.min(c.idx || 0, m.imgs.length - 1) : 0;
+      return { id: m.id, idx, src: m.imgs[idx] };
+    });
+  }
+  // 目前應顯示的輪播索引：登錄的封面成員；沒登錄（或已失效）就第一張
+  function pileCoverIndex(seg, covers) {
+    const c = stackCovers[seg];
+    if (c) { const k = covers.findIndex(x => x.id === c.id); if (k >= 0) return k; }
+    return 0;
+  }
+  // 堆疊封面 ‹ › / 滑動翻閱：換成另一位成員的封面圖（純前端換 src，不重繪）
+  function navPile(pileEl, dir) {
+    const prefix = pileEl.dataset.stack, seg = pileEl.dataset.seg;
+    const covers = pileCoversFor(seg, itemsUnder(prefix, data));
+    if (covers.length < 2) return;
+    const rdiv = pileEl.querySelector(".result"); if (!rdiv) return;
+    let i = +(rdiv.dataset.pidx || 0);
+    i = (i + dir + covers.length) % covers.length;
+    rdiv.dataset.pidx = i;
+    const im = rdiv.querySelector("img");
+    im.addEventListener("load", scheduleMasonry, { once: true });   // 圖片比例不同→載入後重排
+    im.src = covers[i].src;
+    const cnt = rdiv.querySelector(".img-count"); if (cnt) cnt.textContent = (i + 1) + " / " + covers.length;
+    const setb = rdiv.querySelector(".img-default");
+    if (setb) setb.style.display = i === pileCoverIndex(seg, covers) ? "none" : "";   // 翻到非目前封面才顯示「設為封面」
+  }
+  // 卡片多圖 ‹ › / 滑動翻閱（點擊與觸控滑動共用）
+  function navCardImg(card, dir) {
+    const p = data.find(x => x.id === card.dataset.id); if (!p || p.imgs.length < 2) return;
+    const rdiv = card.querySelector(".result"); if (!rdiv) return;
+    let idx = +(rdiv.dataset.idx || 0);
+    idx = (idx + dir + p.imgs.length) % p.imgs.length;
+    rdiv.dataset.idx = idx;
+    const im = rdiv.querySelector("img"); im.addEventListener("load", scheduleMasonry, { once: true }); im.src = p.imgs[idx];   // 換圖比例不同→載入後重排
+    const cnt = rdiv.querySelector(".img-count"); if (cnt) cnt.textContent = (idx + 1) + " / " + p.imgs.length;
+    const defb = rdiv.querySelector(".img-default"); if (defb) defb.style.display = idx === 0 ? "none" : "";
   }
   function pileHTML(prefix, members) {
     const seg = prefix.split("/").pop(), plen = prefix.split("/").length;
     const cover = members[0];
-    const cSrc = stackCoverSrc(seg, members);
+    const covers = pileCoversFor(seg, members);
+    const ci = pileCoverIndex(seg, covers);
     const hasSub = members.some(m => stackPath(m).length > plen);
     return `<article class="card pile t-${cover.type}" data-stack="${esc(prefix)}" data-seg="${esc(seg)}" data-act="stackopen" draggable="true" title="展開此系列堆疊">
       <div class="pile-layer l2"></div><div class="pile-layer l1"></div>
-      ${cSrc ? `<div class="result"><img src="${cSrc}" alt="" loading="lazy"></div>` : ""}
+      ${covers.length ? `<div class="result" data-pidx="${ci}"><img src="${covers[ci].src}" alt="" loading="lazy">${covers.length > 1 ? `
+        <button class="img-nav prev" data-act="pileprev" title="看上一位成員" aria-label="看上一位成員">‹</button>
+        <button class="img-nav next" data-act="pilenext" title="看下一位成員" aria-label="看下一位成員">›</button>
+        <span class="result-badge img-count">${ci + 1} / ${covers.length}</span>
+        <button class="img-default" data-act="pilesetcover" title="把這張設為堆疊封面" style="display:none">設為封面</button>` : ""}</div>` : ""}
       <div class="card-body">
         <div class="card-head"><span class="cat">📚 ${hasSub ? "多層系列" : "系列"}</span><span class="pile-count">${members.length} 件</span></div>
         <h3>${esc(stackName(seg, members))}</h3>
@@ -1735,7 +1771,10 @@
   // 雙擊堆疊（pile 或展開的標頭）→ 就地編輯系列主題、套用到所有成員
   $("#grid").addEventListener("dblclick", e => {
     const pile = e.target.closest(".card.pile");
-    if (pile) { clearTimeout(stackClickT); const h = pile.querySelector("h3"); if (h) { e.preventDefault(); editStackTheme(pile.dataset.seg, h); } return; }
+    if (pile) {
+      if (e.target.closest(".img-nav, .img-default, .result-badge")) return;   // 連點輪播箭頭≠改名
+      clearTimeout(stackClickT); const h = pile.querySelector("h3"); if (h) { e.preventDefault(); editStackTheme(pile.dataset.seg, h); } return;
+    }
     const head = e.target.closest(".stack-head");
     if (head) { clearTimeout(stackClickT); const n = head.querySelector(".sh-name"); if (n) { e.preventDefault(); editStackTheme(head.dataset.seg, n); } return; }
   });
@@ -1773,8 +1812,20 @@
       card.classList.toggle("sel", selected.has(sid));
       updateSelectBar(); return;
     }
-    // 點整疊 → 展開，並把畫面捲到該堆疊節點
-    if (card.classList.contains("pile")) { const seg = card.dataset.seg; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(seg); pendingScrollSeg = seg; render(); }, 250); return; }
+    // 整疊：先攔封面輪播（‹ › / 設為封面），其餘點擊 → 展開，並把畫面捲到該堆疊節點
+    if (card.classList.contains("pile")) {
+      const pa = e.target.closest("[data-act]")?.dataset.act;
+      if (pa === "pileprev" || pa === "pilenext") { clearTimeout(stackClickT); navPile(card, pa === "pilenext" ? 1 : -1); return; }
+      if (pa === "pilesetcover") {
+        clearTimeout(stackClickT);
+        const rdiv = card.querySelector(".result"), sg = card.dataset.seg;
+        const covers = pileCoversFor(sg, itemsUnder(card.dataset.stack, data));
+        const i = Math.min(+(rdiv?.dataset.pidx || 0), covers.length - 1);
+        if (i >= 0 && covers[i]) { stackCovers[sg] = { id: covers[i].id, idx: covers[i].idx }; saveStackCovers(); save(); render(); toast("已設為堆疊封面"); }
+        return;
+      }
+      const seg = card.dataset.seg; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(seg); pendingScrollSeg = seg; render(); }, 250); return;
+    }
     const id = card.dataset.id;
     const actEl = e.target.closest("[data-act]");
     const act = actEl?.dataset.act;
@@ -1782,16 +1833,7 @@
 
     if (act === "expand") { e.target.closest(".prompt-text").classList.toggle("open"); scheduleMasonry(); return; }   // 展開/收合會改變高度→重排
     if (act === "light") { const rdiv = card.querySelector(".result"); openLight(p.imgs, +(rdiv?.dataset.idx || 0)); return; }
-    if (act === "imgprev" || act === "imgnext") {
-      const rdiv = actEl.closest(".result"); if (!rdiv || p.imgs.length < 2) return;
-      let idx = +(rdiv.dataset.idx || 0);
-      idx = (idx + (act === "imgnext" ? 1 : -1) + p.imgs.length) % p.imgs.length;
-      rdiv.dataset.idx = idx;
-      const im = rdiv.querySelector("img"); im.addEventListener("load", scheduleMasonry, { once: true }); im.src = p.imgs[idx];   // 換圖比例不同→載入後重排
-      const cnt = rdiv.querySelector(".img-count"); if (cnt) cnt.textContent = (idx + 1) + " / " + p.imgs.length;
-      const defb = rdiv.querySelector(".img-default"); if (defb) defb.style.display = idx === 0 ? "none" : "";
-      return;
-    }
+    if (act === "imgprev" || act === "imgnext") { navCardImg(card, act === "imgnext" ? 1 : -1); return; }
     if (act === "imgdefault") {
       const rdiv = actEl.closest(".result"); const idx = +(rdiv?.dataset.idx || 0);
       if (idx > 0) { const [pick] = p.imgs.splice(idx, 1); p.imgs.unshift(pick); p.edited = Date.now(); save(); render(); toast("已設為預設封面"); }
@@ -2154,6 +2196,26 @@
     $$("#grid .dragging, #grid .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
     const rz = $("#removeZone"); rz.hidden = true; rz.classList.remove("over");
   }
+  // 封面圖左右滑動翻閱（多圖卡片與堆疊封面皆適用；進入長按拖曳後不觸發）
+  let coverSwipe = null;
+  $("#grid").addEventListener("touchstart", e => {
+    if (selectMode || e.touches.length !== 1) return;
+    const r = e.target.closest && e.target.closest(".card .result"); if (!r) return;
+    const t = e.touches[0];
+    coverSwipe = { card: r.closest(".card"), x: t.clientX, y: t.clientY, done: false };
+  }, { passive: true });
+  $("#grid").addEventListener("touchmove", e => {
+    if (!coverSwipe || coverSwipe.done) return;
+    if (touchDrag && touchDrag.active) { coverSwipe = null; return; }   // 已進入長按拖曳→讓拖曳處理
+    const t = e.touches[0], dx = t.clientX - coverSwipe.x, dy = t.clientY - coverSwipe.y;
+    if (Math.abs(dx) > 34 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      coverSwipe.done = true;
+      const c = coverSwipe.card, dir = dx < 0 ? 1 : -1;
+      if (c.classList.contains("pile")) navPile(c, dir); else navCardImg(c, dir);
+      suppressClickUntil = Date.now() + 500;   // 滑完不要又觸發點擊（展開/燈箱）
+    }
+  }, { passive: true });
+  $("#grid").addEventListener("touchend", () => { coverSwipe = null; });
 
   // ---------- preset pickers ----------
   GROUPS.forEach(g => {
