@@ -136,6 +136,10 @@
   .grid { display:grid; gap:18px; grid-template-columns:repeat(auto-fill, minmax(min(320px, 100%), 1fr)); }
   .grid.sectioned { display:block; }
   .grid.list { display:flex; flex-direction:column; gap:9px; }
+  /* 瀑布流：卡片依圖片原始比例決定高度、緊密堆疊（JS 依內容算 grid-row span，避免各列留白） */
+  .grid.masonry { grid-auto-rows:1px; row-gap:0; column-gap:18px; align-items:start; }
+  .grid.masonry > * { grid-row-end:span 220; }   /* JS 未跑前的預設高度，避免重疊 */
+  .grid.masonry .card:not(.pile) .result img { height:auto; max-height:none; object-fit:contain; }
   .card.row { flex-direction:row; align-items:stretch; border-left:3px solid transparent; }
   .card.row:hover { transform:none; box-shadow:var(--shadow-lg); }
   .card.row.t-image { border-left-color:var(--img); }
@@ -1317,6 +1321,7 @@
     const itemHTML = listMode ? rowHTML : cardHTML;
     $("#densityBtn").setAttribute("aria-pressed", listMode);
     grid.classList.toggle("list", listMode && !sectioned);
+    grid.classList.toggle("masonry", !listMode && !sectioned);   // 縮圖模式（非分區）用瀑布流
     grid.classList.toggle("selecting", selectMode);
     // 勾選模式下平鋪全部（附勾選框）；一般模式下同系列堆疊收合
     const units = seq => selectMode ? seq.map(itemHTML).join("") : renderUnits(seq, itemHTML, listMode);
@@ -1349,8 +1354,29 @@
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
       pendingScrollSeg = null;
     }
+    // 瀑布流：依內容/圖片高度緊密堆疊；圖片載入後再重排（避免重疊）
+    if (grid.classList.contains("masonry") || grid.classList.contains("sectioned")) {
+      layoutMasonry();   // 立即先排一次（不依賴 rAF，背景分頁也可靠）
+      $$("#grid img").forEach(img => { if (!img.complete) { img.addEventListener("load", scheduleMasonry, { once: true }); img.addEventListener("error", scheduleMasonry, { once: true }); } });
+    }
     updateSelectBar();
   }
+  // ---------- 瀑布流版面（grid-row span） ----------
+  const MASONRY_GAP = 18;
+  let masonryT = 0;
+  function layoutMasonry() {
+    const main = $("#grid"); if (!main) return;
+    const grids = main.classList.contains("sectioned") ? [...main.querySelectorAll(".grid.masonry")]
+      : (main.classList.contains("masonry") ? [main] : []);
+    grids.forEach(g => {
+      for (const el of g.children) {
+        const h = el.getBoundingClientRect().height;
+        el.style.gridRowEnd = "span " + (Math.max(0, Math.round(h)) + MASONRY_GAP);
+      }
+    });
+  }
+  function scheduleMasonry() { clearTimeout(masonryT); masonryT = setTimeout(layoutMasonry, 30); }
+  window.addEventListener("resize", scheduleMasonry);
 
   // 把清單依堆疊路徑折疊成多層樹狀「堆疊」；非堆疊者照常。回傳 HTML 字串
   function renderUnits(list, itemHTML, listMode) {
@@ -1485,7 +1511,7 @@
           <span class="grp-count">${items.length}</span>
           <svg class="grp-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
         </div>
-        <div class="grid${listMode ? " list" : ""}">${selectMode ? items.map(itemHTML).join("") : renderUnits(items, itemHTML, listMode)}</div>
+        <div class="grid${listMode ? " list" : " masonry"}">${selectMode ? items.map(itemHTML).join("") : renderUnits(items, itemHTML, listMode)}</div>
       </section>`;
     }).join("");
   }
@@ -1637,14 +1663,14 @@
     const act = actEl?.dataset.act;
     const p = data.find(x => x.id === id); if (!p) return;
 
-    if (act === "expand") { e.target.closest(".prompt-text").classList.toggle("open"); return; }
+    if (act === "expand") { e.target.closest(".prompt-text").classList.toggle("open"); scheduleMasonry(); return; }   // 展開/收合會改變高度→重排
     if (act === "light") { const rdiv = card.querySelector(".result"); openLight(p.imgs, +(rdiv?.dataset.idx || 0)); return; }
     if (act === "imgprev" || act === "imgnext") {
       const rdiv = actEl.closest(".result"); if (!rdiv || p.imgs.length < 2) return;
       let idx = +(rdiv.dataset.idx || 0);
       idx = (idx + (act === "imgnext" ? 1 : -1) + p.imgs.length) % p.imgs.length;
       rdiv.dataset.idx = idx;
-      rdiv.querySelector("img").src = p.imgs[idx];
+      const im = rdiv.querySelector("img"); im.addEventListener("load", scheduleMasonry, { once: true }); im.src = p.imgs[idx];   // 換圖比例不同→載入後重排
       const cnt = rdiv.querySelector(".img-count"); if (cnt) cnt.textContent = (idx + 1) + " / " + p.imgs.length;
       const defb = rdiv.querySelector(".img-default"); if (defb) defb.style.display = idx === 0 ? "none" : "";
       return;
@@ -1654,7 +1680,7 @@
       if (idx > 0) { const [pick] = p.imgs.splice(idx, 1); p.imgs.unshift(pick); p.edited = Date.now(); save(); render(); toast("已設為預設封面"); }
       return;
     }
-    if (act === "vartoggle") { const pop = card.querySelector(".var-pop"); if (pop) pop.hidden = !pop.hidden; return; }
+    if (act === "vartoggle") { const pop = card.querySelector(".var-pop"); if (pop) pop.hidden = !pop.hidden; scheduleMasonry(); return; }   // 變體彈出改變高度→重排
     if (act === "varcopy") {
       const v = p.variants.find(x => x.id === actEl.dataset.vp);
       if (v) { markUsed(p); copyText(v.prompt, actEl); } return;
