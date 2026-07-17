@@ -207,12 +207,16 @@
   .grid.selecting .card.sel { outline:2px solid var(--accent); outline-offset:-2px; }
   /* 底部堆疊操作列 */
   #selectBar { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:60;
-    display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--surface);
-    border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lg); }
+    display:flex; align-items:center; gap:8px; padding:10px 14px; background:var(--surface);
+    border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow-lg);
+    flex-wrap:wrap; justify-content:center; max-width:calc(100vw - 24px); }
   #selectBar[hidden] { display:none; }
   #selectBar .sb-count { font-size:13px; font-weight:600; color:var(--ink-2); font-variant-numeric:tabular-nums; }
-  #selectBar .btn { padding:8px 14px; }
+  #selectBar .btn { padding:8px 13px; }
   #selectBar .btn:disabled { opacity:.4; cursor:not-allowed; }
+  #selectBar .btn.danger { color:var(--danger); }
+  #selectBar .btn.danger:hover:not(:disabled) { background:color-mix(in srgb, var(--danger) 12%, transparent); border-color:var(--danger); }
+  #selectBar .sb-sep { width:1px; align-self:stretch; background:var(--line); margin:2px 2px; }
   /* 拖放堆疊 */
   .grid .card img { -webkit-user-drag:none; user-drag:none; }
   .card.dragging { opacity:.4; }
@@ -585,6 +589,7 @@
     <div class="spacer"></div>
     <button class="chip warn" id="backupNote" hidden></button>
     <button class="chip" id="undoBtn" title="上一步 (Ctrl+Z)" disabled><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9"/></svg> 上一步</button>
+    <button class="chip" id="redoBtn" title="重做 (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0-5 5v0a5 5 0 0 0 5 5h6"/></svg> 重做</button>
     <button class="chip" id="selectBtn" title="勾選作品堆疊成同系列" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> 選取</button>
     <button class="chip" id="densityBtn" title="切換縮圖／選單模式" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg> 選單</button>
     <button class="chip" id="viewBtn" title="依專案／系列分區整理" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="12" width="18" height="8" rx="1"/></svg> 分區整理</button>
@@ -986,6 +991,12 @@
   <span class="sb-count" id="sbCount">已選 0 件</span>
   <button class="btn primary" id="sbStack">📚 堆疊成同系列</button>
   <button class="btn ghost" id="sbUnstack">取消堆疊</button>
+  <span class="sb-sep"></span>
+  <button class="btn ghost" id="sbTag">🏷 加標籤</button>
+  <button class="btn ghost" id="sbFav">★ 收藏</button>
+  <button class="btn ghost" id="sbExport">⬇ 匯出</button>
+  <button class="btn ghost danger" id="sbDelete">🗑 刪除</button>
+  <span class="sb-sep"></span>
   <button class="btn ghost" id="sbDone">完成</button>
 </div>
 <div id="removeZone" hidden>🗑 拖到這裡移出堆疊</div>
@@ -998,6 +1009,60 @@
   "use strict";
   const KEY = "promptvault.v2";
   const OLD_KEY = "promptvault.v1";
+  const FMT_KEY = "promptvault.fmt";   // "idb"＝圖片改存 IndexedDB、localStorage 只放去圖輕量版
+  // ---- IndexedDB（放完整資料含圖，突破 localStorage 容量上限）----
+  const IDB_NAME = "promptvault", IDB_STORE = "kv";
+  const HAS_IDB = (() => { try { return "indexedDB" in window && !!window.indexedDB; } catch (e) { return false; } })();
+  let _idbP = null;
+  function idbOpen() {
+    if (_idbP) return _idbP;
+    _idbP = new Promise((res, rej) => {
+      let req; try { req = indexedDB.open(IDB_NAME, 1); } catch (e) { return rej(e); }
+      req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE); };
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    });
+    return _idbP;
+  }
+  function idbGet(key) {
+    return idbOpen().then(db => new Promise((res, rej) => {
+      const r = db.transaction(IDB_STORE, "readonly").objectStore(IDB_STORE).get(key);
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    })).catch(() => undefined);
+  }
+  function idbSet(key, val) {
+    return idbOpen().then(db => new Promise((res, rej) => {
+      const tx = db.transaction(IDB_STORE, "readwrite"); tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = () => res(true); tx.onerror = () => rej(tx.error); tx.onabort = () => rej(tx.error);
+    })).catch(() => false);
+  }
+  function lightData(arr) { return arr.map(p => Object.assign({}, p, { imgs: [] })); }   // 去圖輕量版
+  // 統一持久化：完整（含圖）→ IndexedDB；localStorage 放去圖輕量版（省空間、當備援）。IDB 不可用時退回完整存 localStorage（舊行為）
+  function persistData() {
+    if (imagesHydrated && HAS_IDB) {
+      idbSet("data", data).then(ok => {
+        if (!ok) { try { localStorage.setItem(KEY, JSON.stringify(data)); localStorage.removeItem(FMT_KEY); } catch (e) {} }   // IDB 寫入失敗→退回完整存 localStorage
+      });
+    }
+    try {
+      localStorage.setItem(KEY, JSON.stringify(HAS_IDB ? lightData(data) : data));
+      if (HAS_IDB) localStorage.setItem(FMT_KEY, "idb"); else localStorage.removeItem(FMT_KEY);
+    } catch (e) {
+      try { localStorage.setItem(KEY, JSON.stringify(lightData(data))); localStorage.setItem(FMT_KEY, "idb"); } catch (e2) { throw e2; }
+    }
+  }
+  async function hydrateImages() {   // idb 格式啟動：localStorage 只有去圖版，從 IndexedDB 補回完整含圖資料
+    const full = await idbGet("data");
+    if (full && Array.isArray(full) && full.length) data = full.map(normalize);
+    imagesHydrated = true;
+    ensureNames(); syncGroups();
+    resetUndoBaseline();
+    render();
+  }
+  async function migrateToIdb() {   // 舊格式（圖存在 localStorage）：複製到 IDB，確認成功後才把 localStorage 瘦身
+    const ok = await idbSet("data", data);
+    if (ok) { try { localStorage.setItem(KEY, JSON.stringify(lightData(data))); localStorage.setItem(FMT_KEY, "idb"); } catch (e) {} }
+  }
   const THEME_KEY = "promptvault.theme";
   const $ = (s, r=document) => r.querySelector(s);
   const $$ = (s, r=document) => [...r.querySelectorAll(s)];
@@ -1031,9 +1096,11 @@
   let stackNames = loadStackNames();          // { segId: 名稱 } 堆疊層級名稱登錄表
   const railOpen = new Set(loadRailOpen());   // 左側堆疊樹目前展開的節點 seg
   let pendingScrollSeg = null;                // render 後要捲動到的堆疊節點 seg
+  const needHydrate = HAS_IDB && localStorage.getItem(FMT_KEY) === "idb";   // localStorage 是去圖版，需從 IDB 補圖
+  let imagesHydrated = !needHydrate;          // 舊格式已內含圖片；idb 格式待補圖後才可安全回寫
   // 補齊所有堆疊節點名稱，並把「根堆疊名稱」同步為成員系列(group)，相容舊版單層堆疊
   ensureNames();
-  if (syncGroups()) { try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (e) {} }
+  if (syncGroups() && imagesHydrated) persistData();   // idb 格式待補圖後（hydrateImages 內）再存，避免用去圖資料蓋掉真圖
   let filter = "all";
   let viewMode = (localStorage.getItem("promptvault.view") === "sections") ? "sections" : "flat";
   let cardMode = (localStorage.getItem("promptvault.cardmode") === "list") ? "list" : "card";
@@ -1045,6 +1112,7 @@
   const railSel = new Set();              // 左側已選取（要在右側顯示）的系列／堆疊；空＝全部作品。token：堆疊 prefix 或 "g:"+散裝group名
   let railClickT = null;                  // 左側單擊防抖（讓雙擊改名可攔截）
   const undoStack = [];                   // 復原堆疊（存 JSON 快照字串）
+  const redoStack = [];                   // 重做堆疊
   const UNDO_MAX = 25;
   let lastSnapshot = null;                // 上一個已存狀態；初始化後設基準（讓第一步編輯也可復原）
   let editingId = null;
@@ -1084,33 +1152,48 @@
   }
   function save(skipUndo) {
     // 存檔前先把「上一個已存狀態」推進復原堆疊（skipUndo＝瑣碎變動如使用次數，不佔用復原步）
-    if (lastSnapshot != null && !skipUndo) { undoStack.push(lastSnapshot); if (undoStack.length > UNDO_MAX) undoStack.shift(); }
+    if (lastSnapshot != null && !skipUndo) { undoStack.push(lastSnapshot); if (undoStack.length > UNDO_MAX) undoStack.shift(); redoStack.length = 0; }
     lastSnapshot = snapshot();
     try {
-      localStorage.setItem(KEY, JSON.stringify(data));
+      persistData();
       localStorage.setItem("promptvault.updated", String(Date.now()));
       bumpDirty();
       scheduleCloudPush();
-    } catch (e) { toast("儲存失敗，圖片可能太多、空間已滿"); }
-    refreshUndoBtn();
+    } catch (e) { toast("儲存失敗，空間已滿"); }
+    refreshUndoRedo();
   }
-  // ---------- 復原（上一步 / Ctrl+Z）----------
+  // ---------- 復原 / 重做（上一步 Ctrl+Z、重做 Ctrl+Shift+Z / Ctrl+Y）----------
   function snapshot() { return JSON.stringify({ d: data, n: stackNames }); }
   function resetUndoBaseline() { lastSnapshot = snapshot(); }   // 雲端整包覆蓋後重設基準，避免復原到別台的舊資料
-  function refreshUndoBtn() { const b = $("#undoBtn"); if (b) b.disabled = undoStack.length === 0; }
-  function undo() {
-    if (!undoStack.length) { toast("沒有可復原的動作"); return; }
-    const snap = JSON.parse(undoStack.pop());
+  function refreshUndoRedo() {
+    const u = $("#undoBtn"), r = $("#redoBtn");
+    if (u) u.disabled = undoStack.length === 0;
+    if (r) r.disabled = redoStack.length === 0;
+  }
+  const refreshUndoBtn = refreshUndoRedo;   // 舊名相容
+  function applySnapshot(str) {
+    const snap = JSON.parse(str);
     data = (snap.d || []).map(normalize);
     stackNames = snap.n || {};
-    lastSnapshot = snapshot();   // 復原後把基準對齊到這個狀態
+    lastSnapshot = snapshot();   // 套用後把基準對齊到這個狀態
     try {
-      localStorage.setItem(KEY, JSON.stringify(data));
+      persistData();
       localStorage.setItem("promptvault.updated", String(Date.now()));
       saveStackNames(); bumpDirty(); scheduleCloudPush();
     } catch (e) {}
-    render(); refreshUndoBtn();
+    render(); refreshUndoRedo();
+  }
+  function undo() {
+    if (!undoStack.length) { toast("沒有可復原的動作"); return; }
+    redoStack.push(snapshot());   // 目前狀態存進重做堆疊
+    applySnapshot(undoStack.pop());
     toast("已復原上一步");
+  }
+  function redo() {
+    if (!redoStack.length) { toast("沒有可重做的動作"); return; }
+    undoStack.push(snapshot());   // 目前狀態存回復原堆疊
+    applySnapshot(redoStack.pop());
+    toast("已重做");
   }
   // 新增／更改／刪除前：先確認雲端有沒有更新的資料，雲端較新就先取下來併入本機，
   // 這樣這次操作是套在「其他裝置的最新資料」上，之後上傳才不會把別台的新增/修改蓋掉。
@@ -1125,7 +1208,8 @@
       const localU = +localStorage.getItem("promptvault.updated") || 0;
       if ((j.updated || 0) > localU) {
         data = j.data.map(normalize);
-        localStorage.setItem(KEY, JSON.stringify(data));
+        imagesHydrated = true;   // 雲端資料為完整含圖
+        persistData();
         localStorage.setItem("promptvault.updated", String(j.updated || Date.now()));
         resetUndoBaseline();   // 併入雲端後重設復原基準
         return true;
@@ -1771,14 +1855,22 @@
   const setHdrH = () => document.documentElement.style.setProperty("--hdr-h", (($("header.top") || {}).offsetHeight || 66) + "px");
   setHdrH(); window.addEventListener("resize", setHdrH);
   $("#undoBtn").addEventListener("click", undo);
-  refreshUndoBtn();
-  // 電腦鍵盤 Ctrl/⌘+Z＝上一步（焦點在輸入欄／可編輯元素時交給瀏覽器原生復原）
+  $("#redoBtn").addEventListener("click", redo);
+  refreshUndoRedo();
+  // 判斷焦點是否在可輸入元素（在的話讓瀏覽器原生處理，不攔快捷鍵）
+  function inEditable(t) { const tag = (t && t.tagName || "").toLowerCase(); return tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable); }
+  // 電腦鍵盤快捷鍵：Ctrl/⌘+Z 上一步、Ctrl+Shift+Z / Ctrl+Y 重做、/ 聚焦搜尋、N 新增
   document.addEventListener("keydown", e => {
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && (e.key === "z" || e.key === "Z")) {
-      const t = e.target, tag = (t && t.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select" || (t && t.isContentEditable)) return;
-      e.preventDefault(); undo();
+    const editing = inEditable(e.target);
+    if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+      if (editing) return;
+      e.preventDefault(); e.shiftKey ? redo() : undo(); return;
     }
+    if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { if (editing) return; e.preventDefault(); redo(); return; }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;   // 以下為單鍵快捷，需排除組合鍵
+    if (editing) return;
+    if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
+    else if (e.key === "n" || e.key === "N") { if (!document.querySelector(".overlay.show")) { e.preventDefault(); openEditor(); } }
   });
   $("#viewBtn").addEventListener("click", () => {
     viewMode = viewMode === "sections" ? "flat" : "sections";
@@ -1800,7 +1892,9 @@
     $("#sbStack").disabled = n < 2;
     const anyStacked = [...selected].some(id => { const p = data.find(x => x.id === id); return p && p.stack; });
     $("#sbUnstack").disabled = !anyStacked;
+    ["sbTag", "sbFav", "sbExport", "sbDelete"].forEach(id => { $("#" + id).disabled = n < 1; });
   }
+  const selectedRecords = () => [...selected].map(id => data.find(x => x.id === id)).filter(Boolean);
   function exitSelect() { selectMode = false; selected.clear(); $("#selectBtn").setAttribute("aria-pressed", "false"); render(); }
   $("#selectBtn").addEventListener("click", () => {
     selectMode = !selectMode; selected.clear();
@@ -1841,6 +1935,41 @@
     olds.forEach(o => dissolveIfLonely(o));
     if (n) { ensureNames(); syncGroups(); save(); toast(`已取消 ${n} 件的堆疊`); }
     exitSelect();
+  });
+  // ---------- 批次操作（多選後）----------
+  $("#sbTag").addEventListener("click", () => {
+    const sels = selectedRecords(); if (!sels.length) return;
+    const raw = prompt(`為選取的 ${sels.length} 件加上標籤（多個用逗號分隔）：`);
+    if (raw == null) return;
+    const tags = raw.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    if (!tags.length) return;
+    sels.forEach(p => { tags.forEach(t => { if (!p.tags.includes(t)) p.tags.push(t); }); p.edited = Date.now(); });
+    save(); render(); toast(`已為 ${sels.length} 件加上標籤`);
+  });
+  $("#sbFav").addEventListener("click", () => {
+    const sels = selectedRecords(); if (!sels.length) return;
+    const allFav = sels.every(p => p.fav);      // 全部已收藏→取消收藏；否則全設為收藏
+    sels.forEach(p => { p.fav = !allFav; p.edited = Date.now(); });
+    save(); render(); toast(allFav ? `已取消收藏 ${sels.length} 件` : `已收藏 ${sels.length} 件`);
+  });
+  $("#sbExport").addEventListener("click", () => {
+    const sels = selectedRecords(); if (!sels.length) return;
+    const blob = new Blob([JSON.stringify(sels, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `prompt-vault-selected-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click(); URL.revokeObjectURL(a.href);
+    toast(`已匯出所選 ${sels.length} 件`);
+  });
+  $("#sbDelete").addEventListener("click", () => {
+    const ids = new Set(selected); if (!ids.size) return;
+    if (!confirm(`確定刪除選取的 ${ids.size} 件？此動作可用「上一步」復原。`)) return;
+    const olds = new Set();
+    data.forEach(x => { if (ids.has(x.id) && x.stack) olds.add(x.stack); });
+    data = data.filter(x => !ids.has(x.id));
+    olds.forEach(o => { if (data.some(x => x.stack === o || x.stack.startsWith(o + "/"))) dissolveIfLonely(o); });
+    ensureNames(); syncGroups(); save();
+    const n = ids.size; exitSelect(); toast(`已刪除 ${n} 件`);
   });
   $("#sbDone").addEventListener("click", exitSelect);
   // ---------- 拖放：加入／建立／巢狀／移出堆疊（桌機 HTML5 DnD + 手機長按觸控）----------
@@ -3333,10 +3462,11 @@
       const localU = +localStorage.getItem("promptvault.updated") || 0;
       if (!manual && (j.updated || 0) <= localU) { updateCloudStatus(); return; }  // 自動模式：本機較新就不覆蓋
       data = j.data.map(normalize);
-      localStorage.setItem(KEY, JSON.stringify(data));
+      imagesHydrated = true;   // 雲端資料為完整含圖
+      persistData();
       localStorage.setItem("promptvault.updated", String(j.updated || Date.now()));
-      undoStack.length = 0; resetUndoBaseline();   // 雲端整包覆蓋後清掉復原歷史
-      render(); refreshUndoBtn();
+      undoStack.length = 0; redoStack.length = 0; resetUndoBaseline();   // 雲端整包覆蓋後清掉復原/重做歷史
+      render(); refreshUndoRedo();
       updateCloudStatus();
       toast(`已從雲端載入 ${data.length} 則`);
     } catch (e) { if (manual) toast("載入失敗：" + e.message); }
@@ -3376,6 +3506,9 @@
   }
 
   render();
+  // 圖片存放：idb 格式→從 IndexedDB 補回完整含圖資料再重繪；舊格式→背景遷移到 IndexedDB 並把 localStorage 瘦身
+  if (needHydrate) hydrateImages();
+  else if (HAS_IDB) migrateToIdb();
   // 啟動時：只要設定了雲端後端就先檢查雲端，雲端較新就自動把最新資料讀入
   //（跨裝置：在別台開啟時若不是最新，一開就先載入最新；本機較新則不覆蓋。不再受「自動同步」開關限制）
   if (cloudBase()) cloudPull(false);
