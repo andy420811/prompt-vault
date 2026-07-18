@@ -194,6 +194,8 @@
             分析並自動填入
           </button>
           <button type="button" class="link-btn ai-link" id="enhanceBtn">✦ AI 強化英文</button>
+          <button type="button" class="link-btn ai-link" id="transBtn">🌐 中英翻譯</button>
+          <button type="button" class="link-btn" id="wcInsertBtn">⚁ 插入選項組</button>
           <button type="button" class="link-btn" id="assetInsertBtn">🎭 插入資產</button>
         </label>
         <textarea id="fPrompt" class="mono" placeholder="貼上提示詞後自動分析，或手動點上方按鈕…"></textarea>
@@ -521,6 +523,7 @@
     </div>
     <div class="modal-body">
       <p class="hint" id="applyHint"></p>
+      <button type="button" class="link-btn" id="aqDice" style="display:none;margin:-4px 0 12px">🎲 全部隨機抽選</button>
       <div class="aq-list" id="aqList"></div>
       <div class="field">
         <label>輸出結果 <span class="opt">（可直接微調）</span></label>

@@ -17,6 +17,14 @@
       if (seen.has(m[0])) continue; seen.add(m[0]);
       qs.push({ kind:"ph", token:m[0], label:m[1], value:/日期|date/i.test(m[1]) ? todayStr() : "" });
     }
+    // 1.2 {選項A|選項B} 選項組（wildcard）→ 下拉選擇＋隨機抽
+    const wcSeen = new Set();
+    for (const m of base.matchAll(/\{([^{}\n|]{1,120}(?:\|[^{}\n|]{1,120})+)\}/g)) {
+      if (wcSeen.has(m[0])) continue; wcSeen.add(m[0]);
+      const opts = m[1].split("|").map(s => s.trim()).filter(Boolean);
+      if (opts.length < 2) continue;
+      qs.push({ kind:"wc", token:m[0], label:`選項組（${opts.length} 選 1）`, value:opts[0], orig:opts[0], options:opts });
+    }
     // 1.5 標題文字（「標題為…」後的引號或整段）→ 填寫
     let tm = base.match(/標題(?:文字)?\s*[為是:：]\s*[「"']([^「」"']{2,60})[」"']/);
     if (!tm) tm = base.match(/標題(?:文字)?\s*[為是:：]\s*[-–—]?\s*([^「」"'，。]{2,60}?)\s*(?=\d{4}[.\/年-]|[，。]|$)/);
@@ -69,6 +77,7 @@
     let out = applyPlan.base;
     applyPlan.qs.forEach(q => {
       if (q.kind === "ph") { if (q.value.trim()) out = out.split(q.token).join(q.value.trim()); }
+      else if (q.kind === "wc") { out = out.split(q.token).join(q.value); }
       else if (q.kind === "txt") { const v = q.value.trim(); if (v && v !== q.orig) out = out.replace(q.token, v); }
       else if (q.kind === "ar") { if (q.value !== q.orig) out = out.replace(q.token, q.value); }
       else if (q.kind === "preset") {
@@ -93,6 +102,7 @@
     $("#applyHint").textContent = qs.length
       ? `偵測到 ${qs.length} 個可調整項目${aiN ? `（含 AI 變數 ${aiN} 個）` : ""} — 填寫或選擇後，下方結果即時更新。`
       : "沒有偵測到可填欄位，可直接微調輸出後複製。";
+    $("#aqDice").style.display = qs.some(q => q.kind === "wc") ? "" : "none";
     renderAq();
     $("#aqPreview").value = applyResult();
     applyOv.classList.add("show");
@@ -104,9 +114,12 @@
     $("#aqList").innerHTML = applyPlan.qs.map((q, i) => {
       const kindChip = (q.kind === "ph" || q.kind === "txt") ? '<span class="aq-kind ph">填寫</span>'
         : q.kind === "num" ? '<span class="aq-kind num-k">數值</span>'
+        : q.kind === "wc" ? '<span class="aq-kind wc-k">抽選</span>'
         : '<span class="aq-kind opt-k">選擇</span>';
       let ctrl;
-      if (q.kind === "ar") {
+      if (q.kind === "wc") {
+        ctrl = `<select data-qi="${i}">${q.options.map(o => `<option value="${esc(o)}"${o===q.value?" selected":""}>${esc(o)}</option>`).join("")}</select>`;
+      } else if (q.kind === "ar") {
         ctrl = `<select data-qi="${i}">${q.options.map(r => `<option value="${r}"${r===q.value?" selected":""}>${r}</option>`).join("")}</select>`;
       } else if (q.kind === "preset") {
         ctrl = `<select data-qi="${i}">${PRESETS[q.group].map(([zh, en]) =>
@@ -179,6 +192,14 @@
   $("#aqList").addEventListener("input", e => {
     const el = e.target.closest("[data-qi]"); if (!el) return;
     applyPlan.qs[+el.dataset.qi].value = el.value;
+    $("#aqPreview").value = applyResult();
+  });
+  $("#aqDice").addEventListener("click", () => {
+    if (!applyPlan) return;
+    applyPlan.qs.forEach(q => {
+      if (q.kind === "wc") q.value = q.options[Math.floor(Math.random() * q.options.length)];
+    });
+    renderAq();
     $("#aqPreview").value = applyResult();
   });
   function closeApply() { applyOv.classList.remove("show"); applyPlan = null; }
@@ -273,6 +294,52 @@
       curVars = []; curVarsAnalyzed = false; renderVarFields();
       $("#blkVars").classList.add("closed");
       toast(r.note ? "已強化：" + r.note : "已強化為英文提示詞，原文存為變體");
+    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
+    finally { btn.innerHTML = old; btn.disabled = false; }
+  });
+
+  // ---------- wildcard 選項組：插入語法 ----------
+  $("#wcInsertBtn").addEventListener("click", () => {
+    const ta = $("#fPrompt");
+    const s = ta.selectionStart || 0, e = ta.selectionEnd || 0;
+    const sel = ta.value.slice(s, e).trim();
+    const ins = sel ? `{${sel}|替代選項}` : "{選項一|選項二|選項三}";
+    ta.value = ta.value.slice(0, s) + ins + ta.value.slice(e);
+    ta.focus();
+    const p1 = s + ins.indexOf("|") + 1;
+    ta.setSelectionRange(p1, p1 + (sel ? 4 : 3));
+    toast("已插入選項組 {A|B|C} — 套用時會出現下拉選單與 🎲 隨機抽選");
+  });
+
+  // ---------- 忠實翻譯（中⇄英對照） ----------
+  const TR_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" } }, required: ["prompt"] };
+  const TR_RULES = "技術參數（如 --ar 16:9、seed、fps、8k）原樣保留；【】包住的佔位符原樣保留不翻譯；{選項|選項} 選項組的大括號與｜分隔結構原樣保留（組內各選項要照翻）；提示詞中指定要顯示在畫面上的標題或文字內容保持原語言不翻譯；不新增細節、不刪減、不潤飾、不重新排序。";
+  $("#transBtn").addEventListener("click", async () => {
+    const raw = $("#fPrompt").value.trim();
+    if (!raw) { toast("請先輸入提示詞"); return; }
+    if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter）"); return; }
+    const zhRatio = (raw.match(/[一-鿿]/g) || []).length / raw.length;
+    const toEn = zhRatio > 0.15;
+    const sys = toEn
+      ? "你是專業譯者。將使用者的圖像/影片生成提示詞【忠實】翻譯成英文，只轉換語言、不做任何強化或改寫。" + TR_RULES + "只輸出 prompt 欄位。"
+      : "你是專業譯者。將使用者的英文圖像/影片生成提示詞【忠實】翻譯成繁體中文，作為閱讀理解用的對照，不做任何強化或改寫。" + TR_RULES + "只輸出 prompt 欄位。";
+    const btn = $("#transBtn"); const old = btn.innerHTML;
+    btn.textContent = "翻譯中…"; btn.disabled = true;
+    try {
+      const r = await aiCall(sys, raw, TR_SCHEMA);
+      if (!r.prompt) throw new Error("空結果");
+      syncVariants();
+      if (toEn) {
+        curVariants.push({ id: uid(), label: "中文原文", prompt: raw, note: "翻譯前的中文原文（對照用）" });
+        $("#fPrompt").value = r.prompt;
+        curVars = []; curVarsAnalyzed = false; renderVarFields();
+        $("#blkVars").classList.add("closed");
+        toast("已忠實翻譯為英文，中文原文存為變體可對照");
+      } else {
+        curVariants.push({ id: uid(), label: "中文對照", prompt: r.prompt, note: "英文原文的中文翻譯（理解用，不必拿去生成）" });
+        toast("已產生中文對照，存於變體區");
+      }
+      renderVariants(); $("#blkVariants").classList.remove("closed");
     } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
     finally { btn.innerHTML = old; btn.disabled = false; }
   });

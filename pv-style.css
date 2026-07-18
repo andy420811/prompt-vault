@@ -453,6 +453,7 @@
   .aq-row > label .aq-kind.ph { color:var(--accent); }
   .aq-row > label .aq-kind.opt-k { color:var(--img); }
   .aq-row > label .aq-kind.num-k { color:var(--vid); }
+  .aq-row > label .aq-kind.wc-k { color:var(--gold); }
   .aq-row input, .aq-row select { font:inherit; font-size:13.5px; color:var(--ink); background:var(--paper);
     border:1px solid var(--line); border-radius:var(--r-sm); padding:9px 11px; width:100%; }
   .aq-row input:focus, .aq-row select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-tint); }
