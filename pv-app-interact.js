@@ -154,7 +154,13 @@
     }
     render();
   });
+  $("#prAddFolder").addEventListener("click", () => {   // 左側新增資料夾（收納堆疊／系列）
+    const name = prompt("資料夾名稱？");
+    if (name != null) createRailFolder(name);
+  });
   $("#prList").addEventListener("click", e => {
+    const del = e.target.closest(".pr-del");
+    if (del) { clearTimeout(railClickT); e.stopPropagation(); deleteRailFolder(del.dataset.del); return; }
     const chev = e.target.closest(".pr-chev");
     if (chev && chev.dataset.chev) {   // 點三角形＝展開／收合左側樹的子節點
       const seg = chev.dataset.chev;
@@ -302,6 +308,7 @@
   // ---------- 拖放：加入／建立／巢狀／移出堆疊（桌機 HTML5 DnD + 手機長按觸控）----------
   let dragCardId = null;      // 正在拖的作品 id
   let dragStackPrefix = null; // 正在拖的整個堆疊路徑
+  let dragGroupName = null;   // 正在拖的散裝系列名（只能丟進左側資料夾）
   let touchDrag = null;
   let suppressClickUntil = 0;
   // 共用落點判定：把目前拖曳中的東西放到 targetEl 上
@@ -330,8 +337,8 @@
     if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); commitStacks("已加入堆疊"); }
   }
   function endDrag() {
-    dragCardId = null; dragStackPrefix = null;
-    $$("#grid .dragging, #grid .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
+    dragCardId = null; dragStackPrefix = null; dragGroupName = null;
+    $$("#grid .dragging, #grid .drop-over, #prList .dragging, #prList .drop-over").forEach(el => el.classList.remove("dragging", "drop-over"));
     const rz = $("#removeZone"); rz.hidden = true; rz.classList.remove("over");
   }
   $("#grid").addEventListener("dragstart", e => {
@@ -374,6 +381,61 @@
       if (!dragCardId && !dragStackPrefix) return; e.preventDefault();
       commitDrop(rz); endDrag();
     });
+  })();
+  // 左側 rail 拖放：把堆疊／作品／散裝系列拖進資料夾或其他堆疊節點；拖到「全部作品」＝移回最上層
+  (() => {
+    const list = $("#prList");
+    list.addEventListener("dragstart", e => {
+      const el = e.target.closest(".pr-stack, .pr-item[data-g]");
+      if (!el) { e.preventDefault(); return; }
+      dragCardId = null; dragStackPrefix = null; dragGroupName = null;
+      if (el.classList.contains("pr-stack")) dragStackPrefix = el.dataset.prefix;
+      else dragGroupName = el.dataset.g;
+      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragStackPrefix || dragGroupName); } catch (_) {}
+      el.classList.add("dragging");
+    });
+    function railDest(e) {   // 目前拖曳物在 rail 上的合法落點；dest=""＝最上層
+      const el = e.target.closest(".pr-stack, .pr-item[data-all]");
+      if (!el) return null;
+      const dest = el.dataset.all !== undefined ? "" : el.dataset.prefix;
+      if (dragStackPrefix) {
+        if (dest === dragStackPrefix || (dest + "/").startsWith(dragStackPrefix + "/")) return null;   // 不能丟進自己或子孫
+        if (!dest && dragStackPrefix.indexOf("/") === -1) return null;   // 已在最上層
+      } else if (dragCardId) {
+        const dp = data.find(x => x.id === dragCardId);
+        if (!dp || dp.stack === dest) return null;
+      } else if (dragGroupName) {
+        if (!dest) return null;   // 散裝系列本來就在最上層
+      } else return null;
+      return { el, dest };
+    }
+    list.addEventListener("dragover", e => {
+      $$("#prList .drop-over").forEach(el => el.classList.remove("drop-over"));
+      const t = railDest(e); if (!t) return;
+      e.preventDefault(); e.dataTransfer.dropEffect = "move"; t.el.classList.add("drop-over");
+    });
+    list.addEventListener("drop", e => {
+      const t = railDest(e); if (!t) { endDrag(); return; }
+      e.preventDefault();
+      const dest = t.dest;
+      if (dest) { dest.split("/").forEach(s => { expandedStacks.add(s); railOpen.add(s); }); saveRailOpen(); }
+      if (dragStackPrefix) nestStack(dragStackPrefix, dest);
+      else if (dragGroupName) moveGroupIntoFolder(dragGroupName, dest);
+      else if (dragCardId) {
+        const dp = data.find(x => x.id === dragCardId);
+        if (dp) {
+          if (!dest) moveItemOut(dp);
+          else {
+            const old = dp.stack;
+            dp.stack = dest; dp.edited = Date.now();
+            if (old) dissolveIfLonely(old);
+            commitStacks(`已移入「${stackName(dest.split("/").pop())}」`);
+          }
+        }
+      }
+      endDrag();
+    });
+    list.addEventListener("dragend", endDrag);
   })();
   // 手機：長按 ~0.4 秒啟動拖曳（觸控無原生 DnD），跟桌機共用 commitDrop
   $("#grid").addEventListener("touchstart", e => {

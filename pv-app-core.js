@@ -111,7 +111,7 @@
   // ▼ 示範資料 SEED 已移至 pv-seed.js（於本程式前載入）
 
   let data = load();
-  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen", SC_KEY = "promptvault.stackcovers";   // 需在下面 load*() 呼叫前先定義（避免 TDZ）
+  const SN_KEY = "promptvault.stacknames", RO_KEY = "promptvault.railopen", SC_KEY = "promptvault.stackcovers", RF_KEY = "promptvault.railfolders";   // 需在下面 load*() 呼叫前先定義（避免 TDZ）
   // 堆疊登錄表的存取 helpers（原在 stacks 檔；因下面啟動期就要呼叫，必須定義在本檔）
   function loadStackNames() { try { return JSON.parse(localStorage.getItem(SN_KEY)) || {}; } catch (e) { return {}; } }
   function loadStackCovers() { try { return JSON.parse(localStorage.getItem(SC_KEY)) || {}; } catch (e) { return {}; } }
@@ -119,9 +119,12 @@
   function saveStackNames() { try { localStorage.setItem(SN_KEY, JSON.stringify(stackNames)); } catch (e) {} }
   function loadRailOpen() { try { return JSON.parse(localStorage.getItem(RO_KEY)) || []; } catch (e) { return []; } }
   function saveRailOpen() { try { localStorage.setItem(RO_KEY, JSON.stringify([...railOpen])); } catch (e) {} }
+  function loadRailFolders() { try { return JSON.parse(localStorage.getItem(RF_KEY)) || []; } catch (e) { return []; } }
+  function saveRailFolders() { try { localStorage.setItem(RF_KEY, JSON.stringify([...railFolders])); } catch (e) {} }
   let stackNames = loadStackNames();          // { segId: 名稱 } 堆疊層級名稱登錄表
   let stackCovers = loadStackCovers();        // { segId: {id, idx} } 堆疊封面登錄表（指定用哪張卡的第幾張圖當 pile 封面）
   const railOpen = new Set(loadRailOpen());   // 左側堆疊樹目前展開的節點 seg
+  const railFolders = new Set(loadRailFolders());   // 使用者在左側建立的資料夾 seg（可為空、不自動解散；不上雲端）
   let pendingScrollSeg = null;                // render 後要捲動到的堆疊節點 seg
   const needHydrate = HAS_IDB && localStorage.getItem(FMT_KEY) === "idb";   // localStorage 是去圖版，需從 IDB 補圖
   let imagesHydrated = !needHydrate;          // 舊格式已內含圖片；idb 格式待補圖後才可安全回寫

@@ -56,6 +56,7 @@
 <aside id="projRail" aria-label="專案列">
   <div class="pr-head">專案／系列</div>
   <div class="pr-list" id="prList"></div>
+  <button class="pr-add" id="prAddFolder" title="新增資料夾收納堆疊或系列">＋ 新增資料夾</button>
 </aside>
 
 <div class="wrap">
@@ -476,10 +477,10 @@
       </button>
     </div>
     <div class="modal-body">
-      <p class="hint" id="revHint" style="margin:0">丟一張參考圖（別人的縮圖、喜歡的風格），AI 反推出可重現的提示詞並帶入編輯器。</p>
+      <p class="hint" id="revHint" style="margin:0">丟一張參考圖（別人的縮圖、喜歡的風格），AI 反推出可重現的提示詞並帶入編輯器。一次丟多張＝批次反推：自動建立新堆疊，AI 在背景逐張反推。</p>
       <p class="hint" id="revModels" style="margin:0"></p>
       <div class="dropzone" id="revDrop"></div>
-      <input id="revFile" type="file" accept="image/*" hidden>
+      <input id="revFile" type="file" accept="image/*" multiple hidden>
       <textarea id="revDesc" rows="2" placeholder="補充描述（選填）：告訴 AI 這張圖的重點，如 中職啦啦隊封面、人物是呱呱、想強調的氛圍與風格…" style="width:100%;font-size:12.5px;resize:vertical;min-height:46px;margin-top:2px"></textarea>
     </div>
     <div class="modal-foot">
@@ -574,6 +575,16 @@
   <span class="lb-count" id="lbCount" hidden></span>
 </div>
 <div class="toast" id="toast"></div>
+
+<!-- 背景任務進度小視窗 -->
+<div id="bgJob" hidden>
+  <div class="bgjob-head">
+    <span id="bgJobLabel">處理中…</span>
+    <button class="btn ghost" id="bgJobCancel" style="padding:2px 10px;font-size:12px">取消</button>
+  </div>
+  <div class="bgjob-bar"><div id="bgJobFill"></div></div>
+  <div class="bgjob-count" id="bgJobCount"></div>
+</div>
 
 <div id="selectBar" hidden>
   <span class="sb-count" id="sbCount">已選 0 件</span>

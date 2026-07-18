@@ -378,22 +378,30 @@
   REV_SCHEMA.properties.prompt = { type: "STRING" };
   REV_SCHEMA.required = ["type", "prompt"];
   const REV_SYS = "你是頂尖的 AI 影像分析師與提示詞工程師。請像鑑識專家一樣鉅細靡遺觀察使用者提供的圖片，反推出一則能高度重現該圖的高品質【英文】生成提示詞填入 prompt 欄。prompt 用逗號分隔、關鍵字要豐富且具體，依序涵蓋（有才寫）：主體（人數／年齡／性別／髮型髮色／表情／姿勢／視線／服裝與配件）、次要元素與前景、場景與背景細節、時間與天氣、光線（來源／方向／軟硬／色溫，如 rim light、golden hour、softbox lighting）、色調與調色（palette、teal and orange、pastel 等）、藝術風格與媒材（photorealistic、cinematic、3D render、anime、oil painting、Unreal Engine 等）、鏡頭（機位角度／景別／焦段／景深，如 low angle、close-up、85mm、shallow depth of field、bokeh）、構圖（rule of thirds、centered、symmetry）、材質與質感、氛圍情緒，最後可加畫質詞（8k、ultra detailed、sharp focus）。盡量精準辨識畫面中可見的具體對象（名人／品牌／角色／地標／可讀文字）並寫入 prompt。其餘欄位依 schema：type 通常 image（明顯為動態影格才 video）；camera/style/light/shot 從允許清單挑出【所有】明顯符合的（可多選、寧多勿漏）；tags 給【5~10】個繁體中文主題標籤（涵蓋主體、風格、色調、場景、用途等不同面向）；title 給 16 字內、具體描述畫面的繁中標題；neg 可留空；constraint 留空。只輸出符合 schema 的 JSON。";
-  let revImg = "";
+  let revImgs = [];
   const revOv = $("#revOverlay");
   function renderRevDrop() {
     const rd = $("#revDrop");
-    if (revImg) {
-      rd.innerHTML = `<div class="thumb-wrap"><img src="${revImg}" alt="參考圖" style="max-height:200px"><button type="button" class="thumb-remove" id="revRm" title="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`;
+    if (revImgs.length) {
+      rd.innerHTML = `<div class="thumb-grid">` + revImgs.map((im, i) =>
+        `<div class="thumb-wrap"><img src="${im}" alt="參考圖 ${i + 1}"><button type="button" class="thumb-remove" data-revrm="${i}" title="移除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>`).join("") + `</div>` +
+        (revImgs.length > 1 ? `<p class="hint" style="margin:8px 0 0">共 ${revImgs.length} 張——會建立新堆疊，AI 在背景逐張反推</p>` : "");
     } else {
-      rd.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.2"/><path d="M4 16l4-4a2 2 0 0 1 3 0l4 4M14 13l1-1a2 2 0 0 1 3 0l2 2"/></svg><span>點擊上傳、拖曳，或 Ctrl/⌘+V 貼上參考圖</span>`;
+      rd.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9" r="1.2"/><path d="M4 16l4-4a2 2 0 0 1 3 0l4 4M14 13l1-1a2 2 0 0 1 3 0l2 2"/></svg><span>點擊上傳、拖曳，或 Ctrl/⌘+V 貼上參考圖（可一次選多張）</span>`;
     }
-    $("#revGo").disabled = !revImg || !gemKey();
+    const go = $("#revGo");
+    go.disabled = !revImgs.length || !gemKey();
+    go.textContent = revImgs.length > 1 ? `批次反推 ${revImgs.length} 張` : "開始反推";
+  }
+  function addRevFiles(list) {
+    [...list].filter(f => f.type.startsWith("image/")).forEach(f =>
+      downscale(f, 1280, d => { revImgs.push(d); renderRevDrop(); }));
   }
   $("#revBtn").addEventListener("click", () => {
     $("#revHint").textContent = IS_SANDBOX
       ? "⚠ 你正在線上版 — 安全沙箱擋外部連線，AI 反推請改用本機 HTML 檔開啟。"
       : gemKey()
-        ? "丟一張參考圖（別人的縮圖、喜歡的風格），AI 反推出可重現的提示詞並帶入編輯器。"
+        ? "丟一張參考圖，AI 反推出可重現的提示詞並帶入編輯器。一次丟多張＝批次反推：自動建立新堆疊，AI 在背景逐張反推。"
         : "⚠ 此功能需要 API Key（Gemini 或 OpenRouter）— 請先到 ⚙ 設定填入。";
     // 列出反推實際會用到的視覺模型
     const chain = [];
@@ -412,35 +420,42 @@
   $("#revCancel").addEventListener("click", closeRev);
   revOv.addEventListener("click", e => { if (e.target === revOv) closeRev(); });
   $("#revDrop").addEventListener("click", e => {
-    if (e.target.closest("#revRm")) { revImg = ""; renderRevDrop(); return; }
+    const rm = e.target.closest("[data-revrm]");
+    if (rm) { revImgs.splice(+rm.dataset.revrm, 1); renderRevDrop(); return; }
     $("#revFile").click();
   });
   $("#revFile").addEventListener("change", e => {
-    const f = e.target.files[0];
-    if (f) downscale(f, 1280, d => { revImg = d; renderRevDrop(); });
+    addRevFiles(e.target.files);
     e.target.value = "";
   });
   $("#revDrop").addEventListener("dragover", e => { e.preventDefault(); $("#revDrop").classList.add("drag"); });
   $("#revDrop").addEventListener("dragleave", () => $("#revDrop").classList.remove("drag"));
   $("#revDrop").addEventListener("drop", e => {
     e.preventDefault(); $("#revDrop").classList.remove("drag");
-    const f = e.dataTransfer.files[0];
-    if (f && f.type.startsWith("image/")) downscale(f, 1280, d => { revImg = d; renderRevDrop(); });
+    addRevFiles(e.dataTransfer.files);
   });
+  // 組出單張圖的 AI 請求 parts（單張與批次共用）
+  function revParts(img, desc) {
+    const mime = (img.match(/^data:([^;]+);/) || [])[1] || "image/jpeg";
+    const ask = desc
+      ? "請分析這張圖片並反推提示詞。以下是使用者對圖片內容的補充說明，請據此提高反推準確度：\n" + desc
+      : "請分析這張圖片並反推提示詞。";
+    return [{ inlineData: { mimeType: mime, data: img.split(",")[1] } }, { text: ask }];
+  }
   $("#revGo").addEventListener("click", async () => {
-    if (!revImg || !gemKey()) return;
+    if (!revImgs.length || !gemKey()) return;
+    const desc = $("#revDesc").value.trim();
+    if (revImgs.length > 1) {   // 批次：建新堆疊 + 背景反推
+      const imgs = revImgs; revImgs = []; $("#revDesc").value = "";
+      closeRev();
+      startBatchRev(imgs, desc);
+      return;
+    }
     const btn = $("#revGo"); btn.textContent = "反推中…"; btn.disabled = true;
     try {
-      const mime = (revImg.match(/^data:([^;]+);/) || [])[1] || "image/jpeg";
-      const desc = $("#revDesc").value.trim();
-      const ask = desc
-        ? "請分析這張圖片並反推提示詞。以下是使用者對圖片內容的補充說明，請據此提高反推準確度：\n" + desc
-        : "請分析這張圖片並反推提示詞。";
-      const parts = [{ inlineData: { mimeType: mime, data: revImg.split(",")[1] } },
-        { text: ask }];
-      const r = await aiCall(REV_SYS, parts, REV_SCHEMA);
-      const img = revImg;
-      closeRev(); revImg = ""; $("#revDesc").value = "";
+      const img = revImgs[0];
+      const r = await aiCall(REV_SYS, revParts(img, desc), REV_SCHEMA);
+      closeRev(); revImgs = []; $("#revDesc").value = "";
       openEditor();
       $("#fPrompt").value = r.prompt || "";
       applyAIResult(r);
@@ -448,7 +463,91 @@
       $("#fNotes").value = ($("#fNotes").value ? $("#fNotes").value + "；" : "") + "附圖為反推的參考圖";
       toast("反推完成，確認後儲存");
     } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { btn.textContent = "開始反推"; btn.disabled = !revImg; }
+    finally { renderRevDrop(); }
+  });
+
+  // ---------- 批次圖反推：一批圖建立新堆疊，AI 在背景逐張補完 ----------
+  // 把反推結果直接寫回既有記錄（不經編輯器）
+  function applyRevToRec(rec, r) {
+    rec.type = r.type === "video" ? "video" : "image";
+    rec.prompt = r.prompt || "";
+    if (r.title) rec.title = r.title;
+    GROUPS.forEach(g => { rec[g] = (r[g] || []).filter(v => LABEL[v]); });
+    if (Array.isArray(r.tags) && r.tags.length) rec.tags = r.tags.filter(Boolean);
+    if (r.model) rec.model = r.model;
+    ["ar", "seed", "steps", "cfg"].forEach(k => { if (r[k]) rec.params[k] = r[k]; });
+    if (rec.type === "video") { if (r.duration) rec.params.duration = r.duration; if (r.fps) rec.params.fps = r.fps; }
+    if (r.constraint && !rec.notes.includes(r.constraint)) rec.notes = (rec.notes ? rec.notes + "；" : "") + r.constraint;
+    if (Array.isArray(r.variables)) rec.vars = cleanVars(rec.prompt, r.variables);
+    rec.edited = Date.now();
+  }
+  let batchCancel = false;
+  function startBatchRev(imgs, desc) {
+    const seg = uid(), d = new Date();
+    stackNames[seg] = `批次反推 ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    saveStackNames();
+    const ids = imgs.map((img, i) => {
+      const rec = normalize({ id: uid(), type: "image", title: `反推中…（${i + 1}）`, prompt: "",
+        imgs: [img], stack: seg, notes: "附圖為反推的參考圖" });
+      data.unshift(rec);
+      return rec.id;
+    });
+    commitStacks(`已建立堆疊「${stackNames[seg]}」，背景反推 ${imgs.length} 張進行中`);
+    runBatchRev(ids, imgs, desc);
+  }
+  async function runBatchRev(ids, imgs, desc) {
+    batchCancel = false;
+    bgJobShow(`批次圖反推（${imgs.length} 張）`, imgs.length, () => { batchCancel = true; });
+    let ok = 0, fail = 0, i = 0;
+    for (; i < ids.length; i++) {
+      if (batchCancel) break;
+      bgJobTick(i, imgs.length, `第 ${i + 1} 張反推中…`);
+      const rec = data.find(p => p.id === ids[i]);
+      if (!rec) continue;   // 這張已被使用者刪除 → 跳過
+      try {
+        applyRevToRec(rec, await aiCall(REV_SYS, revParts(imgs[i], desc), REV_SCHEMA));
+        ok++;
+      } catch (e) {
+        rec.title = `⚠ 反推失敗（${i + 1}）`;
+        rec.notes = (rec.notes ? rec.notes + "；" : "") + "AI 反推失敗：" + e.message;
+        rec.edited = Date.now();
+        fail++;
+      }
+      ensureNames(); syncGroups(); save(true); render();
+      bgJobTick(i + 1, imgs.length);
+    }
+    if (batchCancel && i < ids.length) {   // 取消 → 剩餘的標成未反推
+      for (; i < ids.length; i++) {
+        const rec = data.find(p => p.id === ids[i]);
+        if (rec && !rec.prompt) { rec.title = `（未反推）（${i + 1}）`; rec.edited = Date.now(); }
+      }
+      save(true); render();
+    }
+    bgJobDone();
+    toast(batchCancel
+      ? `批次反推已取消（完成 ${ok} 張）`
+      : `批次反推完成：成功 ${ok} 張` + (fail ? `、失敗 ${fail} 張` : ""));
+  }
+
+  // ---------- 背景任務進度小視窗（通用） ----------
+  let bgJobCancelCb = null;
+  function bgJobShow(label, total, onCancel) {
+    bgJobCancelCb = onCancel || null;
+    $("#bgJobLabel").textContent = label;
+    const c = $("#bgJobCancel");
+    c.disabled = false; c.textContent = "取消"; c.style.display = onCancel ? "" : "none";
+    bgJobTick(0, total);
+    $("#bgJob").hidden = false;
+  }
+  function bgJobTick(done, total, note) {
+    $("#bgJobFill").style.width = total ? Math.round(Math.min(done, total) / total * 100) + "%" : "0%";
+    $("#bgJobCount").textContent = (note ? note + "　" : "") + `${Math.min(done, total)} / ${total}`;
+  }
+  function bgJobDone() { $("#bgJob").hidden = true; bgJobCancelCb = null; }
+  $("#bgJobCancel").addEventListener("click", () => {
+    if (!bgJobCancelCb) return;
+    bgJobCancelCb(); bgJobCancelCb = null;
+    const c = $("#bgJobCancel"); c.disabled = true; c.textContent = "取消中…";
   });
 
   // ---------- video → prompt (reverse engineering) ----------

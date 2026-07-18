@@ -276,7 +276,7 @@
       if (it.type.startsWith("image/")) {
         const f = it.getAsFile(); if (!f) return;
         if (editorOpen) { handleImgFile(f); e.preventDefault(); }
-        else if (revOpen) { downscale(f, 1280, d => { revImg = d; renderRevDrop(); }); e.preventDefault(); }
+        else if (revOpen) { downscale(f, 1280, d => { revImgs.push(d); renderRevDrop(); }); e.preventDefault(); }
         else if (!otherModal) { openEditor(); handleImgFile(f); toast("已建立新項目並附上圖片"); e.preventDefault(); }
         return;
       }

@@ -29,7 +29,7 @@
     segs.forEach(seg => {
       if (!stackNames[seg]) { stackNames[seg] = suggestStackName(data.filter(p => stackPath(p).includes(seg))); changed = true; }
     });
-    Object.keys(stackNames).forEach(seg => { if (!segs.has(seg)) { delete stackNames[seg]; changed = true; } });
+    Object.keys(stackNames).forEach(seg => { if (!segs.has(seg) && !railFolders.has(seg)) { delete stackNames[seg]; changed = true; } });   // 資料夾可為空，名稱不清
     if (changed) saveStackNames();
     // 封面登錄清理：seg 已不存在、或指定的卡已刪／已無圖 → 移除（pile 會自動回退成第一張有圖的成員）。
     // ⚠ 補圖完成前不清（idb 格式啟動時 data 是去圖輕量版，imgs 全空會誤刪登錄；hydrateImages 後會再跑一次）
@@ -109,6 +109,7 @@
     const parent = segs.slice(0, -1).join("/");
     itemsUnder(prefix, data).forEach(p => { const a = stackPath(p); a.splice(idx, 1); p.stack = a.join("/"); p.edited = Date.now(); });
     delete stackNames[seg]; delete stackCovers[seg]; expandedStacks.delete(seg);
+    if (railFolders.delete(seg)) saveRailFolders();
     if (parent) dissolveIfLonely(parent);
   }
   // 把一個作品移出堆疊（完全脫離），並檢查原堆疊是否只剩一項
@@ -122,6 +123,7 @@
   // 堆疊節點的子樹只剩一項 → 自動解除該層；若是根堆疊則詢問是否一併移除系列。會往上遞迴檢查
   function dissolveIfLonely(prefix) {
     if (!prefix) return;
+    if (railFolders.has(prefix.split("/").pop())) return;   // 使用者建立的資料夾即使剩一項（或空）也不自動解散
     const members = itemsUnder(prefix, data);
     if (members.length === 1) {
       const lone = members[0], segs = prefix.split("/"), seg = segs[segs.length - 1];
@@ -134,5 +136,38 @@
       }
       if (parent) dissolveIfLonely(parent);
     }
+  }
+
+  // ---------- 左側資料夾：使用者手動建立的堆疊層（可為空），用來收納堆疊或散裝系列 ----------
+  function createRailFolder(name) {
+    name = (name || "").trim(); if (!name) return;
+    const seg = uid();
+    railFolders.add(seg); saveRailFolders();
+    stackNames[seg] = name; saveStackNames();
+    railOpen.add(seg); saveRailOpen();
+    render(); toast(`已建立資料夾「${name}」`);
+  }
+  function deleteRailFolder(seg) {
+    if (!railFolders.has(seg)) return;
+    const members = itemsUnder(seg, data), nm = stackName(seg);
+    if (members.length && !confirm(`資料夾「${nm}」內還有 ${members.length} 件作品，刪除後內容會上移一層。確定刪除？`)) return;
+    railFolders.delete(seg); saveRailFolders();
+    if (members.length) removeStackLevel(seg);
+    else { delete stackNames[seg]; delete stackCovers[seg]; expandedStacks.delete(seg); }
+    railOpen.delete(seg); saveRailOpen();
+    commitStacks(`已刪除資料夾「${nm}」`);
+  }
+  // 把散裝系列（未堆疊、只有 group 名）整組移進資料夾：多件→建子堆疊保留系列名；單件→直接放進資料夾
+  function moveGroupIntoFolder(g, folderPrefix) {
+    const items = data.filter(p => !p.stack && p.group === g);
+    if (!items.length || !folderPrefix) return;
+    if (items.length === 1) { items[0].stack = folderPrefix; items[0].edited = Date.now(); }
+    else {
+      const seg = uid(); stackNames[seg] = g; saveStackNames();
+      items.forEach(p => { p.stack = folderPrefix + "/" + seg; p.edited = Date.now(); });
+    }
+    folderPrefix.split("/").forEach(s => { expandedStacks.add(s); railOpen.add(s); });
+    saveRailOpen();
+    commitStacks(`已把「${g}」移入「${stackName(folderPrefix.split("/").pop())}」`);
   }
 

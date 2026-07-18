@@ -65,6 +65,19 @@
     transition:transform .12s; transform:rotate(0deg); }
   .pr-chev.open { transform:rotate(90deg); }
   .pr-chev.blank { visibility:hidden; }
+  /* 左側資料夾（使用者建立、可為空）＋ rail 拖放 */
+  .pr-item[draggable] { user-select:none; }
+  .pr-ico { flex:0 0 auto; font-size:13px; line-height:1; }
+  .pr-item .pr-del { flex:0 0 auto; display:none; border:none; background:none; cursor:pointer;
+    color:var(--ink-3); font:inherit; font-size:11px; line-height:1; padding:2px 3px; margin-left:2px; border-radius:4px; }
+  .pr-item:hover .pr-del { display:inline-block; }
+  .pr-item .pr-del:hover { color:var(--danger); background:var(--surface-2); }
+  .pr-item.dragging { opacity:.4; }
+  .pr-item.drop-over { outline:2px dashed var(--accent); outline-offset:-2px; background:var(--accent-tint); }
+  .pr-add { display:flex; align-items:center; gap:6px; margin:8px 12px 0; padding:7px 10px; flex:0 0 auto;
+    border:1px dashed var(--line); border-radius:8px; background:none; color:var(--ink-3);
+    font:inherit; font-size:12.5px; cursor:pointer; text-align:left; }
+  .pr-add:hover { color:var(--accent); border-color:var(--accent); background:var(--accent-tint); }
   @media (min-width:1024px) {
     .top-inner { max-width:none; }
     .wrap { max-width:none; padding-left:32px; padding-right:32px; }
@@ -494,6 +507,16 @@
     opacity:0; pointer-events:none; transition:all .25s; z-index:400; display:flex; align-items:center; gap:8px; }
   .toast svg { width:15px; height:15px; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  /* 背景任務進度小視窗（批次反推等） */
+  #bgJob { position:fixed; right:16px; bottom:16px; z-index:250; width:262px; background:var(--surface);
+    border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow-lg); padding:12px 14px; }
+  #bgJob[hidden] { display:none; }
+  .bgjob-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:8px; }
+  .bgjob-head span { font-size:13px; font-weight:600; color:var(--ink); }
+  .bgjob-bar { height:6px; border-radius:999px; background:var(--paper); border:1px solid var(--line); overflow:hidden; }
+  #bgJobFill { height:100%; width:0; background:var(--accent); border-radius:999px; transition:width .3s; }
+  .bgjob-count { margin-top:6px; font-size:11.5px; color:var(--ink-2); }
 
   @media (max-width:560px) {
     .row2, .row4 { grid-template-columns:1fr 1fr; }

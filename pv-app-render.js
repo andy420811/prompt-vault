@@ -16,7 +16,7 @@
     gSel.style.display = groups.length ? "" : "none";
     gSel.value = railSelDropdownValue();
     renderProjRail(groups);
-    document.documentElement.classList.toggle("has-rail", data.some(p => p.group || p.stack));
+    document.documentElement.classList.toggle("has-rail", railFolders.size > 0 || data.some(p => p.group || p.stack));
 
     // 分區整理檢視：依專案／系列分區顯示，隱藏單選過濾器
     const sectioned = viewMode === "sections";
@@ -272,13 +272,17 @@
     const list = $("#prList"); if (!list) return;
     // 由所有作品的堆疊路徑建出樹（node.count = 子樹作品數）
     const root = { children: new Map() };
+    const inTree = new Set();
     data.forEach(p => {
       let cur = root;
       stackPath(p).forEach(seg => {
+        inTree.add(seg);
         if (!cur.children.has(seg)) cur.children.set(seg, { seg, count: 0, children: new Map() });
         const n = cur.children.get(seg); n.count++; cur = n;
       });
     });
+    // 使用者建立的資料夾：即使沒有任何作品也要顯示（已出現在樹裡的不重複加）
+    railFolders.forEach(seg => { if (!inTree.has(seg)) root.children.set(seg, { seg, count: 0, children: new Map() }); });
     const byName = (a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant");
     let html = `<button class="pr-item${railSel.size === 0 ? " active" : ""}" data-all="1" data-g=""><span class="pr-lbl">全部作品</span><span class="pr-n">${data.length}</span></button>`;
     [...root.children.values()].sort(byName).forEach(n => html += railNodeHTML(n, "", 0));
@@ -287,7 +291,7 @@
     const loose = [...new Set(data.filter(p => !p.stack && p.group).map(p => p.group))].filter(g => !stackedGroups.has(g)).sort((a, b) => a.localeCompare(b, "zh-Hant"));
     loose.forEach(g => {
       const n = data.filter(p => !p.stack && p.group === g).length;
-      html += `<button class="pr-item${railSel.has("g:" + g) ? " active" : ""}" data-g="${esc(g)}"><span class="pr-lbl">${esc(g)}</span><span class="pr-n">${n}</span></button>`;
+      html += `<button class="pr-item${railSel.has("g:" + g) ? " active" : ""}" data-g="${esc(g)}" draggable="true"><span class="pr-lbl">${esc(g)}</span><span class="pr-n">${n}</span></button>`;
     });
     list.innerHTML = html;
   }
@@ -296,7 +300,8 @@
     const hasKids = node.children.size > 0, open = railOpen.has(node.seg);
     const chev = hasKids ? `<span class="pr-chev${open ? " open" : ""}" data-chev="${esc(node.seg)}">▸</span>` : `<span class="pr-chev blank">▸</span>`;
     const active = railSel.has(prefix) ? " active" : "";   // 已選取（會在右側顯示）者高亮
-    let html = `<div class="pr-item pr-stack${active}" data-prefix="${esc(prefix)}" data-seg="${esc(node.seg)}" style="padding-left:${10 + depth * 14}px">${chev}<span class="pr-lbl">${esc(stackName(node.seg))}</span><span class="pr-n">${node.count}</span></div>`;
+    const isFolder = railFolders.has(node.seg);
+    let html = `<div class="pr-item pr-stack${isFolder ? " pr-folder" : ""}${active}" data-prefix="${esc(prefix)}" data-seg="${esc(node.seg)}" draggable="true" style="padding-left:${10 + depth * 14}px">${chev}${isFolder ? `<span class="pr-ico">${open && hasKids ? "📂" : "📁"}</span>` : ""}<span class="pr-lbl">${esc(stackName(node.seg))}</span><span class="pr-n">${node.count}</span>${isFolder ? `<button class="pr-del" data-del="${esc(node.seg)}" title="刪除資料夾">✕</button>` : ""}</div>`;
     if (hasKids && open) [...node.children.values()].sort((a, b) => stackName(a.seg).localeCompare(stackName(b.seg), "zh-Hant")).forEach(c => html += railNodeHTML(c, prefix, depth + 1));
     return html;
   }
