@@ -369,7 +369,7 @@
   $("#addBtn").addEventListener("click", () => openEditor());
   $("#overlay").addEventListener("click", e => { if (e.target === $("#overlay")) closeEditor(); });
   document.addEventListener("keydown", e => {
-    if (e.key === "Escape") { closeEditor(); ["intakeOverlay","libOverlay","applyOverlay","menuOverlay","revOverlay","tagOverlay","trashOverlay"].forEach(id => $("#" + id).classList.remove("show")); $("#lightbox").classList.remove("show"); }
+    if (e.key === "Escape") { closeEditor(); ["intakeOverlay","libOverlay","applyOverlay","menuOverlay","revOverlay","tagOverlay","trashOverlay","storyOverlay","assetOverlay"].forEach(id => $("#" + id).classList.remove("show")); $("#lightbox").classList.remove("show"); }
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && $("#overlay").classList.contains("show")) $("#saveBtn").click();
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#q").focus(); }
   });

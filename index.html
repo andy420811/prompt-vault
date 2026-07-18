@@ -36,6 +36,9 @@
     <button class="icon-btn" id="canvasBtn" title="專案畫布（串聯 prompt 關係）">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1M8.5 15.5 16 10"/></svg>
     </button>
+    <button class="icon-btn" id="assetBtn" title="資產庫（角色／風格）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3.4 2.9-5.4 5.5-5.4s4.9 2 5.5 5.4"/><path d="m17.5 3.5 1 2.1 2.3.3-1.7 1.6.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.6 2.3-.3z"/></svg>
+    </button>
     <button class="icon-btn" id="themeBtn" title="切換深／淺色">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v2M12 19v2M5 12H3M21 12h-2M6 6 4.5 4.5M19.5 19.5 18 18M18 6l1.5-1.5M4.5 19.5 6 18"/><circle cx="12" cy="12" r="4"/></svg>
     </button>
@@ -91,6 +94,74 @@
   </div>
 </div>
 
+<!-- storyboard（放在編輯器之前：從故事板開編輯器時，編輯器要蓋在上面） -->
+<div class="overlay" id="storyOverlay">
+  <div class="modal sto-modal" role="dialog" aria-modal="true" aria-labelledby="storyTitle">
+    <div class="modal-head">
+      <h2 id="storyTitle">🎬 故事板</h2>
+      <button class="icon-btn" id="storyClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="gap:10px">
+      <div class="sto-bar">
+        <p class="hint" style="margin:0;flex:1;min-width:200px">依播出順序排列分鏡：‹ › 調整順序，秒數／轉場／備註改完自動儲存，點標題或 ✎ 開編輯器。</p>
+        <button type="button" class="btn ghost" id="stoAdd">➕ 新增分鏡</button>
+        <button type="button" class="btn ghost" id="stoCopy">📋 複製 Shotlist</button>
+        <button type="button" class="btn ghost" id="stoDl">⬇ 下載 .md</button>
+      </div>
+      <div class="sto-strip" id="stoStrip"></div>
+      <datalist id="stoTransList">
+        <option>硬切</option><option>淡入</option><option>淡出</option><option>疊化</option>
+        <option>擦除</option><option>縮放推近</option><option>甩鏡 Whip pan</option><option>跳接</option>
+      </datalist>
+    </div>
+  </div>
+</div>
+
+<!-- asset library（角色／風格資產） -->
+<div class="overlay" id="assetOverlay">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
+    <div class="modal-head">
+      <h2>資產庫（角色／風格）</h2>
+      <button class="icon-btn" id="assetClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="gap:10px">
+      <p class="hint" id="assetHint" style="margin:0"></p>
+      <div class="ast-list" id="astList"></div>
+      <div class="ast-form" id="astForm" hidden>
+        <div class="row2">
+          <div class="field"><label for="astName">名稱</label><input id="astName" placeholder="例如：呱呱（主角）、頻道縮圖風格"></div>
+          <div class="field"><label>類型</label>
+            <div class="seg" id="astKindSeg">
+              <button type="button" data-k="char" class="on">🎭 角色</button>
+              <button type="button" data-k="style">🎨 風格</button>
+            </div>
+          </div>
+        </div>
+        <div class="field"><label for="astDesc">描述片段 <span class="opt">（插入 prompt 的文字，建議英文）</span></label>
+          <textarea id="astDesc" class="mono" style="min-height:90px" placeholder="a cheerful yellow duck mascot, round body, big sparkling eyes, wearing a tiny baseball cap…"></textarea>
+        </div>
+        <div class="field"><label>參考圖 <span class="opt">（選填・單張）</span></label>
+          <div class="ast-imgrow">
+            <img id="astImgPrev" alt="" hidden>
+            <button type="button" class="btn ghost" id="astImgPick">選擇圖片</button>
+            <button type="button" class="btn ghost" id="astImgClear" hidden>移除</button>
+          </div>
+          <input id="astImgFile" type="file" accept="image/*" hidden>
+        </div>
+        <div class="pk-actions">
+          <button type="button" class="btn primary" id="astSave">儲存資產</button>
+          <button type="button" class="btn ghost" id="astCancel">取消</button>
+        </div>
+      </div>
+      <button type="button" class="btn ghost" id="astAdd" style="justify-content:center">➕ 新增資產</button>
+    </div>
+  </div>
+</div>
+
 <!-- editor -->
 <div class="overlay" id="overlay">
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="mTitle">
@@ -123,6 +194,7 @@
             分析並自動填入
           </button>
           <button type="button" class="link-btn ai-link" id="enhanceBtn">✦ AI 強化英文</button>
+          <button type="button" class="link-btn" id="assetInsertBtn">🎭 插入資產</button>
         </label>
         <textarea id="fPrompt" class="mono" placeholder="貼上提示詞後自動分析，或手動點上方按鈕…"></textarea>
       </div>
@@ -524,4 +596,5 @@
 <script src="pv-app-analyze.js"></script>
 <script src="pv-app-editor.js"></script>
 <script src="pv-app-tools.js"></script>
+<script src="pv-app-board.js"></script>
 <script src="pv-app-boot.js"></script>

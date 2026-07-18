@@ -19,6 +19,7 @@ const ASSETS = [
   "./pv-app-analyze.js",
   "./pv-app-editor.js",
   "./pv-app-tools.js",
+  "./pv-app-board.js",
   "./pv-app-boot.js",
   "./manifest.webmanifest",
   "./icon-192.png",

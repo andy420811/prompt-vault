@@ -176,6 +176,7 @@
     const style = depth ? ` style="margin-left:${depth * 18}px"` : "";
     return `<div class="stack-head${depth ? " nested" : ""}" data-stack="${esc(prefix)}" data-seg="${esc(seg)}"${style}>
       <span class="sh-ico">📚</span><span class="sh-name">${esc(stackName(seg, members))}</span><span class="sh-n">${members.length} 件</span>
+      <button type="button" class="sh-btn" data-act="storyboard">🎬 故事板</button>
       <button type="button" class="sh-btn" data-act="stackclose">收合</button>
       <button type="button" class="sh-btn danger" data-act="unstack">取消堆疊</button>
     </div>`;
@@ -259,7 +260,7 @@
         <span class="result-badge img-count">${ci + 1} / ${covers.length}</span>
         <button class="img-default" data-act="pilesetcover" title="把這張設為堆疊封面" style="display:none">設為封面</button>` : ""}</div>` : ""}
       <div class="card-body">
-        <div class="card-head"><span class="cat">📚 ${hasSub ? "多層系列" : "系列"}</span><span class="pile-count">${members.length} 件</span></div>
+        <div class="card-head"><span class="cat">📚 ${hasSub ? "多層系列" : "系列"}</span><span class="pile-count">${members.length} 件</span><button type="button" class="pile-board" data-act="storyboard" title="開啟故事板">🎬</button></div>
         <h3>${esc(stackName(seg, members))}</h3>
         <div class="pile-preview">${members.slice(0, 4).map(m => esc(m.title || "未命名")).join("、")}${members.length > 4 ? " …" : ""}</div>
       </div>

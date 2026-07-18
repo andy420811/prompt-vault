@@ -27,6 +27,7 @@
       const prefix = sh.dataset.stack, seg = sh.dataset.seg, a = e.target.closest("[data-act]")?.dataset.act;
       clearTimeout(stackClickT);
       if (a === "unstack") { removeStackLevel(prefix); commitStacks("已取消堆疊"); return; }
+      if (a === "storyboard") { openStoryboard(prefix); return; }
       if (a === "stackclose") { expandedStacks.delete(seg); render(); return; }
       stackClickT = setTimeout(() => { expandedStacks.delete(seg); render(); }, 250);   // 空白處單擊收合，防抖讓雙擊改名
       return;
@@ -50,6 +51,7 @@
     if (card.classList.contains("pile")) {
       const pa = e.target.closest("[data-act]")?.dataset.act;
       if (pa === "pileprev" || pa === "pilenext") { clearTimeout(stackClickT); navPile(card, pa === "pilenext" ? 1 : -1); return; }
+      if (pa === "storyboard") { clearTimeout(stackClickT); openStoryboard(card.dataset.stack); return; }
       if (pa === "pilesetcover") {
         clearTimeout(stackClickT);
         const rdiv = card.querySelector(".result"), sg = card.dataset.seg;
