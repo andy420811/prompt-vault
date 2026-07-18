@@ -168,8 +168,17 @@
       saveRailOpen(); render(); return;
     }
     const stackEl = e.target.closest(".pr-stack");
-    if (stackEl) {   // 點堆疊節點＝切換選取（防抖，讓雙擊改名可攔截）
+    if (stackEl) {
       clearTimeout(railClickT);
+      if (stackEl.classList.contains("pr-folder")) {   // 點資料夾列＝展開／收合（防抖，讓雙擊改名可攔截）
+        const seg = stackEl.dataset.seg;
+        railClickT = setTimeout(() => {
+          if (railOpen.has(seg)) railOpen.delete(seg); else railOpen.add(seg);
+          saveRailOpen(); render();
+        }, 230);
+        return;
+      }
+      // 點堆疊節點＝切換選取（防抖，讓雙擊改名可攔截）
       const prefix = stackEl.dataset.prefix;
       railClickT = setTimeout(() => toggleRailFilter(prefix, true), 230);
       return;
