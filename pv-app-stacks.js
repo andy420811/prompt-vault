@@ -112,6 +112,19 @@
     if (railFolders.delete(seg)) saveRailFolders();
     if (parent) dissolveIfLonely(parent);
   }
+  // 手動解除堆疊：根堆疊會詢問是否一併移除成員因堆疊設定的系列主題；巢狀層的主題屬於上層根堆疊，不問
+  function unstackAsk(prefix, msg) {
+    if (!prefix) return;
+    const segs = prefix.split("/"), seg = segs[segs.length - 1];
+    const isRoot = segs.length === 1;
+    const g = stackNames[seg] || "";
+    const direct = isRoot ? data.filter(p => p.stack === prefix && p.group === g) : [];
+    const clear = isRoot && g && direct.length &&
+      confirm(`要一併移除成員的系列主題「${g}」嗎？\n（按取消則保留，成員仍會以「${g}」散裝系列分組）`);
+    removeStackLevel(prefix);
+    if (clear) direct.forEach(p => { p.group = ""; p.edited = Date.now(); });
+    commitStacks(msg);
+  }
   // 把一個作品移出堆疊（完全脫離），並檢查原堆疊是否只剩一項
   function moveItemOut(dp) {
     if (!dp || !dp.stack) return;

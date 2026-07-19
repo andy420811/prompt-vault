@@ -26,7 +26,7 @@
     if (sh) {
       const prefix = sh.dataset.stack, seg = sh.dataset.seg, a = e.target.closest("[data-act]")?.dataset.act;
       clearTimeout(stackClickT);
-      if (a === "unstack") { removeStackLevel(prefix); commitStacks("已取消堆疊"); return; }
+      if (a === "unstack") { unstackAsk(prefix, "已取消堆疊"); return; }
       if (a === "storyboard") { openStoryboard(prefix); return; }
       if (a === "stackclose") { expandedStacks.delete(seg); render(); return; }
       stackClickT = setTimeout(() => { expandedStacks.delete(seg); render(); }, 250);   // 空白處單擊收合，防抖讓雙擊改名
@@ -326,7 +326,7 @@
     const onRemove = !!targetEl.closest("#removeZone");
     const pile = targetEl.closest(".card.pile"), head = targetEl.closest(".stack-head"), tcard = targetEl.closest(".card:not(.pile)");
     if (dragStackPrefix) {   // 拖曳整個堆疊 → 解散 or 巢狀進另一疊
-      if (onRemove) { removeStackLevel(dragStackPrefix); commitStacks("已解散堆疊"); return; }
+      if (onRemove) { unstackAsk(dragStackPrefix, "已解散堆疊"); return; }
       let dest = null;
       if (pile) dest = pile.dataset.stack;
       else if (head) dest = head.dataset.stack;
