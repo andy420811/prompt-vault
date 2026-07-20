@@ -144,6 +144,7 @@
   const UNDO_MAX = 25;
   let lastSnapshot = null;                // 上一個已存狀態；初始化後設基準（讓第一步編輯也可復原）
   let editingId = null;
+  let newCtx = null;                      // 新增時要落入的當前堆疊／資料夾／散裝系列（openEditor 捕捉，儲存時套用）
   let curType = "image";
   let curImgs = [];
   const sel = { camera:new Set(), style:new Set(), light:new Set(), shot:new Set() };

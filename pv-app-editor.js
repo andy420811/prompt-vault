@@ -116,6 +116,12 @@
   // ---------- editor ----------
   window.openEditor = function (p) {
     editingId = p ? p.id : null;
+    // 新增時：若左側正單選一個堆疊／資料夾／散裝系列，記住它，儲存時把新項目落進去
+    newCtx = null;
+    if (!p && railSel.size === 1) {
+      const t = [...railSel][0];
+      newCtx = t.startsWith("g:") ? { group: t.slice(2) } : { stack: t };
+    }
     autoAnalyzed = false;
     curType = p ? p.type : "image";
     $("#mTitle").textContent = p ? "編輯提示詞" : "新增提示詞";
@@ -125,7 +131,7 @@
     $("#fModel").value = p ? p.model : "";
     $("#fTags").value = p ? p.tags.join(", ") : "";
     $("#fUrl").value = p ? p.url : "";
-    $("#fGroup").value = p ? p.group : "";
+    $("#fGroup").value = p ? p.group : (newCtx && newCtx.group ? newCtx.group : "");
     $("#groupList").innerHTML = [...new Set(data.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("");
     $("#fNotes").value = p ? p.notes : "";
     const pm = p ? p.params : {};
@@ -347,8 +353,11 @@
       else { target = normalize({ ...rec, id: editingId, fav: false, created: Date.now(), edited: Date.now() }); data.unshift(target); }  // 該筆已在別台刪除→重新加入
       toast(pulled ? "已併入雲端更新，並更新此則" : "已更新");
     } else {
+      if (newCtx && newCtx.stack) rec.stack = newCtx.stack;   // 落進當前開啟的堆疊／資料夾
       target = normalize({ ...rec, id: uid(), fav: false, created: Date.now(), edited: Date.now() });
-      data.unshift(target); toast(pulled ? "已併入雲端更新，並新增" : "已新增");
+      data.unshift(target);
+      if (target.stack) syncGroups();   // 讓 group 依堆疊根同步（railSel 篩選與顯示才正確）
+      toast(pulled ? "已併入雲端更新，並新增" : "已新增");
     }
     save(); render(); closeEditor();
     if (!target.varsDone) detectVars(target);   // 沒在編輯器分析過的（如手動輸入）背景補辨識
