@@ -256,7 +256,14 @@
       a.href = q ? base + encodeURIComponent(q) : base.split("?")[0].replace(/\/search.*/, "");
     });
   }
-  $("#libQ").addEventListener("input", renderLib);
+  let extDeb = null;
+  $("#libQ").addEventListener("input", () => {
+    if (libSrcCur === "local") { renderLib(); return; }
+    clearTimeout(extDeb); extDeb = setTimeout(() => extSearch(true), 600);
+  });
+  $("#libQ").addEventListener("keydown", e => {
+    if (e.key === "Enter" && libSrcCur !== "local") { clearTimeout(extDeb); extSearch(true); }
+  });
   $("#libList").addEventListener("click", e => {
     const item = e.target.closest(".lib-item"); if (!item) return;
     const it = LIB[+item.dataset.i]; if (!it) return;
@@ -270,10 +277,170 @@
       analyzePrompt();
     }
   });
-  $("#libBtn").addEventListener("click", () => { libOv.classList.add("show"); renderLib(); setTimeout(() => $("#libQ").focus(), 50); });
+  $("#libBtn").addEventListener("click", () => { libOv.classList.add("show"); refreshLib(false); setTimeout(() => $("#libQ").focus(), 50); });
   $("#canvasBtn").addEventListener("click", () => { if (window.PVCanvas) window.PVCanvas.open(); else toast("畫布模組未載入（請確認 pv-canvas.js 與本檔同資料夾）"); });
   $("#libClose").addEventListener("click", () => libOv.classList.remove("show"));
   libOv.addEventListener("click", e => { if (e.target === libOv) libOv.classList.remove("show"); });
+
+  // ---------- 外部靈感來源（Civitai / Danbooru：公開 API、免金鑰、CORS 開放）----------
+  let libSrcCur = "local";
+  let extState = null;   // { src, items[], cursor, page, end, busy }；重設時換新物件，舊的非同步請求自然作廢
+  const LIB_PLACEHOLDER = {
+    local: "搜尋模板：縮圖、B-roll、產品、動漫…",
+    civitai: "以英文關鍵字過濾當月熱門的提示詞，留空＝瀏覽熱門（含影片）",
+    danbooru: "輸入一個英文標籤（空格自動併成同一標籤，如 cat girl）",
+  };
+  $("#libSrc").addEventListener("click", e => {
+    const b = e.target.closest(".pk"); if (!b) return;
+    libSrcCur = b.dataset.s;
+    $$("#libSrc .pk").forEach(x => x.classList.toggle("on", x === b));
+    $("#libCats").style.display = libSrcCur === "local" ? "" : "none";
+    $("#libQ").placeholder = LIB_PLACEHOLDER[libSrcCur];
+    refreshLib(true);
+  });
+  function refreshLib(reset) {
+    if (libSrcCur === "local") { $("#extFoot").hidden = true; renderLib(); return; }
+    extSearch(reset);
+  }
+  function extStatus(t) { $("#extStatus").textContent = t; }
+  async function extSearch(reset) {
+    if (!extState || reset || extState.src !== libSrcCur)
+      extState = { src: libSrcCur, items: [], cursor: null, page: 1, end: false, busy: false };
+    const st = extState;
+    if (st.busy) return;
+    if (st.end && st.items.length) { extRender(); return; }
+    st.busy = true;
+    $("#extFoot").hidden = false; $("#extMore").hidden = true;
+    extStatus("搜尋中…");
+    if (!st.items.length) $("#libList").innerHTML = `<div class="lib-none">搜尋中…</div>`;
+    try {
+      if (st.src === "civitai") await civFetch(st); else await danFetch(st);
+      if (st !== extState) return;
+      extRender();
+    } catch (err) {
+      if (st !== extState) return;
+      $("#libList").innerHTML = `<div class="lib-none">外部搜尋失敗：${esc(err.message || String(err))}<br>需要網路連線；來源偶爾限流，稍候再試，或用下方外部連結。</div>`;
+      extStatus("");
+    }
+    st.busy = false;
+  }
+  function civThumb(url, w) {
+    return /\/(original=true|width=\d+)\//.test(url) ? url.replace(/\/(original=true|width=\d+)\//, `/width=${w}/`) : url;
+  }
+  async function civFetch(st) {
+    const kw = $("#libQ").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const before = st.items.length;
+    let pages = 0;
+    do {
+      const u = new URL("https://civitai.com/api/v1/images");
+      u.searchParams.set("limit", kw.length ? "100" : "40");
+      u.searchParams.set("nsfw", "None");
+      u.searchParams.set("withMeta", "true");
+      u.searchParams.set("sort", "Most Reactions");
+      u.searchParams.set("period", "Month");
+      if (st.cursor) u.searchParams.set("cursor", st.cursor);
+      const r = await fetch(u); if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      st.cursor = (j.metadata && j.metadata.nextCursor) || null;
+      if (!st.cursor) st.end = true;
+      for (const it of j.items || []) {
+        const p = it.meta && it.meta.prompt; if (!p || !it.url) continue;
+        const pl = p.toLowerCase();
+        if (kw.length && !kw.every(k => pl.includes(k))) continue;
+        st.items.push({
+          src: "civitai", ty: it.type === "video" ? "video" : "image",
+          thumb: civThumb(it.url, 240), grab: civThumb(it.url, 960), full: it.url,
+          prompt: p.trim(), neg: ((it.meta.negativePrompt || "") + "").trim(),
+          by: it.username || "", model: it.baseModel || "",
+          link: "https://civitai.com/images/" + it.id,
+        });
+      }
+      pages++;
+    } while (kw.length && pages < 5 && !st.end && st.items.length - before < 20);
+  }
+  async function danFetch(st) {
+    const q = $("#libQ").value.trim();
+    const tag = q ? q.replace(/\s+/g, "_") : "order:rank";
+    const r = await fetch("https://danbooru.donmai.us/posts.json?limit=40&page=" + st.page +
+      "&tags=" + encodeURIComponent("rating:general " + tag));
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    if (!Array.isArray(j)) throw new Error((j && j.message) || "回應格式錯誤");
+    if (j.length < 40) st.end = true;
+    st.page++;
+    for (const it of j) {
+      if (!it.preview_file_url) continue;
+      const tags = [it.tag_string_character, it.tag_string_copyright, it.tag_string_general]
+        .filter(Boolean).join(" ").split(" ").filter(Boolean);
+      if (!tags.length) continue;
+      st.items.push({
+        src: "danbooru", ty: "image",
+        thumb: it.preview_file_url, grab: it.large_file_url || it.file_url || it.preview_file_url,
+        full: it.large_file_url || it.file_url || it.preview_file_url,
+        prompt: tags.map(t => t.replace(/_/g, " ")).join(", "), neg: "",
+        by: "", model: "",
+        link: "https://danbooru.donmai.us/posts/" + it.id,
+      });
+    }
+  }
+  function extTitle(it) {
+    const s = (it.prompt.split(/[,\n]/)[0] || "").trim();
+    return (s.length > 42 ? s.slice(0, 42) + "…" : s) || (it.src === "civitai" ? "Civitai 靈感" : "Danbooru 靈感");
+  }
+  function extRender() {
+    const st = extState;
+    $("#libList").innerHTML = st.items.length ? st.items.map((it, i) => `
+      <div class="lib-item ext-item" data-x="${i}">
+        ${it.ty === "video"
+          ? `<video class="exi-thumb" src="${esc(it.thumb)}" muted loop playsinline preload="metadata"></video>`
+          : `<img class="exi-thumb" src="${esc(it.thumb)}" decoding="async" alt="">`}
+        <div class="exi-body">
+          <div class="lh">
+            <span class="lc ${it.ty === "video" ? "v" : "i"}">${it.ty === "video" ? "影片" : "圖像"}</span>
+            ${it.model ? `<span class="lc">${esc(it.model)}</span>` : ""}
+            ${it.by ? `<span class="lc">@${esc(it.by)}</span>` : ""}
+            <span class="la">
+              <a class="mini-btn" href="${esc(it.link)}" target="_blank" rel="noopener">原頁</a>
+              <button type="button" class="mini-btn x-copy">複製</button>
+              <button type="button" class="mini-btn x-use">帶入編輯器</button>
+            </span>
+          </div>
+          <div class="lp">${esc(it.prompt)}</div>
+        </div>
+      </div>`).join("")
+      : `<div class="lib-none">沒有結果——換個英文關鍵字，或按「載入更多」擴大掃描範圍。</div>`;
+    $("#extMore").hidden = st.end;
+    extStatus(st.items.length ? `已載入 ${st.items.length} 筆${st.end ? "（到底了）" : ""}` : "");
+  }
+  $("#extMore").addEventListener("click", () => extSearch(false));
+  $("#libList").addEventListener("click", e => {
+    const item = e.target.closest(".ext-item"); if (!item || !extState) return;
+    const it = extState.items[+item.dataset.x]; if (!it) return;
+    if (e.target.closest(".x-copy")) { copyText(it.prompt, e.target.closest(".x-copy")); return; }
+    if (e.target.closest(".exi-thumb")) {
+      if (it.ty === "video") window.open(it.link, "_blank"); else openLight([it.full], 0);
+      return;
+    }
+    if (e.target.closest(".x-use")) {
+      libOv.classList.remove("show");
+      openEditor();
+      setType(it.ty);
+      $("#fPrompt").value = it.prompt;
+      if (it.neg) $("#fNeg").value = it.neg;
+      $("#fTitle").value = extTitle(it);
+      $("#fUrl").value = it.link;
+      autoAnalyzed = true;
+      analyzePrompt();
+      if (it.ty === "image") {           // 抓縮圖進結果圖；跨域或逾時失敗就靜默略過
+        const tgt = curImgs;
+        fetch(it.grab).then(r => r.ok ? r.blob() : Promise.reject())
+          .then(b => downscale(b, 960, d => { if (tgt === curImgs) { curImgs.push(d); renderThumb(); } }))
+          .catch(() => {});
+      }
+    }
+  });
+  $("#libList").addEventListener("mouseover", e => { const v = e.target.closest("video.exi-thumb"); if (v) v.play().catch(() => {}); });
+  $("#libList").addEventListener("mouseout", e => { const v = e.target.closest("video.exi-thumb"); if (v) v.pause(); });
 
   // ---------- AI enhance (zh → pro English prompt) ----------
   const ENH_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" }, note: { type: "STRING" } }, required: ["prompt"] };

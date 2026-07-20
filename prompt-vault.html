@@ -552,12 +552,21 @@
       </button>
     </div>
     <div class="modal-body lib-tools">
+      <div class="lib-cats" id="libSrc">
+        <button type="button" class="pk on" data-s="local">📚 本地模板</button>
+        <button type="button" class="pk" data-s="civitai">🎨 Civitai 熱門</button>
+        <button type="button" class="pk" data-s="danbooru">🌸 Danbooru 動漫</button>
+      </div>
       <div class="lib-search">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
         <input id="libQ" type="search" placeholder="搜尋模板：縮圖、B-roll、產品、動漫…" autocomplete="off">
       </div>
       <div class="lib-cats" id="libCats"></div>
       <div class="lib-list" id="libList"></div>
+      <div class="ext-foot" id="extFoot" hidden>
+        <span class="ext-status" id="extStatus"></span>
+        <button type="button" class="mini-btn" id="extMore" hidden>載入更多</button>
+      </div>
       <div class="ext-links" id="extLinks">
         <span class="el-label">找更多靈感（外部）：</span>
         <a data-base="https://lexica.art/?q=" href="https://lexica.art" target="_blank" rel="noopener">Lexica</a>
