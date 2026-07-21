@@ -544,7 +544,7 @@
 
 <!-- prompt library / searcher -->
 <div class="overlay" id="libOverlay">
-  <div class="modal" role="dialog" aria-modal="true" style="max-width:680px">
+  <div class="modal lib-modal" id="libModal" role="dialog" aria-modal="true">
     <div class="modal-head">
       <h2>Prompt 靈感搜尋器</h2>
       <button class="icon-btn" id="libClose" title="關閉" style="width:34px;height:34px">
@@ -552,26 +552,61 @@
       </button>
     </div>
     <div class="modal-body lib-tools">
-      <div class="lib-cats" id="libSrc">
-        <button type="button" class="pk on" data-s="local">📚 本地模板</button>
-        <button type="button" class="pk" data-s="civitai">🎨 Civitai 熱門</button>
-        <button type="button" class="pk" data-s="danbooru">🌸 Danbooru 動漫</button>
-      </div>
-      <div class="lib-search">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input id="libQ" type="search" placeholder="搜尋模板：縮圖、B-roll、產品、動漫…" autocomplete="off">
+      <div class="lib-bar">
+        <div class="lib-cats" id="libSrc">
+          <button type="button" class="pk on" data-s="local">📚 本地模板</button>
+          <button type="button" class="pk" data-s="civitai">🎨 Civitai 熱門</button>
+          <button type="button" class="pk" data-s="danbooru">🌸 Danbooru 動漫</button>
+        </div>
+        <div class="lib-search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input id="libQ" type="search" placeholder="搜尋模板：縮圖、B-roll、產品、動漫…" autocomplete="off">
+        </div>
       </div>
       <div class="lib-cats" id="libCats"></div>
+      <div class="ext-chips" id="extChips" hidden></div>
       <div class="lib-list" id="libList"></div>
+      <div class="ext-feed" id="extFeed" hidden></div>
       <div class="ext-foot" id="extFoot" hidden>
         <span class="ext-status" id="extStatus"></span>
-        <button type="button" class="mini-btn" id="extMore" hidden>載入更多</button>
+        <button type="button" class="btn ghost" id="extMore" hidden>載入更多</button>
       </div>
       <div class="ext-links" id="extLinks">
         <span class="el-label">找更多靈感（外部）：</span>
         <a data-base="https://lexica.art/?q=" href="https://lexica.art" target="_blank" rel="noopener">Lexica</a>
         <a data-base="https://prompthero.com/search?q=" href="https://prompthero.com" target="_blank" rel="noopener">PromptHero</a>
         <a data-base="https://civitai.com/search/images?query=" href="https://civitai.com" target="_blank" rel="noopener">Civitai</a>
+      </div>
+    </div>
+
+    <!-- 貼文詳情（覆蓋整個 modal） -->
+    <div class="exd" id="extDetail" hidden>
+      <div class="exd-media" id="exdMedia">
+        <button class="exd-nav prev" id="exdPrev" title="上一則">‹</button>
+        <button class="exd-nav next" id="exdNext" title="下一則">›</button>
+      </div>
+      <div class="exd-side">
+        <div class="exd-top">
+          <div class="exd-meta" id="exdMeta"></div>
+          <button class="icon-btn" id="exdClose" title="返回列表" style="width:32px;height:32px">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <div class="exd-scroll">
+          <div class="exd-label">提示詞</div>
+          <div class="exd-prompt" id="exdPrompt"></div>
+          <div id="exdNegWrap" hidden>
+            <div class="exd-label">負向提示詞</div>
+            <div class="exd-prompt neg" id="exdNeg"></div>
+          </div>
+          <div class="exd-label">標籤（點擊搜尋相似）</div>
+          <div class="exd-tags" id="exdTags"></div>
+        </div>
+        <div class="exd-acts">
+          <a class="btn ghost" id="exdLink" target="_blank" rel="noopener">原頁</a>
+          <button type="button" class="btn ghost" id="exdCopy">複製</button>
+          <button type="button" class="btn primary" id="exdUse">帶入編輯器</button>
+        </div>
       </div>
     </div>
   </div>

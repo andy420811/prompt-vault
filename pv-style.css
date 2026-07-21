@@ -509,14 +509,75 @@
   .ext-links .el-label { font-size:12px; color:var(--ink-3); }
   .ext-links a { font-size:12.5px; font-weight:600; color:var(--accent); text-decoration:none; }
   .ext-links a:hover { text-decoration:underline; }
-  .ext-item { display:flex; gap:12px; }
-  .exi-thumb { width:84px; height:84px; object-fit:cover; border-radius:8px; border:1px solid var(--line);
-    background:var(--surface-2); flex:none; cursor:zoom-in; }
-  .exi-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
-  .ext-item .lp { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
   a.mini-btn { display:inline-flex; align-items:center; text-decoration:none; }
   .ext-foot { display:flex; align-items:center; justify-content:center; gap:12px; min-height:20px; }
   .ext-status { font-size:12px; color:var(--ink-3); }
+
+  /* ── 靈感搜尋器：社群式瀑布流 ───────────────────────────── */
+  .lib-modal { max-width:680px; }
+  .lib-modal [hidden] { display:none !important; }
+  .lib-modal.wide { max-width:1180px; height:calc(100vh - 80px); margin:16px 0; display:flex; flex-direction:column;
+    position:relative; overflow:hidden; }
+  .lib-modal.wide .modal-body { flex:1; min-height:0; overflow:hidden; gap:11px; padding:14px 18px; }
+  .lib-modal.wide .ext-links { display:none; }   /* 來源已在頂部丸子列，外連清單留給本地模板 */
+  .lib-bar { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .lib-bar .lib-cats { flex:none; }
+  .lib-bar .lib-search { flex:1; min-width:200px; }
+  .ext-chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .ext-chips .pk { font-size:12px; }
+
+  .ext-feed { display:flex; gap:14px; align-items:flex-start; flex:1; min-height:0;
+    overflow-y:auto; overflow-x:hidden; padding-right:4px; scroll-behavior:smooth; }
+  .ext-feed .lib-none { flex:1; }
+  .exf-col { flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:14px; }
+  .exf-card { margin:0; border-radius:12px; overflow:hidden; background:var(--surface-2); border:1px solid var(--line);
+    cursor:zoom-in; transition:transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
+  .exf-card:hover, .exf-card:focus-visible { transform:translateY(-3px); box-shadow:var(--shadow-lg);
+    border-color:var(--accent); outline:none; }
+  .exf-media { position:relative; width:100%; background:var(--surface-2); }
+  .exf-media img, .exf-media video { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+  .exf-badge { position:absolute; top:8px; left:8px; z-index:2; font-size:11px; font-weight:600; padding:2px 8px;
+    border-radius:999px; background:color-mix(in srgb, #100f16 65%, transparent); color:#fff; backdrop-filter:blur(4px); }
+  .exf-hov { position:absolute; inset:0; z-index:1; display:flex; flex-direction:column; justify-content:flex-end;
+    gap:8px; padding:10px; opacity:0; transition:opacity .18s ease;
+    background:linear-gradient(to top, rgba(16,15,22,.92) 0%, rgba(16,15,22,.55) 45%, transparent 100%); }
+  .exf-card:hover .exf-hov, .exf-card:focus-within .exf-hov { opacity:1; }
+  .exf-p { font-family:var(--mono); font-size:10.5px; line-height:1.5; color:rgba(255,255,255,.9);
+    display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+  .exf-acts { display:flex; gap:6px; }
+  .exf-btn { font:inherit; font-size:11.5px; font-weight:600; color:#fff; cursor:pointer;
+    background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.32); border-radius:7px; padding:4px 10px;
+    backdrop-filter:blur(4px); transition:background .15s; }
+  .exf-btn:hover { background:rgba(255,255,255,.34); }
+  .exf-cap { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:7px 10px;
+    font-size:11.5px; color:var(--ink-3); }
+  .exf-by { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .exf-like { flex:none; color:var(--ink-2); font-weight:600; }
+
+  /* 貼文詳情 */
+  .exd { position:absolute; inset:0; z-index:5; display:flex; background:var(--surface); animation:pop .18s ease-out; }
+  .exd-media { position:relative; flex:1.5; min-width:0; display:flex; align-items:center; justify-content:center;
+    background:#100f16; padding:14px; }
+  .exd-img { max-width:100%; max-height:100%; object-fit:contain; border-radius:8px; cursor:zoom-in; }
+  .exd-nav { position:absolute; top:50%; transform:translateY(-50%); z-index:2; width:38px; height:38px; border-radius:50%;
+    display:grid; place-items:center; font-size:24px; line-height:1; cursor:pointer; color:#fff;
+    background:rgba(255,255,255,.16); border:1px solid rgba(255,255,255,.3); backdrop-filter:blur(4px); transition:background .15s; }
+  .exd-nav:hover:not(:disabled) { background:rgba(255,255,255,.34); }
+  .exd-nav:disabled { opacity:.25; cursor:default; }
+  .exd-nav.prev { left:12px; } .exd-nav.next { right:12px; }
+  .exd-side { flex:none; width:370px; display:flex; flex-direction:column; border-left:1px solid var(--line); }
+  .exd-top { display:flex; align-items:flex-start; gap:10px; padding:14px 16px; border-bottom:1px solid var(--line-soft); }
+  .exd-meta { flex:1; display:flex; flex-wrap:wrap; gap:6px; }
+  .exd-scroll { flex:1; min-height:0; overflow-y:auto; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+  .exd-label { font-size:11.5px; font-weight:600; color:var(--ink-3); letter-spacing:.02em; margin-top:4px; }
+  .exd-prompt { font-family:var(--mono); font-size:12px; line-height:1.65; color:var(--ink-2);
+    background:var(--paper); border:1px solid var(--line); border-radius:8px; padding:10px 12px;
+    white-space:pre-wrap; word-break:break-word; user-select:text; }
+  .exd-prompt.neg { color:var(--ink-3); }
+  .exd-tags { display:flex; flex-wrap:wrap; gap:5px; }
+  .exd-tags .pk { font-size:11.5px; padding:3px 9px; }
+  .exd-acts { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line-soft); }
+  .exd-acts .btn { flex:1; justify-content:center; font-size:13px; padding:9px 10px; }
 
   /* toast */
   .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--ink);
@@ -567,6 +628,18 @@
     .modal-foot .btn { flex:1; justify-content:center; }
     .modal-foot .del-side { flex-basis:100%; margin-right:0; order:5; }
     .lib-list { max-height:none; }
+    /* 社群牆：手機吃滿螢幕，卡片常駐顯示提示詞（無 hover），詳情改上下堆疊 */
+    .lib-modal.wide { height:100%; min-height:0; max-width:none; }
+    .lib-modal.wide .modal-body { padding:12px; }
+    .ext-feed { gap:10px; }
+    .exf-col { gap:10px; }
+    .exf-card:hover { transform:none; }
+    .exf-hov { opacity:1; background:linear-gradient(to top, rgba(16,15,22,.9) 0%, rgba(16,15,22,.4) 55%, transparent 100%); }
+    .exf-p { -webkit-line-clamp:2; }
+    .exd { flex-direction:column; }
+    .exd-media { flex:none; height:42vh; padding:8px; }
+    .exd-side { width:auto; flex:1; min-height:0; border-left:none; border-top:1px solid var(--line); }
+    .exd-nav { width:34px; height:34px; }
     .lb-nav { width:40px; height:40px; }
     #lbPrev { left:6px; } #lbNext { right:6px; }
     .toast { left:12px; right:12px; transform:translateY(20px); bottom:16px; }
