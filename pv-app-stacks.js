@@ -62,6 +62,14 @@
     }
     return false;
   }
+  // 目前「開啟中」的堆疊 prefix（新增項目時的落點）；已收合或已不存在則視為沒有
+  function openStackCtx() {
+    if (!curStack) return null;
+    const seg = curStack.split("/").pop();
+    if (!expandedStacks.has(seg)) return null;                                      // 收合了＝不再是當前
+    if (!railFolders.has(seg) && !itemsUnder(curStack, data).length) return null;   // 堆疊已解散（資料夾可為空）
+    return curStack;
+  }
   // 只有單選一個系列時，讓工具列的下拉選單同步顯示該系列名（多選或選子堆疊則顯示「全部專案」）
   function railSelDropdownValue() {
     if (railSel.size !== 1) return "";
@@ -76,11 +84,12 @@
     const token = isStack ? key : ("g:" + key);
     if (railSel.has(token)) {
       railSel.delete(token);
-      if (isStack) { const segs = key.split("/"); expandedStacks.delete(segs[segs.length - 1]); }
+      if (isStack) { const segs = key.split("/"); expandedStacks.delete(segs[segs.length - 1]); if (curStack === key) curStack = null; }
     } else {
       railSel.add(token);
       if (isStack) {
         const segs = key.split("/");
+        curStack = key;   // 左側選取＝開啟該堆疊／資料夾，成為新增時的落點
         segs.forEach(s => { expandedStacks.add(s); railOpen.add(s); });
         saveRailOpen();
         pendingScrollSeg = segs[segs.length - 1];

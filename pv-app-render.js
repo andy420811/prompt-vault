@@ -176,6 +176,7 @@
     const style = depth ? ` style="margin-left:${depth * 18}px"` : "";
     return `<div class="stack-head${depth ? " nested" : ""}" data-stack="${esc(prefix)}" data-seg="${esc(seg)}"${style}>
       <span class="sh-ico">📚</span><span class="sh-name">${esc(stackName(seg, members))}</span><span class="sh-n">${members.length} 件</span>
+      <button type="button" class="sh-btn" data-act="addhere">＋ 加入</button>
       <button type="button" class="sh-btn" data-act="storyboard">🎬 故事板</button>
       <button type="button" class="sh-btn" data-act="stackclose">收合</button>
       <button type="button" class="sh-btn danger" data-act="unstack">取消堆疊</button>

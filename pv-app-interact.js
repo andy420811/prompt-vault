@@ -27,6 +27,7 @@
       const prefix = sh.dataset.stack, seg = sh.dataset.seg, a = e.target.closest("[data-act]")?.dataset.act;
       clearTimeout(stackClickT);
       if (a === "unstack") { unstackAsk(prefix, "已取消堆疊"); return; }
+      if (a === "addhere") { openEditor(null, { stack: prefix }); return; }   // 直接新增一則進這個堆疊
       if (a === "storyboard") { openStoryboard(prefix); return; }
       if (a === "stackclose") { expandedStacks.delete(seg); render(); return; }
       stackClickT = setTimeout(() => { expandedStacks.delete(seg); render(); }, 250);   // 空白處單擊收合，防抖讓雙擊改名
@@ -60,7 +61,7 @@
         if (i >= 0 && covers[i]) { stackCovers[sg] = { id: covers[i].id, idx: covers[i].idx }; saveStackCovers(); save(); render(); toast("已設為堆疊封面"); }
         return;
       }
-      const seg = card.dataset.seg; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(seg); pendingScrollSeg = seg; render(); }, 250); return;
+      const seg = card.dataset.seg, pfx = card.dataset.stack; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(seg); curStack = pfx; pendingScrollSeg = seg; render(); }, 250); return;   // curStack：點開＝成為新增時的落點
     }
     const id = card.dataset.id;
     const actEl = e.target.closest("[data-act]");

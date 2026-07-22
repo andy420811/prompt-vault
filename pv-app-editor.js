@@ -114,13 +114,19 @@
   $$(".block-head[data-toggle]").forEach(h => h.addEventListener("click", () => h.parentElement.classList.toggle("closed")));
 
   // ---------- editor ----------
-  window.openEditor = function (p) {
+  // p：要編輯的記錄（省略＝新增）；ctx：新增時指定落點 {stack} 或 {group}（省略則看左側單選）
+  window.openEditor = function (p, ctx) {
     editingId = p ? p.id : null;
-    // 新增時：若左側正單選一個堆疊／資料夾／散裝系列，記住它，儲存時把新項目落進去
+    // 新增時：落進指定堆疊，或左側正單選的那個堆疊／資料夾／散裝系列
     newCtx = null;
-    if (!p && railSel.size === 1) {
-      const t = [...railSel][0];
-      newCtx = t.startsWith("g:") ? { group: t.slice(2) } : { stack: t };
+    if (!p) {
+      const openStack = openStackCtx();   // 右側點開／左側選取的堆疊，優先（比選取更貼近「當前在看哪」）
+      if (ctx) newCtx = ctx;
+      else if (openStack) newCtx = { stack: openStack };
+      else if (railSel.size === 1) {
+        const t = [...railSel][0];
+        newCtx = t.startsWith("g:") ? { group: t.slice(2) } : { stack: t };
+      }
     }
     autoAnalyzed = false;
     curType = p ? p.type : "image";
