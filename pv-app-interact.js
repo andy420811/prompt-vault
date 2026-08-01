@@ -109,10 +109,11 @@
     if (act === "episode") {   // 以此卡為底建立新一集：日期換今天、同系列、開編輯器快改事件/標題
       const copy = newEpisodeFrom(p);
       data.unshift(copy); save(); render();
-      toast("已建立新一集，日期已更新為今天");
-      // 直接給變體想法（想法視窗裡有「開啟編輯器」可跳去改事件／標題）
-      if (typeof window.episodeIdeas === "function") window.episodeIdeas(copy, { newEp: true });
-      else openEditor(copy);
+      // 不搶畫面：變體想法收到右下角常駐，點一下才開（想法視窗裡有「開啟編輯器」可跳去改事件／標題）
+      if (typeof window.ideaDockAdd === "function") {
+        window.ideaDockAdd(copy, { newEp: true });
+        toast("已建立新一集 — 變體想法在右下角，點一下就開");
+      } else { toast("已建立新一集，日期已更新為今天"); openEditor(copy); }
       return;
     }
     if (act === "dup") {

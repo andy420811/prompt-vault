@@ -890,3 +890,20 @@
 .idea-acts button.pri{color:var(--accent);border-color:var(--accent)}
 .idea-acts button:disabled{opacity:.5;cursor:default}
 .idea-empty{font-size:12.5px;color:var(--ink-3);text-align:center;padding:18px 10px;line-height:1.7}
+
+/* 右下角常駐：新一集的變體想法（點一下開視窗） */
+.idea-dock{position:fixed;right:16px;bottom:16px;z-index:240;display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:min(340px,72vw)}
+.idea-dock.lifted{bottom:190px}   /* 背景工作視窗 #bgJob 出現時讓位 */
+.idea-chip{display:flex;align-items:center;gap:8px;max-width:100%;padding:8px 10px 8px 12px;border-radius:999px;cursor:pointer;
+  background:var(--surface);border:1px solid var(--accent);color:var(--ink);box-shadow:var(--shadow-lg);animation:pop .2s ease-out}
+.idea-chip:hover{background:var(--accent-tint)}
+.idea-chip .ic{font-size:14px;flex:0 0 auto}
+.idea-chip .it{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.idea-chip .ix{flex:0 0 auto;border:none;background:none;color:var(--ink-3);font-size:16px;line-height:1;cursor:pointer;padding:0 2px}
+.idea-chip .ix:hover{color:var(--danger)}
+.idea-chip.run{border-color:var(--line);cursor:progress}
+.idea-chip.err{border-color:var(--danger)}
+.idea-chip.err .it{color:var(--danger)}
+.jspin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:jspin .8s linear infinite;vertical-align:-1px}
+@keyframes jspin{to{transform:rotate(360deg)}}

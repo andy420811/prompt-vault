@@ -289,7 +289,7 @@
     if (type === "video" && sec) rec.params.duration = sec;
     return rec;
   }
-  $("#scrGo").addEventListener("click", async () => {
+  $("#scrGo").addEventListener("click", () => {
     const text = $("#scrText").value.trim();
     if (!text) { toast("請先貼上腳本或旁白"); return; }
     if (!gemKey()) { toast("腳本拆分鏡需要 AI，請先到 ⚙ 設定填入 Gemini 或 OpenRouter 金鑰"); return; }
@@ -297,32 +297,31 @@
     const cnt = $("#scrCount").value;
     const dur = $("#scrDur").value.trim();
     const type = $("#scrType").value === "image" ? "image" : "video";
-    const btn = $("#scrGo"), old = btn.textContent;
-    btn.textContent = "AI 拆解中…"; btn.disabled = true;
-    $("#scrStatus").textContent = "正在拆解鏡頭，腳本較長時可能要 10～30 秒…";
-    try {
-      const ask = [
-        "【腳本／旁白】\n" + text,
-        styleTxt ? "【視覺方向】" + styleTxt + "（每一鏡的 prompt 都要吃到這個風格）" : "",
-        cnt ? `【鏡頭數】請剛好拆成 ${cnt} 個鏡頭` : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
-        dur ? `【每鏡預設秒數】約 ${dur} 秒，長短依內容微調` : "",
-        "【分鏡類型】" + (type === "video" ? "影片動態鏡頭" : "靜態畫面")
-      ].filter(Boolean).join("\n\n");
-      const r = await aiCall(SCR_SYS, ask, SCR_SCHEMA);
-      const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
-      if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
-      const seg = uid(), now = Date.now();
-      const name = ($("#scrName").value.trim() || String(r.title || "").trim() || "腳本分鏡").slice(0, 40);
-      stackNames[seg] = name; saveStackNames();
-      data.unshift(...shots.map((s, i) => shotToRec(s, i, shots.length, type, dur, seg, now)));
-      commitStacks(`已建立「${name}」：${shots.length} 個分鏡`);
-      closeScript();
-      $("#scrText").value = ""; $("#scrName").value = "";
-      openStoryboard(seg);
-    } catch (e) {
-      $("#scrStatus").textContent = "拆解失敗：" + e.message;
-      toast("AI 呼叫失敗（" + e.message + "）");
-    } finally { btn.textContent = old; btn.disabled = false; }
+    const wantName = $("#scrName").value.trim();
+    const ask = [
+      "【腳本／旁白】\n" + text,
+      styleTxt ? "【視覺方向】" + styleTxt + "（每一鏡的 prompt 都要吃到這個風格）" : "",
+      cnt ? "【鏡頭數】請剛好拆成 " + cnt + " 個鏡頭" : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
+      dur ? "【每鏡預設秒數】約 " + dur + " 秒，長短依內容微調" : "",
+      "【分鏡類型】" + (type === "video" ? "影片動態鏡頭" : "靜態畫面")
+    ].filter(Boolean).join("\n\n");
+    // 丟到背景：拆完就把分鏡建進庫裡（畫布的自動串接會接上），故事板等使用者點右下角再開
+    closeScript(); $("#scrText").value = ""; $("#scrName").value = "";
+    window.jobTray.run({
+      title: "腳本拆分鏡" + (wantName ? "：" + wantName.slice(0, 10) : ""), icon: "🎞",
+      work: async () => {
+        const r = await aiCall(SCR_SYS, ask, SCR_SCHEMA);
+        const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
+        if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
+        const seg = uid(), now = Date.now();
+        const name = (wantName || String(r.title || "").trim() || "腳本分鏡").slice(0, 40);
+        stackNames[seg] = name; saveStackNames();
+        data.unshift(...shots.map((s, i) => shotToRec(s, i, shots.length, type, dur, seg, now)));
+        commitStacks("已建立「" + name + "」：" + shots.length + " 個分鏡");
+        return { seg: seg, name: name, n: shots.length };
+      },
+      open: r => openStoryboard(r.seg)
+    });
   });
 
   // 包一層 render：任何重繪（編輯器儲存、復原、雲端拉取…）後，故事板開著就同步刷新

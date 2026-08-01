@@ -97,19 +97,25 @@
 
   // ---------- 單張：卡片上的「生成」鈕 ----------
   const genBusy = new Set();   // 進行中的記錄 id（避免重複點）
-  async function genCard(p, btn) {
+  function genCard(p, btn) {
     if (genBusy.has(p.id)) return;
     genBusy.add(p.id);
     const old = btn ? btn.innerHTML : "";
     if (btn) { btn.innerHTML = ICON.spin + "生成中"; btn.disabled = true; btn.classList.add("busy"); }
-    try {
-      const ok = await genOne(p);
-      render();
-      toast(ok ? "生成完成，已存進這張卡" : "生成完成，但原記錄已不存在");
-    } catch (e) {
-      toast("生成失敗（" + e.message + "）");
+    const restore = () => {
+      genBusy.delete(p.id);
       if (btn && btn.isConnected) { btn.innerHTML = old; btn.disabled = false; btn.classList.remove("busy"); }
-    } finally { genBusy.delete(p.id); }
+    };
+    // 背景執行：生成期間可以繼續做別的事，完成後右下角點一下開那張卡
+    window.jobTray.run({
+      title: "生成圖片：" + (p.title || "未命名").slice(0, 12), icon: "🎨",
+      work: async () => { const ok = await genOne(p); render(); restore(); return ok; },
+      open: () => {
+        const rec = data.find(x => x.id === p.id);
+        if (rec) openEditor(rec); else toast("這則已經不在庫裡了");
+      }
+    });
+    setTimeout(() => { if (genBusy.has(p.id)) restore(); }, 1500);   // 按鈕不用一直卡著轉圈
   }
 
   // ---------- 批次：勾選多張 → 背景佇列（沿用 bgJob* 進度視窗）----------

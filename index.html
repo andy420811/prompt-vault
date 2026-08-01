@@ -493,6 +493,9 @@
   <div class="modal" role="dialog" aria-modal="true" style="max-width:660px">
     <div class="modal-head">
       <h2 id="ideaTitle">💡 變體想法</h2>
+      <button class="icon-btn" id="ideaMin" title="縮到右下角（稍後再看）" style="width:34px;height:34px;margin-left:auto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v10m0 0 4-4m-4 4-4-4M5 19h14"/></svg>
+      </button>
       <button class="icon-btn" id="ideaClose" title="關閉" style="width:34px;height:34px">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
@@ -513,6 +516,9 @@
     </div>
   </div>
 </div>
+
+<!-- 右下角常駐：等著看變體想法的新一集 -->
+<div class="idea-dock" id="ideaDock" hidden></div>
 
 <!-- import/export menu -->
 <div class="overlay" id="tagOverlay">

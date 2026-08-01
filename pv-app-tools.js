@@ -608,24 +608,35 @@
   // ---------- AI enhance (zh → pro English prompt) ----------
   const ENH_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" }, note: { type: "STRING" } }, required: ["prompt"] };
   const ENH_SYS = "你是資深提示詞工程師。將使用者的生成提示詞改寫為高品質英文提示詞：完整保留原始意圖與所有硬性要求（如「不要修改人物」、需附參考圖、比例參數）；畫面中要顯示的標題或文字內容保持原語言、不翻譯；補足具體視覺細節（光線、構圖、材質、色調），但不加入與原意矛盾的元素。輸出 prompt（改寫後的英文提示詞）與 note（一句繁體中文，說明主要強化了什麼）。";
-  $("#enhanceBtn").addEventListener("click", async () => {
+  $("#enhanceBtn").addEventListener("click", () => {
     const raw = $("#fPrompt").value.trim();
     if (!raw) { toast("請先輸入提示詞"); return; }
     if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter）"); return; }
+    const rid = editingId, title = $("#fTitle").value.trim() || "未命名";
+    const same = () => edOpen() && editingId === rid && $("#fPrompt").value.trim() === raw;
     const btn = $("#enhanceBtn"); const old = btn.innerHTML;
-    btn.textContent = "強化中…"; btn.disabled = true;
-    try {
-      const r = await aiCall(ENH_SYS, raw, ENH_SCHEMA);
-      if (!r.prompt) throw new Error("空結果");
-      syncVariants();
-      curVariants.push({ id: uid(), label: "原始版", prompt: raw, note: "AI 強化前的原文" });
-      renderVariants(); $("#blkVariants").classList.remove("closed");
-      $("#fPrompt").value = r.prompt;
-      curVars = []; curVarsAnalyzed = false; renderVarFields();
-      $("#blkVars").classList.add("closed");
-      toast(r.note ? "已強化：" + r.note : "已強化為英文提示詞，原文存為變體");
-    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { btn.innerHTML = old; btn.disabled = false; }
+    btn.textContent = "已丟到背景執行…"; btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = old; btn.disabled = false; }, 1500);
+    window.jobTray.run({
+      title: "AI 強化：" + title.slice(0, 12), icon: "✨",
+      work: () => aiCall(ENH_SYS, raw, ENH_SCHEMA).then(r => { if (!r.prompt) throw new Error("空結果"); return r; }),
+      autoApply: same,   // 編輯器沒動過就直接換上去；動過或關掉就留在右下角當候選，不會偷改你正在寫的東西
+      open: r => {
+        if (same()) {
+          syncVariants();
+          curVariants.push({ id: uid(), label: "原始版", prompt: raw, note: "AI 強化前的原文" });
+          renderVariants(); $("#blkVariants").classList.remove("closed");
+          $("#fPrompt").value = r.prompt;
+          curVars = []; curVarsAnalyzed = false; renderVarFields();
+          $("#blkVars").classList.add("closed");
+          toast(r.note ? "已強化：" + r.note : "已強化為英文提示詞，原文存為變體");
+        } else {
+          const rec = rid ? data.find(x => x.id === rid) : null;
+          window.ideaShowResults(rec || { id: rid, title: title, prompt: raw },
+            [{ label: "AI 強化版", desc: r.note || "強化後的提示詞", prompt: r.prompt }], "✨ AI 強化結果");
+        }
+      }
+    });
   });
 
   // ---------- wildcard 選項組：插入語法 ----------
@@ -644,7 +655,7 @@
   // ---------- 忠實翻譯（中⇄英對照） ----------
   const TR_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" } }, required: ["prompt"] };
   const TR_RULES = "技術參數（如 --ar 16:9、seed、fps、8k）原樣保留；【】包住的佔位符原樣保留不翻譯；{選項|選項} 選項組的大括號與｜分隔結構原樣保留（組內各選項要照翻）；提示詞中指定要顯示在畫面上的標題或文字內容保持原語言不翻譯；不新增細節、不刪減、不潤飾、不重新排序。";
-  $("#transBtn").addEventListener("click", async () => {
+  $("#transBtn").addEventListener("click", () => {
     const raw = $("#fPrompt").value.trim();
     if (!raw) { toast("請先輸入提示詞"); return; }
     if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter）"); return; }
@@ -653,25 +664,37 @@
     const sys = toEn
       ? "你是專業譯者。將使用者的圖像/影片生成提示詞【忠實】翻譯成英文，只轉換語言、不做任何強化或改寫。" + TR_RULES + "只輸出 prompt 欄位。"
       : "你是專業譯者。將使用者的英文圖像/影片生成提示詞【忠實】翻譯成繁體中文，作為閱讀理解用的對照，不做任何強化或改寫。" + TR_RULES + "只輸出 prompt 欄位。";
+    const rid = editingId, title = $("#fTitle").value.trim() || "未命名";
+    const same = () => edOpen() && editingId === rid && $("#fPrompt").value.trim() === raw;
     const btn = $("#transBtn"); const old = btn.innerHTML;
-    btn.textContent = "翻譯中…"; btn.disabled = true;
-    try {
-      const r = await aiCall(sys, raw, TR_SCHEMA);
-      if (!r.prompt) throw new Error("空結果");
-      syncVariants();
-      if (toEn) {
-        curVariants.push({ id: uid(), label: "中文原文", prompt: raw, note: "翻譯前的中文原文（對照用）" });
-        $("#fPrompt").value = r.prompt;
-        curVars = []; curVarsAnalyzed = false; renderVarFields();
-        $("#blkVars").classList.add("closed");
-        toast("已忠實翻譯為英文，中文原文存為變體可對照");
-      } else {
-        curVariants.push({ id: uid(), label: "中文對照", prompt: r.prompt, note: "英文原文的中文翻譯（理解用，不必拿去生成）" });
-        toast("已產生中文對照，存於變體區");
+    btn.textContent = "已丟到背景執行…"; btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = old; btn.disabled = false; }, 1500);
+    window.jobTray.run({
+      title: (toEn ? "翻譯成英文：" : "中文對照：") + title.slice(0, 12), icon: "🌐",
+      work: () => aiCall(sys, raw, TR_SCHEMA).then(r => { if (!r.prompt) throw new Error("空結果"); return r; }),
+      autoApply: same,
+      open: r => {
+        if (same()) {
+          syncVariants();
+          if (toEn) {
+            curVariants.push({ id: uid(), label: "中文原文", prompt: raw, note: "翻譯前的中文原文（對照用）" });
+            $("#fPrompt").value = r.prompt;
+            curVars = []; curVarsAnalyzed = false; renderVarFields();
+            $("#blkVars").classList.add("closed");
+            toast("已忠實翻譯為英文，中文原文存為變體可對照");
+          } else {
+            curVariants.push({ id: uid(), label: "中文對照", prompt: r.prompt, note: "英文原文的中文翻譯（理解用，不必拿去生成）" });
+            toast("已產生中文對照，存於變體區");
+          }
+          renderVariants(); $("#blkVariants").classList.remove("closed");
+        } else {
+          const rec = rid ? data.find(x => x.id === rid) : null;
+          window.ideaShowResults(rec || { id: rid, title: title, prompt: raw },
+            [{ label: toEn ? "英文版" : "中文對照", desc: toEn ? "忠實翻譯的英文提示詞" : "英文原文的中文翻譯（理解用）", prompt: r.prompt }],
+            "🌐 翻譯結果");
+        }
       }
-      renderVariants(); $("#blkVariants").classList.remove("closed");
-    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { btn.innerHTML = old; btn.disabled = false; }
+    });
   });
 
   // ---------- AI suggested variants ----------
@@ -679,28 +702,37 @@
     type: "OBJECT", properties: { label: { type: "STRING" }, prompt: { type: "STRING" }, desc: { type: "STRING" } }, required: ["label", "prompt"]
   } } }, required: ["variants"] };
   const VARS_SYS = "基於使用者的生成提示詞，提出方向明確不同的微調變體。每個變體輸出三個欄位：\n- label：8~16 字繁體中文、具體描述這個變體的方向與特色（如「黃昏暖調＋低角度仰拍」「藍調夜景霓虹光」），不要只寫「暖色版」這種過短籠統的名稱；\n- prompt：完整提示詞，語言與原文相同，只改動該方向相關的部分，保留其餘內容與所有硬性要求；\n- desc：一句繁體中文，具體說明「相對原版改了什麼」（如「時段改黃昏、鏡頭改仰角、色調偏琥珀金」）。\n若使用者指定了想要的變化方向，就完全依其要求逐項產生對應變體（一個方向一個變體）；未指定時，自行從換色調、情緒、時段、場景、鏡頭、風格、天氣等面向挑 3 個明顯不同的方向。";
-  $("#aiVarBtn").addEventListener("click", async () => {
+  $("#aiVarBtn").addEventListener("click", () => {
     const raw = $("#fPrompt").value.trim();
     if (!raw) { toast("請先輸入提示詞"); return; }
     if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter）"); return; }
     const dir = $("#aiVarHint").value.trim();
+    const rid = editingId, title = $("#fTitle").value.trim() || "未命名";
     const userMsg = dir
-      ? `原始提示詞：\n${raw}\n\n使用者想要的變化方向（請逐項對應產生變體）：\n${dir}`
-      : `原始提示詞：\n${raw}`;
+      ? "原始提示詞：\n" + raw + "\n\n使用者想要的變化方向（請逐項對應產生變體）：\n" + dir
+      : "原始提示詞：\n" + raw;
+    const inEditor = () => edOpen() && editingId === rid;
     const btn = $("#aiVarBtn"); const old = btn.innerHTML;
-    btn.textContent = "生成中…"; btn.disabled = true;
-    try {
-      const r = await aiCall(VARS_SYS, userMsg, VARS_SCHEMA);
-      syncVariants();
-      let n = 0;
-      (r.variants || []).slice(0, 6).forEach(v => {
-        if (v.prompt) { curVariants.push({ id: uid(), label: v.label || "變體", prompt: v.prompt, note: (v.desc || "AI 建議").trim() }); n++; }
-      });
-      renderVariants(); $("#blkVariants").classList.remove("closed");
-      if (n) $("#aiVarHint").value = "";
-      toast(n ? `已加入 ${n} 個 AI 變體` : "AI 沒有回傳變體");
-    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { btn.innerHTML = old; btn.disabled = false; }
+    btn.textContent = "已丟到背景執行…"; btn.disabled = true;
+    setTimeout(() => { btn.innerHTML = old; btn.disabled = false; }, 1500);
+    window.jobTray.run({
+      title: "AI 變體：" + title.slice(0, 12), icon: "✦",
+      work: () => aiCall(VARS_SYS, userMsg, VARS_SCHEMA),
+      autoApply: inEditor,   // 編輯器還開著同一筆＝直接加進變體區；否則留在右下角
+      open: r => {
+        const vs = (r.variants || []).filter(v => v.prompt).slice(0, 6);
+        if (inEditor()) {
+          syncVariants();
+          vs.forEach(v => curVariants.push({ id: uid(), label: v.label || "變體", prompt: v.prompt, note: (v.desc || "AI 建議").trim() }));
+          renderVariants(); $("#blkVariants").classList.remove("closed"); $("#aiVarHint").value = "";
+          toast(vs.length ? "已加入 " + vs.length + " 個 AI 變體" : "AI 沒有回傳變體");
+        } else {
+          const rec = rid ? data.find(x => x.id === rid) : null;
+          window.ideaShowResults(rec || { id: rid, title: title, prompt: raw },
+            vs.map(v => ({ label: v.label || "變體", desc: v.desc || "", prompt: v.prompt })), "✦ AI 建議的變體");
+        }
+      }
+    });
   });
 
   // ---------- image → prompt (reverse engineering) ----------
@@ -780,7 +812,7 @@
       : "請分析這張圖片並反推提示詞。";
     return [{ inlineData: { mimeType: mime, data: img.split(",")[1] } }, { text: ask }];
   }
-  $("#revGo").addEventListener("click", async () => {
+  $("#revGo").addEventListener("click", () => {
     if (!revImgs.length || !gemKey()) return;
     const common = $("#revDesc").value.trim();
     if (revImgs.length > 1) {   // 批次：建新堆疊 + 背景反推
@@ -789,103 +821,20 @@
       startBatchRev(items, common);
       return;
     }
-    const btn = $("#revGo"); btn.textContent = "反推中…"; btn.disabled = true;
-    try {
-      const img = revImgs[0].img;
-      const r = await aiCall(REV_SYS, revParts(img, mergeDesc(common, revImgs[0].desc)), REV_SCHEMA);
-      closeRev(); revImgs = []; $("#revDesc").value = "";
-      openEditor();
-      $("#fPrompt").value = r.prompt || "";
-      applyAIResult(r);
-      curImgs = [img]; renderThumb();
-      $("#fNotes").value = ($("#fNotes").value ? $("#fNotes").value + "；" : "") + "附圖為反推的參考圖";
-      toast("反推完成，確認後儲存");
-    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { renderRevDrop(); }
-  });
-
-  // ---------- 批次圖反推：一批圖建立新堆疊，AI 在背景逐張補完 ----------
-  // 把反推結果直接寫回既有記錄（不經編輯器）
-  function applyRevToRec(rec, r) {
-    rec.type = r.type === "video" ? "video" : "image";
-    rec.prompt = r.prompt || "";
-    if (r.title) rec.title = r.title;
-    GROUPS.forEach(g => { rec[g] = (r[g] || []).filter(v => LABEL[v]); });
-    if (Array.isArray(r.tags) && r.tags.length) rec.tags = r.tags.filter(Boolean);
-    if (r.model) rec.model = r.model;
-    ["ar", "seed", "steps", "cfg"].forEach(k => { if (r[k]) rec.params[k] = r[k]; });
-    if (rec.type === "video") { if (r.duration) rec.params.duration = r.duration; if (r.fps) rec.params.fps = r.fps; }
-    if (r.constraint && !rec.notes.includes(r.constraint)) rec.notes = (rec.notes ? rec.notes + "；" : "") + r.constraint;
-    if (Array.isArray(r.variables)) rec.vars = cleanVars(rec.prompt, r.variables);
-    rec.edited = Date.now();
-  }
-  let batchCancel = false;
-  function startBatchRev(items, common) {
-    const seg = uid(), d = new Date();
-    stackNames[seg] = `批次反推 ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-    saveStackNames();
-    const ids = items.map((it, i) => {
-      const rec = normalize({ id: uid(), type: "image", title: `反推中…（${i + 1}）`, prompt: "",
-        imgs: [it.img], stack: seg, notes: "附圖為反推的參考圖" });
-      data.unshift(rec);
-      return rec.id;
+    // 單張：也丟到背景，完成後在右下角點開（帶著結果開編輯器）
+    const img = revImgs[0].img, desc = mergeDesc(common, revImgs[0].desc);
+    revImgs = []; $("#revDesc").value = ""; closeRev();
+    window.jobTray.run({
+      title: "圖片反推 prompt", icon: "🔍",
+      work: () => aiCall(REV_SYS, revParts(img, desc), REV_SCHEMA),
+      open: r => {
+        openEditor();
+        $("#fPrompt").value = r.prompt || "";
+        applyAIResult(r);
+        curImgs = [img]; renderThumb();
+        toast("反推完成，確認後儲存");
+      }
     });
-    commitStacks(`已建立堆疊「${stackNames[seg]}」，背景反推 ${items.length} 張進行中`);
-    runBatchRev(ids, items, common);
-  }
-  async function runBatchRev(ids, items, common) {
-    batchCancel = false;
-    bgJobShow(`批次圖反推（${items.length} 張）`, items.length, () => { batchCancel = true; });
-    let ok = 0, fail = 0, i = 0;
-    for (; i < ids.length; i++) {
-      if (batchCancel) break;
-      bgJobTick(i, items.length, `第 ${i + 1} 張反推中…`);
-      const rec = data.find(p => p.id === ids[i]);
-      if (!rec) continue;   // 這張已被使用者刪除 → 跳過
-      try {
-        applyRevToRec(rec, await aiCall(REV_SYS, revParts(items[i].img, mergeDesc(common, items[i].desc)), REV_SCHEMA));
-        ok++;
-      } catch (e) {
-        rec.title = `⚠ 反推失敗（${i + 1}）`;
-        rec.notes = (rec.notes ? rec.notes + "；" : "") + "AI 反推失敗：" + e.message;
-        rec.edited = Date.now();
-        fail++;
-      }
-      ensureNames(); syncGroups(); save(true); render();
-      bgJobTick(i + 1, items.length);
-    }
-    if (batchCancel && i < ids.length) {   // 取消 → 剩餘的標成未反推
-      for (; i < ids.length; i++) {
-        const rec = data.find(p => p.id === ids[i]);
-        if (rec && !rec.prompt) { rec.title = `（未反推）（${i + 1}）`; rec.edited = Date.now(); }
-      }
-      save(true); render();
-    }
-    bgJobDone();
-    toast(batchCancel
-      ? `批次反推已取消（完成 ${ok} 張）`
-      : `批次反推完成：成功 ${ok} 張` + (fail ? `、失敗 ${fail} 張` : ""));
-  }
-
-  // ---------- 背景任務進度小視窗（通用） ----------
-  let bgJobCancelCb = null;
-  function bgJobShow(label, total, onCancel) {
-    bgJobCancelCb = onCancel || null;
-    $("#bgJobLabel").textContent = label;
-    const c = $("#bgJobCancel");
-    c.disabled = false; c.textContent = "取消"; c.style.display = onCancel ? "" : "none";
-    bgJobTick(0, total);
-    $("#bgJob").hidden = false;
-  }
-  function bgJobTick(done, total, note) {
-    $("#bgJobFill").style.width = total ? Math.round(Math.min(done, total) / total * 100) + "%" : "0%";
-    $("#bgJobCount").textContent = (note ? note + "　" : "") + `${Math.min(done, total)} / ${total}`;
-  }
-  function bgJobDone() { $("#bgJob").hidden = true; bgJobCancelCb = null; }
-  $("#bgJobCancel").addEventListener("click", () => {
-    if (!bgJobCancelCb) return;
-    bgJobCancelCb(); bgJobCancelCb = null;
-    const c = $("#bgJobCancel"); c.disabled = true; c.textContent = "取消中…";
   });
 
   // ---------- video → prompt (reverse engineering) ----------
@@ -1012,33 +961,36 @@
     e.preventDefault(); $("#vrevDrop").classList.remove("drag");
     const f = e.dataTransfer.files[0]; if (f) loadVrevFile(f);
   });
-  $("#vrevGo").addEventListener("click", async () => {
+  $("#vrevGo").addEventListener("click", () => {
     if (!vrevFrames.length || !gemKey()) return;
-    const btn = $("#vrevGo"); btn.textContent = "反推中…"; btn.disabled = true;
-    try {
-      const parts = vrevFrames.map(f => ({
-        inlineData: { mimeType: (f.match(/^data:([^;]+);/) || [])[1] || "image/jpeg", data: f.split(",")[1] }
-      }));
-      const meta = vrevInfo || {};
-      let hint = "以上是同一段影片依時間先後抽取的 " + vrevFrames.length + " 格畫面，請反推影片提示詞。";
-      if (meta.dur) hint += " 影片實際時長約 " + Math.round(meta.dur) + " 秒";
-      if (meta.ar) hint += "，畫面比例約 " + meta.ar;
-      hint += "。";
-      parts.push({ text: hint });
-      const r = await aiCall(VREV_SYS, parts, VREV_SCHEMA);
-      r.type = "video";
-      if (!r.duration && meta.dur) r.duration = String(Math.round(meta.dur));
-      if (!r.ar && meta.ar) r.ar = meta.ar;
-      const frames = vrevFrames.slice();
-      closeVrev(); vrevFrames = []; vrevInfo = null;
-      openEditor();
-      $("#fPrompt").value = r.prompt || "";
-      applyAIResult(r);
-      curImgs = frames; renderThumb();
-      $("#fNotes").value = ($("#fNotes").value ? $("#fNotes").value + "；" : "") + "附圖為影片反推的參考影格";
-      toast("影片反推完成，確認後儲存");
-    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { btn.textContent = "開始反推"; btn.disabled = !vrevFrames.length; }
+    const frames = vrevFrames.slice(), meta = vrevInfo || {};
+    closeVrev(); vrevFrames = []; vrevInfo = null;
+    const parts = frames.map(f => ({
+      inlineData: { mimeType: (f.match(/^data:([^;]+);/) || [])[1] || "image/jpeg", data: f.split(",")[1] }
+    }));
+    let hint = "以上是同一段影片依時間先後抽取的 " + frames.length + " 格畫面，請反推影片提示詞。";
+    if (meta.dur) hint += " 影片實際時長約 " + Math.round(meta.dur) + " 秒";
+    if (meta.ar) hint += "，畫面比例約 " + meta.ar;
+    hint += "。";
+    parts.push({ text: hint });
+    // 丟到背景執行，完成後在右下角點開（帶著結果開編輯器）
+    window.jobTray.run({
+      title: "影片反推 prompt", icon: "🎬",
+      work: () => aiCall(VREV_SYS, parts, VREV_SCHEMA).then(r => {
+        r.type = "video";
+        if (!r.duration && meta.dur) r.duration = String(Math.round(meta.dur));
+        if (!r.ar && meta.ar) r.ar = meta.ar;
+        return r;
+      }),
+      open: r => {
+        openEditor();
+        $("#fPrompt").value = r.prompt || "";
+        applyAIResult(r);
+        curImgs = frames; renderThumb();
+        $("#fNotes").value = ($("#fNotes").value ? $("#fNotes").value + "；" : "") + "附圖為影片反推的參考影格";
+        toast("影片反推完成，確認後儲存");
+      }
+    });
   });
 
 
@@ -1058,7 +1010,7 @@
   window.episodeIdeas = function (p, opts) {
     if (!p) return;
     ideaTarget = p; ideaOpts = opts || {}; ideaItems = [];
-    $("#ideaTitle").textContent = ideaOpts.newEp ? "💡 這一集可以怎麼變？" : "💡 變體想法";
+    $("#ideaTitle").textContent = ideaOpts.title || (ideaOpts.newEp ? "💡 這一集可以怎麼變？" : "💡 變體想法");
     $("#ideaHint").innerHTML = (ideaOpts.newEp ? "新一集已建立（日期換成今天）。" : "") +
       "挑到的想法會存成「<b>" + esc((p.title || "").slice(0, 20) || "未命名") + "</b>」的變體，不會蓋掉原本的提示詞。";
     $("#ideaDir").value = ideaOpts.dir || "";
@@ -1139,28 +1091,39 @@
     ideaItems = ideaItems.filter(x => x.added).concat(out);
     renderIdeas();
   });
-  $("#ideaGo").addEventListener("click", async () => {
+  $("#ideaGo").addEventListener("click", () => {
     const base = ((ideaTarget && ideaTarget.prompt) || "").trim();
     if (!base) { toast("這則沒有提示詞內容"); return; }
     if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter），或改用 🎲 離線靈感"); return; }
     const dir = $("#ideaDir").value.trim();
+    const target = { id: (ideaTarget && ideaTarget.id) || null, title: (ideaTarget && ideaTarget.title) || "", prompt: base };
+    const opts = Object.assign({}, ideaOpts);
     const msg = [
       "原始提示詞：\n" + base,
-      ideaTarget.title ? "作品標題：" + ideaTarget.title : "",
-      ideaOpts.newEp ? "情境：這是同一系列的「新一集」，請讓新一集和上一集有明顯區別，但維持系列調性。" : "",
+      target.title ? "作品標題：" + target.title : "",
+      opts.newEp ? "情境：這是同一系列的「新一集」，請讓新一集和上一集有明顯區別，但維持系列調性。" : "",
       dir ? "使用者想要的變化方向（請逐項對應產生）：\n" + dir : ""
     ].filter(Boolean).join("\n\n");
-    const btn = $("#ideaGo"); const old = btn.textContent;
-    btn.textContent = "AI 想點子中…"; btn.disabled = true;
-    try {
-      const r = await aiCall(IDEA_SYS, msg, IDEA_SCHEMA);
-      const got = (r.ideas || []).filter(v => v.prompt).slice(0, 6);
-      ideaItems = ideaItems.filter(x => x.added).concat(got);
-      renderIdeas();
-      toast(got.length ? `AI 給了 ${got.length} 個想法，挑喜歡的存成變體` : "AI 沒有回傳想法");
-    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
-    finally { btn.textContent = old; btn.disabled = false; }
+    const sameTarget = () => ideaOv.classList.contains("show") && !!ideaTarget && (ideaTarget.id || null) === target.id;
+    const btn = $("#ideaGo"); btn.textContent = "已丟到背景執行…"; btn.disabled = true;
+    setTimeout(() => { btn.textContent = "✦ AI 想 5 個點子"; btn.disabled = false; }, 1500);
+    window.jobTray.run({
+      title: "變體想法：" + (target.title || "未命名").slice(0, 12), icon: "💡",
+      work: () => aiCall(IDEA_SYS, msg, IDEA_SCHEMA),
+      autoApply: sameTarget,   // 視窗還開在同一筆就直接填進去，否則留在右下角等點
+      open: r => {
+        const got = (r.ideas || []).filter(v => v.prompt).slice(0, 6);
+        if (!sameTarget()) {
+          const rec = target.id ? data.find(x => x.id === target.id) : null;
+          window.episodeIdeas(rec || target, opts);
+        }
+        ideaItems = ideaItems.filter(x => x.added).concat(got);
+        renderIdeas();
+        toast(got.length ? "AI 給了 " + got.length + " 個想法，挑喜歡的存成變體" : "AI 沒有回傳想法");
+      }
+    });
   });
+
   // 編輯器變體區的入口：拿目前欄位內容當來源（可以是還沒儲存的新記錄）
   $("#ideaBtn").addEventListener("click", () => {
     const raw = $("#fPrompt").value.trim();
@@ -1171,3 +1134,78 @@
   document.addEventListener("keydown", e => {
     if (e.key === "Escape" && ideaOv.classList.contains("show")) { e.stopPropagation(); ideaClose(); }
   }, true);
+
+  /* ---------- 背景工作駐列（右下角）----------
+     每個要等 AI 的功能都丟到這裡跑：進行中顯示轉圈，完成後亮起來，點一下開結果。
+     只活在這次瀏覽（不寫進資料）；主畫面與畫布共用。 */
+  const ideaDock = $("#ideaDock");
+  let jobs = [];
+  const JOB_MAX = 6;
+  function jobDrop(id) { jobs = jobs.filter(j => j.id !== id); renderDock(); }
+  function renderDock() {
+    ideaDock.hidden = !jobs.length;
+    ideaDock.innerHTML = jobs.map(j => `
+      <div class="idea-chip ${j.state}" data-j="${j.id}" title="${j.state === "run" ? "背景執行中…" : j.state === "done" ? "點一下查看結果" : "點一下看失敗原因"}">
+        <span class="ic">${j.state === "run" ? '<span class="jspin"></span>' : (j.state === "err" ? "⚠" : (j.icon || "✅"))}</span>
+        <span class="it">${esc(j.title)}${j.state === "run" ? "…" : ""}</span>
+        <button type="button" class="ix" data-jx="${j.id}" title="移除">×</button>
+      </div>`).join("");
+  }
+  window.jobTray = {
+    // spec: {title, icon, work:()=>Promise, open:(result)=>void, autoApply:()=>bool}
+    run(spec) {
+      const j = { id: uid(), title: spec.title || "AI 工作", icon: spec.icon || "", state: "run", open: spec.open };
+      jobs.push(j); if (jobs.length > JOB_MAX) jobs.shift();
+      renderDock();
+      Promise.resolve().then(() => spec.work()).then(res => {
+        j.state = "done"; j.result = res;
+        const auto = typeof spec.autoApply === "function" && spec.autoApply();
+        if (auto) { jobDrop(j.id); try { spec.open && spec.open(res); } catch (e) { toast("套用失敗：" + e.message); } }
+        else { renderDock(); toast(j.title + " 完成 — 右下角點一下查看"); }
+      }).catch(err => {
+        j.state = "err"; j.err = (err && err.message) || String(err); renderDock();
+        toast(j.title + " 失敗（" + j.err + "）");
+      });
+      return j.id;
+    },
+    // 結果已經有了，只是等使用者來看（新一集的變體想法、⤓ 縮小都走這裡）
+    park(title, open, icon) { jobs.push({ id: uid(), title, state: "done", open, icon: icon || "💡" }); if (jobs.length > JOB_MAX) jobs.shift(); renderDock(); }
+  };
+  ideaDock.addEventListener("click", e => {
+    const x = e.target.closest("[data-jx]");
+    if (x) { jobDrop(x.dataset.jx); return; }
+    const chip = e.target.closest(".idea-chip"); if (!chip) return;
+    const j = jobs.find(y => y.id === chip.dataset.j); if (!j) return;
+    if (j.state === "run") { toast("還在背景跑，完成後這顆會亮起來"); return; }
+    if (j.state === "err") { toast("失敗原因：" + j.err); jobDrop(j.id); return; }
+    jobDrop(j.id);
+    try { j.open && j.open(j.result); } catch (err) { toast("開啟失敗：" + err.message); }
+  });
+  // 新一集：把「等著看的變體想法」放進駐列
+  window.ideaDockAdd = function (p, opts) {
+    if (!p || !p.id) return;
+    window.jobTray.park((p.title || "新一集").slice(0, 22), () => {
+      const rec = data.find(x => x.id === p.id);
+      if (!rec) { toast("這則已經不在庫裡了"); return; }
+      window.episodeIdeas(rec, opts || {});
+    }, "💡");
+  };
+  // 縮到右下角：想法視窗關起來但留一顆，等有空再看
+  $("#ideaMin").addEventListener("click", () => {
+    const rec = ideaRec();
+    if (rec) window.ideaDockAdd(rec, ideaOpts);
+    else toast("這則還沒儲存，先存檔才能稍後再看");
+    ideaClose();
+  });
+  // 把一組 AI 產出的候選丟進想法視窗檢視（強化／翻譯／建議變體共用同一個結果檢視器）
+  window.ideaShowResults = function (target, items, title) {
+    window.episodeIdeas(target, { title: title });
+    ideaItems = items || []; renderIdeas();
+  };
+  // 背景工作視窗 #bgJob 出現時讓位（兩者都固定在右下角）
+  (function watchBgJob() {
+    const bg = $("#bgJob"); if (!bg) return;
+    const sync = () => ideaDock.classList.toggle("lifted", !bg.hidden);
+    new MutationObserver(sync).observe(bg, { attributes: true, attributeFilter: ["hidden"] });
+    sync();
+  })();
