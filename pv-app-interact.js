@@ -89,6 +89,9 @@
       const v = p.variants.find(x => x.id === actEl.dataset.vp);
       if (v) { markUsed(p); copyText(v.prompt, actEl); } return;
     }
+    if (act === "gen") { genCard(p, actEl); return; }
+    if (act === "similar") { semSimilar(p); return; }
+    if (act === "tree") { openTree(p); return; }
     if (act === "apply") { openApply(p); return; }
     if (act === "fav") { p.fav = !p.fav; p.edited = Date.now(); save(); render(); return; }
     if (act === "edit") { openEditor(p); return; }
@@ -113,6 +116,7 @@
     if (act === "dup") {
       const copy = JSON.parse(JSON.stringify(p));
       copy.id = uid(); copy.title = (p.title||"未命名") + "（副本）";
+      copy.parent = p.id;   // 演化樹：記錄血統
       copy.created = Date.now(); copy.edited = Date.now(); copy.fav = false;
       copy.variants = copy.variants.map(v => ({ ...v, id: uid() }));
       data.unshift(copy); save(); render(); toast("已複製一份"); return;

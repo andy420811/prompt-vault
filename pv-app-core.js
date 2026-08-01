@@ -88,6 +88,16 @@
   // preset option lists: [中文, english keyword]
   // ▼ 選項清單 PRESETS 已移至 pv-vocab.js（於本程式前以 <script src> 載入）
   const GROUPS = ["camera","style","light","shot"];
+  // 製作狀態（看板欄位；空字串＝未分類，必須是第一個）
+  const PSTATUS = [
+    { k:"",     zh:"未分類",  ico:"○" },
+    { k:"idea", zh:"構想",    ico:"💡" },
+    { k:"todo", zh:"待生成",  ico:"⏳" },
+    { k:"gen",  zh:"已生成",  ico:"🖼" },
+    { k:"pick", zh:"已採用",  ico:"✅" },
+    { k:"pub",  zh:"已發佈",  ico:"🚀" }
+  ];
+  const PSTAT = {}; PSTATUS.forEach(s => PSTAT[s.k] = s);
   // english -> 中文 for display
   const LABEL = {}; GROUPS.forEach(g => PRESETS[g].forEach(([zh,en]) => LABEL[en] = zh));
 
@@ -105,6 +115,9 @@
     starF:'<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="m12 3 2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.3 6.8 19l1-5.8-4.2-4.1 5.8-.8z"/></svg>',
     wand:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3v4M3 5h4M6 17v4m-2-2h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5z"/></svg>',
     fork:'⑂',
+    sim:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="9" r="5.5"/><circle cx="15.5" cy="15" r="5.5"/></svg>',
+    gen:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4.5 13H11l-1 9 8.5-11H12z"/></svg>',
+    spin:'<svg class="gen-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 3a9 9 0 1 0 9 9" stroke-linecap="round"/></svg>',
     ep:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M12 13.5v5M9.5 16h5"/></svg>'
   };
 
@@ -139,6 +152,11 @@
   let stackClickT = null;                 // 堆疊單擊防抖（讓雙擊改名可攔截）
   const railSel = new Set();              // 左側已選取（要在右側顯示）的系列／堆疊；空＝全部作品。token：堆疊 prefix 或 "g:"+散裝group名
   let railClickT = null;                  // 左側單擊防抖（讓雙擊改名可攔截）
+  let smarts = [];                        // 智慧集合清單（實際載入／比對在 pv-app-kanban.js）
+  let smartCur = null;                    // 目前套用的智慧集合
+  let lastList = [];                      // render() 最後算出的可見清單（看板沿用同一份篩選結果）
+  let semSet = null;                    // 語意搜尋結果的 id 集合（null＝未啟用）；填值時 render 只顯示這些並依 semRank 排序
+  const semRank = new Map();              // id → 相似度名次（越小越前）
   const undoStack = [];                   // 復原堆疊（存 JSON 快照字串）
   const redoStack = [];                   // 重做堆疊
   const UNDO_MAX = 25;
@@ -147,6 +165,7 @@
   let newCtx = null;                      // 新增時要落入的當前堆疊／資料夾／散裝系列（openEditor 捕捉，儲存時套用）
   let curStack = null;                    // 最近一次「開啟」的堆疊 prefix（右側點開整疊或左側選取）；收合後由 openStackCtx() 自動失效
   let curType = "image";
+  let typeTouched = false;                // 這次編輯中使用者是否自己按過圖像／影片切換（背景補完不覆蓋他的選擇）
   let curImgs = [];
   const sel = { camera:new Set(), style:new Set(), light:new Set(), shot:new Set() };
   let curVariants = [];
@@ -176,6 +195,8 @@
     p.vars = Array.isArray(p.vars) ? p.vars.filter(v => v && v.token && v.label) : [];
     p.varsDone = !!p.varsDone;
     p.stack = typeof p.stack === "string" ? p.stack : "";   // 堆疊分組 id（同一系列共用）
+    p.parent = typeof p.parent === "string" ? p.parent : "";   // 演化樹：衍生來源的記錄 id
+    p.status = PSTATUS.some(s => s.k === p.status) ? p.status : "";   // 製作狀態（看板欄位）
     p.fav = !!p.fav; p.created = p.created || Date.now(); p.edited = p.edited || p.created;
     if (!p.id) p.id = uid();
     return p;

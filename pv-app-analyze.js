@@ -37,65 +37,98 @@
   });
 
   // ---------- offline analyze & auto-fill ----------
-  function analyzePrompt() {
-    const raw = $("#fPrompt").value.trim();
-    if (!raw) { toast("請先輸入提示詞"); return; }
-    const t = " " + raw.toLowerCase() + " ";
+  // 純運算：只吃 prompt 字串、不碰 DOM，回傳與 AI 分析同形狀的結果物件（編輯器與背景補完共用）
+  function offlineAnalyze(raw) {
+    const src = String(raw || "");
+    const t = " " + src.toLowerCase() + " ";
     const cap = re => { const m = t.match(re); return m ? m[1] : ""; };
-    let picked = 0, filled = 0;
+    const out = { camera: [], style: [], light: [], shot: [], tags: [], model: "", constraint: "", title: "" };
 
-    // preset chips (add, never remove)
+    // preset chips
     GROUPS.forEach(g => {
-      Object.entries(DETECT[g]).forEach(([val, keys]) => {
-        if (!sel[g].has(val) && keys.some(k => t.includes(k))) { sel[g].add(val); picked++; }
-      });
+      Object.entries(DETECT[g]).forEach(([val, keys]) => { if (keys.some(k => t.includes(k))) out[g].push(val); });
     });
-    refreshPickerUI();
 
     // type — 封面/縮圖/海報類強制視為圖像（除非明確出現 fps）
-    let isVid = VIDEO_WORDS.some(w => t.includes(w)) || [...sel.camera].some(c => MOTION.has(c));
+    let isVid = VIDEO_WORDS.some(w => t.includes(w)) || out.camera.some(c => MOTION.has(c));
     if (IMG_FORCE.some(w => t.includes(w)) && !t.includes("fps")) isVid = false;
-    setType(isVid ? "video" : "image");
+    out.type = isVid ? "video" : "image";
 
     // params
     let ar = cap(/(?:--ar|aspect(?:\s*ratio)?[:=\s]+)\s*(\d{1,2}:\d{1,2})/i);
     if (!ar) { const m = t.match(/(?:比例|尺寸)[^\d]{0,4}(\d{1,2})\s*[-:：比xX×]\s*(\d{1,2})/); if (m) ar = m[1] + ":" + m[2]; }
     if (!ar) { const m = t.match(/\b(16:9|9:16|1:1|4:3|3:2|2:3|4:5|21:9)\b/); ar = m ? m[1] : ""; }
     if (!ar) { if (/直式|直向|直幅/.test(t)) ar = "9:16"; else if (/橫式|橫向|橫幅/.test(t)) ar = "16:9"; else if (/正方形|方形/.test(t)) ar = "1:1"; }
-    const seed = cap(/(?:--seed|seed[:=\s])\s*(\d{2,})/i);
-    let steps = cap(/(?:--steps|steps?[:=\s])\s*(\d{1,4})/i); if (!steps) steps = cap(/(\d{1,4})\s*steps/i);
-    const cfg = cap(/(?:--cfg|cfg[:=\s]|guidance[:=\s])\s*(\d{1,2}(?:\.\d)?)/i);
-    let dur = cap(/(\d{1,3})\s*(?:seconds|second|secs|sec|s)\b/i); if (!dur) dur = cap(/(\d{1,3})\s*秒/);
-    const fps = cap(/(\d{1,3})\s*fps/i);
-
-    const setEmpty = (id, val) => { const el = $(id); if (val && !el.value.trim()) { el.value = val; filled++; } };
-    if (ar && !$("#pAr").value && [...$("#pAr").options].some(o => o.value === ar)) { $("#pAr").value = ar; filled++; }
-    setEmpty("#pSeed", seed); setEmpty("#pSteps", steps); setEmpty("#pCfg", cfg);
-    if (isVid) { setEmpty("#pDur", dur); setEmpty("#pFps", fps); }
+    out.ar = ar;
+    out.seed = cap(/(?:--seed|seed[:=\s])\s*(\d{2,})/i);
+    out.steps = cap(/(?:--steps|steps?[:=\s])\s*(\d{1,4})/i) || cap(/(\d{1,4})\s*steps/i);
+    out.cfg = cap(/(?:--cfg|cfg[:=\s]|guidance[:=\s])\s*(\d{1,2}(?:\.\d)?)/i);
+    out.duration = cap(/(\d{1,3})\s*(?:seconds|second|secs|sec|s)\b/i) || cap(/(\d{1,3})\s*秒/);
+    out.fps = cap(/(\d{1,3})\s*fps/i);
 
     // model
-    for (const [k, name] of MODELS) { if (t.includes(k)) { if (!$("#fModel").value.trim()) { $("#fModel").value = name; filled++; } break; } }
+    for (const [k, name] of MODELS) { if (t.includes(k)) { out.model = name; break; } }
+
+    // subject tags
+    SUBJECT_TAGS.forEach(([keys, tag]) => { if (!out.tags.includes(tag) && keys.some(k => t.includes(k))) out.tags.push(tag); });
+
+    // hard constraints
+    if (/不要修改人物|不改變人物|人物不變|保持人物|不要改變人物/.test(src)) out.constraint = "人物不可修改（需附參考圖）";
+
+    // title suggestion
+    const sl = out.style.length ? LABEL[out.style[0]] : "";
+    out.title = titlePick(src, [out.tags[0] || "", sl].filter(Boolean).join("・"));
+    return out;
+  }
+  function firstPhrase(raw) {   // prompt 的第一個句子／逗號片語
+    return String(raw || "").split(/[\n。．.!?！？,，;；]/).map(s => s.trim()).find(s => s.length >= 2) || "";
+  }
+  // 保底標題：短中文開頭最貼近內容 → 其次「主題・風格」→ 再不然截斷開頭；總之不要是「未命名」
+  function titlePick(raw, byTag) {
+    const f = firstPhrase(raw);
+    if (f && f.length <= 16 && /[一-鿿]/.test(f)) return f;
+    return byTag || f.slice(0, 16);
+  }
+
+  function analyzePrompt() {
+    const raw = $("#fPrompt").value.trim();
+    if (!raw) { toast("請先輸入提示詞"); return; }
+    const r = offlineAnalyze(raw);
+    let picked = 0, filled = 0;
+
+    // preset chips (add, never remove)
+    GROUPS.forEach(g => r[g].forEach(v => { if (!sel[g].has(v)) { sel[g].add(v); picked++; } }));
+    refreshPickerUI();
+
+    // 型別：把使用者先前已選的動態運鏡一起算進來
+    const lc = " " + raw.toLowerCase() + " ";
+    let isVid = r.type === "video" || [...sel.camera].some(c => MOTION.has(c));
+    if (IMG_FORCE.some(w => lc.includes(w)) && !lc.includes("fps")) isVid = false;
+    setType(isVid ? "video" : "image");
+
+    const setEmpty = (id, val) => { const el = $(id); if (val && !el.value.trim()) { el.value = val; filled++; } };
+    if (r.ar && !$("#pAr").value && [...$("#pAr").options].some(o => o.value === r.ar)) { $("#pAr").value = r.ar; filled++; }
+    setEmpty("#pSeed", r.seed); setEmpty("#pSteps", r.steps); setEmpty("#pCfg", r.cfg);
+    if (isVid) { setEmpty("#pDur", r.duration); setEmpty("#pFps", r.fps); }
+    setEmpty("#fModel", r.model);
 
     // subject tags (merge)
-    const found = [];
-    SUBJECT_TAGS.forEach(([keys, tag]) => { if (!found.includes(tag) && keys.some(k => t.includes(k))) found.push(tag); });
-    if (found.length) {
+    if (r.tags.length) {
       const cur = $("#fTags").value.split(",").map(s => s.trim()).filter(Boolean);
-      found.forEach(tg => { if (!cur.includes(tg)) cur.push(tg); });
+      r.tags.forEach(tg => { if (!cur.includes(tg)) cur.push(tg); });
       $("#fTags").value = cur.join(", ");
     }
 
     // hard constraints → notes
     const notesEl = $("#fNotes");
-    if (/不要修改人物|不改變人物|人物不變|保持人物|不要改變人物/.test(raw) && !notesEl.value.includes("人物不可修改")) {
-      notesEl.value = (notesEl.value ? notesEl.value + "；" : "") + "人物不可修改（需附參考圖）";
+    if (r.constraint && !notesEl.value.includes("人物不可修改")) {
+      notesEl.value = (notesEl.value ? notesEl.value + "；" : "") + r.constraint;
     }
 
     // title suggestion when empty
     if (!$("#fTitle").value.trim()) {
       const sl = sel.style.size ? LABEL[[...sel.style][0]] : "";
-      const parts = [found[0] || "", sl].filter(Boolean);
-      if (parts.length) $("#fTitle").value = parts.join("・");
+      $("#fTitle").value = titlePick(raw, [r.tags[0] || "", sl].filter(Boolean).join("・"));
     }
 
     if (picked) $("#blkPresets").classList.remove("closed");
@@ -334,4 +367,51 @@
     finally { btn.innerHTML = old; btn.disabled = false; }
   }
   $("#analyzeBtn").addEventListener("click", runAnalyze);
+
+  // ---------- 背景補完（儲存後才跑，直接寫回記錄） ----------
+  // 使用者只貼 prompt 就按儲存 → 卡片會是「未命名」。這裡在存檔後背景跑一次分析，
+  // 只填「原本空白」的欄位（不覆蓋使用者自己填的），完成後 save(true)+render()。
+  const enrichIds = new Set();          // 正在補完的記錄 id（同一筆不重複跑）
+  function needsEnrich(p) {
+    return !!p && !!(p.prompt || "").trim() && (!p.title.trim() || !p.tags.length || !p.varsDone);
+  }
+  async function enrichRecord(p, opts) {
+    if (!p || !(p.prompt || "").trim() || enrichIds.has(p.id)) return;
+    const o = opts || {}, id = p.id, prompt = p.prompt;
+    enrichIds.add(id);
+    let r = null, byAI = false;
+    if (gemKey()) {
+      try { r = await aiCall(AI_SYS, prompt, AI_SCHEMA); byAI = true; }
+      catch (e) { r = null; }                     // 靜默退回離線規則（下次存檔會再試）
+    }
+    enrichIds.delete(id);
+    if (!r) r = offlineAnalyze(prompt);
+    const t = data.find(x => x.id === id);
+    if (!t || t.prompt !== prompt) return;        // 補完期間被刪除／提示詞已改 → 結果作廢
+    if (editingId === id) return;                 // 使用者正開著這一筆在編輯 → 別覆蓋他手上的內容
+
+    let changed = 0;
+    if (o.type !== false && (r.type === "image" || r.type === "video") && t.type !== r.type) { t.type = r.type; changed++; }
+    const nt = String(r.title || "").trim() || titlePick(prompt, "");   // AI 沒給標題也要有名字，不留「未命名」
+    if (!t.title.trim() && nt) { t.title = nt.slice(0, 30); changed++; }
+    if (!t.model.trim() && r.model) { t.model = r.model; changed++; }
+    const pm = t.params || (t.params = {});
+    const setP = (k, v) => { if (v && !String(pm[k] || "").trim()) { pm[k] = String(v); changed++; } };
+    if (r.ar && !pm.ar && [...$("#pAr").options].some(x => x.value === r.ar)) { pm.ar = r.ar; changed++; }
+    setP("seed", r.seed); setP("steps", r.steps); setP("cfg", r.cfg);
+    if (t.type === "video") { setP("duration", r.duration); setP("fps", r.fps); }
+    GROUPS.forEach(g => (r[g] || []).forEach(v => { if (LABEL[v] && !t[g].includes(v)) { t[g].push(v); changed++; } }));
+    (r.tags || []).forEach(tg => { if (tg && !t.tags.includes(tg)) { t.tags.push(String(tg).slice(0, 20)); changed++; } });
+    if (r.constraint && !t.notes.includes(r.constraint)) { t.notes = (t.notes ? t.notes + "；" : "") + r.constraint; changed++; }
+    if (byAI && Array.isArray(r.variables) && typeof cleanVars === "function") {
+      t.vars = cleanVars(t.prompt, r.variables);
+      t.varsDone = true;
+      changed++;
+    }
+    if (!changed) return;
+    t.edited = Date.now();
+    save(true);                                    // 背景補完不佔用復原步
+    render();
+    toast(`${byAI ? "AI" : "離線"}背景補完：${t.title || "此則"}${t.vars.length ? `・變數 ${t.vars.length} 個` : ""}`);
+  }
 

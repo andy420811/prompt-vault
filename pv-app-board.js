@@ -236,6 +236,95 @@
   $("#storyClose").addEventListener("click", () => { stoPrefix = null; stoOv.classList.remove("show"); });
   stoOv.addEventListener("click", e => { if (e.target === stoOv) { stoPrefix = null; stoOv.classList.remove("show"); } });
 
+  // ================= 腳本 → 分鏡：AI 把旁白拆成鏡頭，建成新堆疊並直接開故事板 =================
+  const scrOv = $("#scriptOverlay");
+  const SCR_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+      title: { type: "STRING" },
+      shots: { type: "ARRAY", items: {
+        type: "OBJECT",
+        properties: {
+          title: { type: "STRING" }, prompt: { type: "STRING" }, narration: { type: "STRING" },
+          dur: { type: "STRING" }, trans: { type: "STRING" }, note: { type: "STRING" },
+          camera: { type: "ARRAY", items: { type: "STRING", enum: enumOf("camera") } },
+          style:  { type: "ARRAY", items: { type: "STRING", enum: enumOf("style") } },
+          light:  { type: "ARRAY", items: { type: "STRING", enum: enumOf("light") } },
+          shot:   { type: "ARRAY", items: { type: "STRING", enum: enumOf("shot") } },
+          tags:   { type: "ARRAY", items: { type: "STRING" } }
+        },
+        required: ["prompt"]
+      } }
+    },
+    required: ["shots"]
+  };
+  const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 一律用英文，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍（分鏡類型是影片時要寫清楚動態與時間演變，是靜態畫面時就描述決定性的一格）；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點（動作、情緒、音效提示）；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
+
+  function openScript() {
+    $("#scrStatus").textContent = "";
+    scrOv.classList.add("show");
+    setTimeout(() => $("#scrText").focus(), 40);
+  }
+  function closeScript() { scrOv.classList.remove("show"); }
+  $("#scriptBtn").addEventListener("click", openScript);
+  $("#scrClose").addEventListener("click", closeScript);
+  $("#scrCancel").addEventListener("click", closeScript);
+  scrOv.addEventListener("click", e => { if (e.target === scrOv) closeScript(); });
+
+  // AI 回傳的一鏡 → 一筆記錄（sb 讓它直接排進故事板時間軸）
+  function shotToRec(s, i, total, type, dur, seg, now) {
+    const sec = String(s.dur || dur || "").replace(/[^\d.]/g, "");
+    const rec = normalize({
+      id: uid(),
+      type,
+      title: String(s.title || "").trim().slice(0, 40) || `分鏡 ${i + 1}`,
+      prompt: String(s.prompt || "").trim(),
+      stack: seg,
+      tags: Array.isArray(s.tags) ? s.tags.filter(Boolean) : [],
+      notes: s.narration ? "旁白：" + s.narration : "",
+      created: now + (total - i), edited: now + (total - i),   // 讓第 1 鏡排在「最近新增」最前
+      sb: { ord: i, dur: sec, trans: String(s.trans || "").trim(), note: String(s.note || s.narration || "").trim() }
+    });
+    GROUPS.forEach(g => { rec[g] = (Array.isArray(s[g]) ? s[g] : []).filter(v => LABEL[v]); });
+    if (type === "video" && sec) rec.params.duration = sec;
+    return rec;
+  }
+  $("#scrGo").addEventListener("click", async () => {
+    const text = $("#scrText").value.trim();
+    if (!text) { toast("請先貼上腳本或旁白"); return; }
+    if (!gemKey()) { toast("腳本拆分鏡需要 AI，請先到 ⚙ 設定填入 Gemini 或 OpenRouter 金鑰"); return; }
+    const styleTxt = $("#scrStyle").value.trim();
+    const cnt = $("#scrCount").value;
+    const dur = $("#scrDur").value.trim();
+    const type = $("#scrType").value === "image" ? "image" : "video";
+    const btn = $("#scrGo"), old = btn.textContent;
+    btn.textContent = "AI 拆解中…"; btn.disabled = true;
+    $("#scrStatus").textContent = "正在拆解鏡頭，腳本較長時可能要 10～30 秒…";
+    try {
+      const ask = [
+        "【腳本／旁白】\n" + text,
+        styleTxt ? "【視覺方向】" + styleTxt + "（每一鏡的 prompt 都要吃到這個風格）" : "",
+        cnt ? `【鏡頭數】請剛好拆成 ${cnt} 個鏡頭` : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
+        dur ? `【每鏡預設秒數】約 ${dur} 秒，長短依內容微調` : "",
+        "【分鏡類型】" + (type === "video" ? "影片動態鏡頭" : "靜態畫面")
+      ].filter(Boolean).join("\n\n");
+      const r = await aiCall(SCR_SYS, ask, SCR_SCHEMA);
+      const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
+      if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
+      const seg = uid(), now = Date.now();
+      const name = ($("#scrName").value.trim() || String(r.title || "").trim() || "腳本分鏡").slice(0, 40);
+      stackNames[seg] = name; saveStackNames();
+      data.unshift(...shots.map((s, i) => shotToRec(s, i, shots.length, type, dur, seg, now)));
+      commitStacks(`已建立「${name}」：${shots.length} 個分鏡`);
+      closeScript();
+      $("#scrText").value = ""; $("#scrName").value = "";
+      openStoryboard(seg);
+    } catch (e) {
+      $("#scrStatus").textContent = "拆解失敗：" + e.message;
+      toast("AI 呼叫失敗（" + e.message + "）");
+    } finally { btn.textContent = old; btn.disabled = false; }
+  });
+
   // 包一層 render：任何重繪（編輯器儲存、復原、雲端拉取…）後，故事板開著就同步刷新
   const _renderCore = render;
   render = function () {

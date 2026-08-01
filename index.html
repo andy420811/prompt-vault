@@ -33,6 +33,9 @@
     <button class="icon-btn" id="libBtn" title="Prompt 靈感搜尋器">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5z"/></svg>
     </button>
+    <button class="icon-btn" id="scriptBtn" title="腳本 → 分鏡（AI 拆鏡頭並建立故事板）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4.5h11a2 2 0 0 1 2 2V19a2 2 0 0 0 2 2H6a2 2 0 0 1-2-2z"/><path d="M17 8h3v11a2 2 0 0 1-2 2"/><path d="M7 8h5M7 11.5h5M7 15h3"/></svg>
+    </button>
     <button class="icon-btn" id="canvasBtn" title="專案畫布（串聯 prompt 關係）">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="M8 7l8 1M8.5 15.5 16 10"/></svg>
     </button>
@@ -57,6 +60,9 @@
   <div class="pr-head">專案／系列</div>
   <div class="pr-list" id="prList"></div>
   <button class="pr-add" id="prAddFolder" title="新增資料夾收納堆疊或系列">＋ 新增資料夾</button>
+  <div class="pr-head sm-head">智慧集合</div>
+  <div class="pr-list" id="smartList"></div>
+  <button class="pr-add" id="smartAdd" title="把目前的篩選條件存成會自動更新的集合">＋ 存成智慧集合</button>
 </aside>
 
 <div class="wrap">
@@ -68,11 +74,14 @@
       <button class="chip star" data-f="fav" aria-pressed="false">★ 收藏 <span class="n" id="n-fav">0</span></button>
     </div>
     <div class="spacer"></div>
+    <button class="chip sem-on" id="semChip" hidden></button>
+    <button class="chip" id="semBtn" title="用意思找 prompt（需先建立語意索引）" aria-pressed="false">🧠 語意</button>
     <button class="chip warn" id="backupNote" hidden></button>
     <button class="chip" id="undoBtn" title="上一步 (Ctrl+Z)" disabled><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5H9"/></svg> 上一步</button>
     <button class="chip" id="redoBtn" title="重做 (Ctrl+Shift+Z)" disabled><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0-5 5v0a5 5 0 0 0 5 5h6"/></svg> 重做</button>
     <button class="chip" id="selectBtn" title="勾選作品堆疊成同系列" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg> 選取</button>
     <button class="chip" id="densityBtn" title="切換縮圖／選單模式" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg> 選單</button>
+    <button class="chip" id="boardBtn" title="製作進度看板（可拖拉換狀態）" aria-pressed="false">📋 看板</button>
     <button class="chip" id="viewBtn" title="依專案／系列分區整理" aria-pressed="false"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-3px"><rect x="3" y="4" width="18" height="5" rx="1"/><rect x="3" y="12" width="18" height="8" rx="1"/></svg> 分區整理</button>
     <select class="sort" id="groupSel" style="display:none"><option value="">全部專案</option></select>
     <select class="sort" id="sort">
@@ -84,6 +93,7 @@
     </select>
   </div>
   <div class="count-line" id="countLine"></div>
+  <div class="kanban" id="kanban" hidden></div>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" style="display:none">
     <h2>這裡還沒有提示詞</h2>
@@ -92,6 +102,147 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M5 12h14"/></svg>
       新增第一則
     </button>
+  </div>
+</div>
+
+<!-- 公開分享連結（唯讀作品集頁，由自架 Worker 提供 /s/<id>） -->
+<div class="overlay" id="shareOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="shareTitle" style="max-width:620px">
+    <div class="modal-head">
+      <h2 id="shareTitle">🔗 分享連結</h2>
+      <button class="icon-btn" id="shareClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="gap:12px">
+      <p class="hint" id="shareHint" style="margin:0"></p>
+      <div class="field" id="shareForm" hidden>
+        <label for="shareName">作品集名稱</label>
+        <input id="shareName" placeholder="例如：頻道開場素材集">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-top:9px;cursor:pointer">
+          <input type="checkbox" id="shareImgs" checked style="width:auto"> 一併分享結果圖（每則只帶第一張）
+        </label>
+        <p class="hint" style="margin:8px 0 0">分享出去的是<b>公開唯讀網頁</b>，任何拿到連結的人都看得到裡面的提示詞與圖片。不會包含你的金鑰、標籤管理或其他未選取的作品。</p>
+      </div>
+      <div class="sh-list" id="shareList"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="shareCancel">關閉</button>
+      <button class="btn primary" id="shareGo" hidden>建立公開連結</button>
+    </div>
+  </div>
+</div>
+
+<!-- 演化樹（prompt 血統：新一集／副本會記 p.parent） -->
+<div class="overlay" id="treeOverlay">
+  <div class="modal tree-modal" role="dialog" aria-modal="true" aria-labelledby="treeTitle">
+    <div class="modal-head">
+      <h2 id="treeTitle">🌳 演化樹</h2>
+      <button class="icon-btn" id="treeClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="gap:10px">
+      <p class="hint" style="margin:0">用「新一集」或「副本」衍生出來的作品會自動記錄血統。每個節點列出跟上一代比多了／少了哪些片語，點節點可開編輯器。</p>
+      <div class="tree-wrap" id="treeWrap"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 統計儀表板（純前端統計，不呼叫 AI） -->
+<div class="overlay" id="statsOverlay">
+  <div class="modal dash-modal" role="dialog" aria-modal="true" aria-labelledby="statsTitle">
+    <div class="modal-head">
+      <h2 id="statsTitle">📊 統計儀表板</h2>
+      <button class="icon-btn" id="statsClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="gap:14px">
+      <div class="dash-kpis" id="dashKpis"></div>
+      <div class="dash-card">
+        <h3>近 12 個月新增</h3>
+        <div class="dash-months" id="dashMonths"></div>
+      </div>
+      <div class="dash-cols">
+        <div class="dash-card">
+          <h3>標籤分布 <span class="dash-sub">點一下即搜尋</span></h3>
+          <div class="dash-bars" id="dashTags"></div>
+        </div>
+        <div class="dash-card">
+          <h3>模型分布 <span class="dash-sub">點一下即搜尋</span></h3>
+          <div class="dash-bars" id="dashModels"></div>
+        </div>
+      </div>
+      <div class="dash-cols">
+        <div class="dash-card">
+          <h3>最常用 Top 8 <span class="dash-sub">點一下開編輯器</span></h3>
+          <div class="dash-list" id="dashTop"></div>
+        </div>
+        <div class="dash-card">
+          <h3>閒置提醒 <span class="dash-sub">90 天沒用過</span></h3>
+          <div class="dash-list" id="dashIdle"></div>
+        </div>
+      </div>
+      <div class="dash-card">
+        <h3>最常出現的用語 <span class="dash-sub">從 prompt 逗號片語統計・點一下即搜尋</span></h3>
+        <div class="dash-words" id="dashWords"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 腳本 → 分鏡：AI 把旁白拆成鏡頭，建立堆疊並進故事板 -->
+<div class="overlay" id="scriptOverlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="scrTitle" style="max-width:720px">
+    <div class="modal-head">
+      <h2 id="scrTitle">📝 腳本 → 分鏡</h2>
+      <button class="icon-btn" id="scrClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="gap:13px">
+      <p class="hint" style="margin:0">貼上旁白或腳本，AI 會拆成一鏡一鏡，每鏡自動寫好英文畫面 prompt、秒數與轉場，建立成一個新堆疊並直接開啟故事板。</p>
+      <div class="field">
+        <label for="scrText">腳本／旁白</label>
+        <textarea id="scrText" class="mono" rows="8" placeholder="貼上整段旁白，或一行一句的腳本…"></textarea>
+      </div>
+      <div class="field">
+        <label for="scrStyle">視覺方向 <span class="opt">（選填，會套用到每一鏡）</span></label>
+        <input id="scrStyle" placeholder="例：電影感冷色調、日系動畫插畫風、手持紀錄片質感">
+      </div>
+      <div class="row4">
+        <div class="field">
+          <label for="scrCount">鏡頭數</label>
+          <select id="scrCount">
+            <option value="">自動判斷</option>
+            <option value="4">4 鏡</option><option value="6">6 鏡</option>
+            <option value="8">8 鏡</option><option value="10">10 鏡</option>
+            <option value="12">12 鏡</option><option value="16">16 鏡</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="scrDur">每鏡秒數</label>
+          <input id="scrDur" inputmode="numeric" placeholder="5" value="5">
+        </div>
+        <div class="field">
+          <label for="scrType">分鏡類型</label>
+          <select id="scrType">
+            <option value="video">影片（動態鏡頭）</option>
+            <option value="image">圖像（靜態畫面）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="scrName">堆疊名稱 <span class="opt">（選填）</span></label>
+          <input id="scrName" placeholder="AI 自動命名">
+        </div>
+      </div>
+      <p class="hint" id="scrStatus" style="margin:0"></p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="scrCancel">取消</button>
+      <button class="btn primary" id="scrGo">拆解分鏡</button>
+    </div>
   </div>
 </div>
 
@@ -198,8 +349,24 @@
           <button type="button" class="link-btn ai-link" id="transBtn">🌐 中英翻譯</button>
           <button type="button" class="link-btn" id="wcInsertBtn">⚁ 插入選項組</button>
           <button type="button" class="link-btn" id="assetInsertBtn">🎭 插入資產</button>
+          <button type="button" class="link-btn" id="ptToggle">⌗ 片語檢視</button>
         </label>
-        <textarea id="fPrompt" class="mono" placeholder="貼上提示詞後自動分析，或手動點上方按鈕…"></textarea>
+        <div class="pt-wrap">
+          <textarea id="fPrompt" class="mono" placeholder="貼上提示詞後自動分析，或手動點上方按鈕…（打字時會即時建議關鍵字，↑↓ 選、Tab 補全）"></textarea>
+          <div class="pt-suggest" id="ptSuggest" hidden></div>
+        </div>
+        <div class="pt-toks" id="ptToks" hidden></div>
+      </div>
+      <div class="field">
+        <label for="fStatus">製作狀態 <span class="opt">（看板欄位）</span></label>
+        <select id="fStatus">
+          <option value="">○ 未分類</option>
+          <option value="idea">💡 構想</option>
+          <option value="todo">⏳ 待生成</option>
+          <option value="gen">🖼 已生成</option>
+          <option value="pick">✅ 已採用</option>
+          <option value="pub">🚀 已發佈</option>
+        </select>
       </div>
       <div class="field">
         <label for="fNeg">負面提示詞 <span class="opt">Negative（選填）</span></label>
@@ -369,6 +536,51 @@
       <button class="btn ghost" id="mExport" style="justify-content:flex-start">匯出 JSON 備份</button>
       <button class="btn ghost" id="mTags" style="justify-content:flex-start">🏷 標籤管理</button>
       <button class="btn ghost" id="mTrash" style="justify-content:flex-start">🗑 回收站 <span id="mTrashN" style="font-weight:400;color:var(--ink-3)"></span></button>
+      <button class="btn ghost" id="mStats" style="justify-content:flex-start">📊 統計儀表板</button>
+      <button class="btn ghost" id="mSemIndex" style="justify-content:flex-start">🧠 建立／更新語意索引 <span id="mSemN" style="font-weight:400;color:var(--ink-3)"></span></button>
+      <button class="btn ghost" id="mTree" style="justify-content:flex-start">🌳 演化樹（全部血統）</button>
+      <button class="btn ghost" id="mShare" style="justify-content:flex-start">🔗 分享連結管理 <span id="mShareN" style="font-weight:400;color:var(--ink-3)"></span></button>
+      <div style="border-top:1px solid var(--line-soft);padding-top:14px;display:flex;flex-direction:column;gap:9px">
+        <span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">🖼 圖片生成 <span style="font-weight:400;color:var(--ink-3)">（卡片上的「生成」鈕）</span></span>
+        <div class="field">
+          <label for="genProv" style="font-size:11.5px">生成供應商</label>
+          <select id="genProv">
+            <option value="gemini">Gemini 圖像（用上面的 Gemini 金鑰・預設）</option>
+            <option value="pollinations">Pollinations（需自行申請 token）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="genGModel" style="font-size:11.5px">Gemini 圖像模型</label>
+          <input id="genGModel" list="genGList" spellcheck="false" style="font-family:var(--mono);font-size:11.5px">
+          <datalist id="genGList">
+            <option value="gemini-2.5-flash-image">gemini-2.5-flash-image（推薦）</option>
+            <option value="gemini-2.0-flash-preview-image-generation">gemini-2.0-flash-preview-image-generation</option>
+          </datalist>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="genPModel" style="font-size:11.5px">Pollinations 模型</label>
+            <input id="genPModel" list="genPList" spellcheck="false" style="font-family:var(--mono);font-size:11.5px">
+            <datalist id="genPList">
+              <option value="flux">flux</option>
+              <option value="turbo">turbo（最快）</option>
+              <option value="sana">sana</option>
+            </datalist>
+          </div>
+          <div class="field">
+            <label for="genPToken" style="font-size:11.5px">Pollinations token</label>
+            <input id="genPToken" spellcheck="false" autocomplete="off" placeholder="選填" style="font-family:var(--mono);font-size:11.5px">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="hint" id="genCfgStatus" style="margin:0;flex:1"></span>
+          <button class="btn ghost" id="genCfgSave">儲存</button>
+        </div>
+        <p class="hint" style="margin:0">尺寸自動吃卡片的比例參數（AR），沒填就用 1:1。生成完的圖會直接存進那張卡的結果圖。勾選多張卡可用底部「⚡ 批次生成」排隊背景跑。<br>
+          ⚠ Pollinations 已改為需驗證，匿名請求一律 403；要用它得先到
+          <a href="https://auth.pollinations.ai" target="_blank" rel="noopener" style="color:var(--accent);font-weight:600">auth.pollinations.ai ↗</a>
+          申請 token 填進上欄。<br>⚠ 線上 Artifact 版沙箱擋外連，生成功能僅本機 HTML／自架版可用。</p>
+      </div>
       <div style="border-top:1px solid var(--line-soft);padding-top:14px;display:flex;flex-direction:column;gap:8px">
         <label for="gemKeyInput" style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Gemini API Keys <span style="font-weight:400;color:var(--ink-3)">（AI 智慧分析，選填・可多組）</span></label>
         <textarea id="gemKeyInput" rows="3" placeholder="每行貼一組金鑰，例如：&#10;AIza…&#10;AIza…" autocomplete="off" spellcheck="false"
@@ -635,6 +847,8 @@
   <button class="btn primary" id="sbStack">📚 堆疊成同系列</button>
   <button class="btn ghost" id="sbUnstack">取消堆疊</button>
   <span class="sb-sep"></span>
+  <button class="btn ghost" id="sbGen">⚡ 批次生成</button>
+  <button class="btn ghost" id="sbShare">🔗 分享</button>
   <button class="btn ghost" id="sbTag">🏷 加標籤</button>
   <button class="btn ghost" id="sbFav">★ 收藏</button>
   <button class="btn ghost" id="sbExport">⬇ 匯出</button>
@@ -655,4 +869,11 @@
 <script src="pv-app-editor.js"></script>
 <script src="pv-app-tools.js"></script>
 <script src="pv-app-board.js"></script>
+<script src="pv-app-gen.js"></script>
+<script src="pv-app-sem.js"></script>
+<script src="pv-app-tree.js"></script>
+<script src="pv-app-kanban.js"></script>
+<script src="pv-app-share.js"></script>
+<script src="pv-app-stats.js"></script>
+<script src="pv-app-suggest.js"></script>
 <script src="pv-app-boot.js"></script>

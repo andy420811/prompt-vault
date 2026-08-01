@@ -28,7 +28,7 @@
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-Proxy-Password",
   "Access-Control-Max-Age": "86400",
 };
@@ -112,9 +112,88 @@ async function callOpenRouter(key, textModel, visionModel, sys, user, schema) {
   return JSON.parse(txt.slice(s, e + 1));
 }
 
+// ---------- 公開分享頁（唯讀作品集）----------
+const esc = (s) =>
+  String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// 只允許 data:image/... 的內嵌圖，擋掉 javascript: 之類的 URL
+const safeImg = (s) => (typeof s === "string" && /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(s) ? s : "");
+
+const SHARE_CSS = `
+:root{--paper:#F4F2EC;--surface:#fff;--ink:#1B1A21;--ink-2:#4A4854;--ink-3:#8C8A96;--line:#E2DFD6;--accent:#B4553C}
+@media (prefers-color-scheme:dark){:root{--paper:#131218;--surface:#1B1A22;--ink:#EDEBE5;--ink-2:#B6B3BE;--ink-3:#7E7C88;--line:#2E2C38;--accent:#E08C6E}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.65 -apple-system,"Segoe UI","Noto Sans TC",system-ui,sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:40px 20px 72px}
+header h1{font-size:30px;margin:0 0 6px;letter-spacing:-.01em}
+header p{margin:0;color:var(--ink-3);font-size:13.5px}
+.list{display:flex;flex-direction:column;gap:20px;margin-top:30px}
+.item{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.item img{width:100%;display:block;max-height:520px;object-fit:contain;background:#0000000d}
+.body{padding:16px 18px}
+.t{font-size:17px;font-weight:700;margin:0 0 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cat{font-size:11px;font-weight:600;color:var(--ink-3);border:1px solid var(--line);border-radius:20px;padding:2px 9px}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12.5px/1.7 ui-monospace,"SF Mono",Consolas,monospace;
+  background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--ink-2)}
+.lbl{font-size:11px;font-weight:700;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;margin:13px 0 5px}
+.meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.tag{font-size:11.5px;color:var(--ink-2);background:var(--paper);border:1px solid var(--line);border-radius:20px;padding:2px 10px}
+.cp{margin-top:12px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--line);
+  background:var(--paper);color:var(--ink-2);border-radius:8px;padding:7px 14px}
+.cp:hover{border-color:var(--accent);color:var(--accent)}
+footer{margin-top:44px;text-align:center;color:var(--ink-3);font-size:12px}
+`;
+
+function shareHTML(payload) {
+  const items = (payload.items || []).map((p) => {
+    const img = safeImg((p.imgs || [])[0]);
+    const params = Object.entries(p.params || {}).map(([k, v]) => `<span class="tag">${esc(k)} ${esc(v)}</span>`).join("");
+    const tags = (p.tags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+    return `<article class="item">
+      ${img ? `<img src="${img}" alt="${esc(p.title)}" loading="lazy">` : ""}
+      <div class="body">
+        <h2 class="t">${esc(p.title) || "未命名"}<span class="cat">${p.type === "video" ? "影片" : "圖像"}</span>${p.model ? `<span class="cat">${esc(p.model)}</span>` : ""}</h2>
+        <pre data-p>${esc(p.prompt)}</pre>
+        ${p.neg ? `<div class="lbl">負面提示詞</div><pre>${esc(p.neg)}</pre>` : ""}
+        ${params || tags ? `<div class="meta">${params}${tags}</div>` : ""}
+        <button class="cp" type="button">複製提示詞</button>
+      </div>
+    </article>`;
+  }).join("");
+  const d = new Date(payload.at || Date.now());
+  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${esc(payload.name) || "Prompt 作品集"}</title>
+<style>${SHARE_CSS}</style></head><body><div class="wrap">
+<header><h1>${esc(payload.name) || "Prompt 作品集"}</h1>
+<p>${(payload.items || []).length} 則提示詞・分享於 ${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}${payload.stripped ? "・（圖片過大已省略）" : ""}</p></header>
+<div class="list">${items || "<p>這個分享沒有內容。</p>"}</div>
+<footer>由 Prompt Vault 分享・唯讀頁面</footer></div>
+<script>
+document.addEventListener("click", function (e) {
+  var b = e.target.closest(".cp"); if (!b) return;
+  var pre = b.parentNode.querySelector("[data-p]");
+  navigator.clipboard.writeText(pre.textContent).then(function () {
+    b.textContent = "已複製"; setTimeout(function () { b.textContent = "複製提示詞"; }, 1600);
+  });
+});
+<\/script></body></html>`;
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
+
+    // 公開分享頁：/s/<id>，唯一不需要密碼的路由（讀取者是外人）
+    const sm = new URL(request.url).pathname.match(/^\/s\/([A-Za-z0-9_-]{6,32})$/);
+    if (sm) {
+      if (!env.VAULT) return new Response("後端尚未綁定 KV", { status: 500 });
+      const raw = await env.VAULT.get("share:" + sm[1]);
+      if (!raw) return new Response("這個分享連結不存在或已被取消。", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+      return new Response(shareHTML(JSON.parse(raw)), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=120" },
+      });
+    }
 
     // 密碼保護：擋掉任何不知道密碼的人，避免金鑰／資料被盜用
     if (!env.PROXY_PASSWORD || request.headers.get("X-Proxy-Password") !== env.PROXY_PASSWORD) {
@@ -137,6 +216,30 @@ export default {
         return json({ ok: true, count: b.data.length });
       }
       return json({ error: "只接受 GET/POST" }, 405);
+    }
+
+    // ---------- 建立／取消公開分享（需密碼；讀取端 /s/<id> 才是公開的）----------
+    if (path.endsWith("/share")) {
+      if (!env.VAULT) return json({ error: "後端尚未綁定 KV（Variable name 需為 VAULT）" }, 500);
+      if (request.method !== "POST") return json({ error: "只接受 POST" }, 405);
+      let b;
+      try { b = await request.json(); } catch (e) { return json({ error: "請求格式錯誤" }, 400); }
+      if (b.remove) {
+        if (!/^[A-Za-z0-9_-]{6,32}$/.test(b.remove || "")) return json({ error: "id 格式錯誤" }, 400);
+        await env.VAULT.delete("share:" + b.remove);
+        return json({ ok: true });
+      }
+      if (!Array.isArray(b.items) || !b.items.length) return json({ error: "items 必須是非空陣列" }, 400);
+      const id = [...crypto.getRandomValues(new Uint8Array(9))].map((n) => "abcdefghijkmnpqrstuvwxyz23456789"[n % 32]).join("");
+      let payload = { name: String(b.name || "Prompt 作品集").slice(0, 80), items: b.items.slice(0, 200), at: Date.now(), stripped: false };
+      let body = JSON.stringify(payload);
+      if (body.length > 20 * 1024 * 1024) {   // KV 單值上限 25MB → 太大就拿掉圖片再存
+        payload.items = payload.items.map((p) => ({ ...p, imgs: [] }));
+        payload.stripped = true;
+        body = JSON.stringify(payload);
+      }
+      await env.VAULT.put("share:" + id, body);
+      return json({ ok: true, id, url: new URL(request.url).origin + "/s/" + id, stripped: payload.stripped });
     }
 
     // ---------- AI 代理 ----------

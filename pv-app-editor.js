@@ -129,6 +129,7 @@
       }
     }
     autoAnalyzed = false;
+    typeTouched = false;
     curType = p ? p.type : "image";
     $("#mTitle").textContent = p ? "編輯提示詞" : "新增提示詞";
     $("#fTitle").value = p ? p.title : "";
@@ -140,6 +141,7 @@
     $("#fGroup").value = p ? p.group : (newCtx && newCtx.group ? newCtx.group : "");
     $("#groupList").innerHTML = [...new Set(data.map(x => x.group).filter(Boolean))].map(g => `<option value="${esc(g)}">`).join("");
     $("#fNotes").value = p ? p.notes : "";
+    $("#fStatus").value = p ? (p.status || "") : "";
     const pm = p ? p.params : {};
     $("#pAr").value = pm.ar || ""; $("#pSeed").value = pm.seed || ""; $("#pSteps").value = pm.steps || "";
     $("#pCfg").value = pm.cfg || ""; $("#pDur").value = pm.duration || ""; $("#pFps").value = pm.fps || "";
@@ -171,7 +173,7 @@
     $$("#typeSeg button").forEach(b => b.classList.toggle("on", b.dataset.t === t));
     $("#videoParams").style.display = t === "video" ? "grid" : "none";
   }
-  $("#typeSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setType(b.dataset.t); });
+  $("#typeSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) { typeTouched = true; setType(b.dataset.t); } });
 
   // ---------- variants editor ----------
   function renderVariants() {
@@ -344,6 +346,7 @@
       params,
       camera:[...sel.camera], style:[...sel.style], light:[...sel.light], shot:[...sel.shot],
       url: $("#fUrl").value.trim(), imgs: curImgs, group: $("#fGroup").value.trim(), notes: $("#fNotes").value.trim(),
+      status: $("#fStatus").value,
       variants: curVariants.filter(v => v.prompt.trim() || v.label.trim()),
       vars: cleanVars(prompt, curVars),
       varsDone: curVarsAnalyzed
@@ -365,8 +368,11 @@
       if (target.stack) syncGroups();   // 讓 group 依堆疊根同步（railSel 篩選與顯示才正確）
       toast(pulled ? "已併入雲端更新，並新增" : "已新增");
     }
+    const wantEnrich = needsEnrich(target), lockType = typeTouched;
     save(); render(); closeEditor();
-    if (!target.varsDone) detectVars(target);   // 沒在編輯器分析過的（如手動輸入）背景補辨識
+    // 只貼 prompt 就存（標題／標籤／變數空著）→ 背景跑一次分析寫回；其餘情況只補變數辨識
+    if (wantEnrich) enrichRecord(target, { type: !lockType });
+    else if (!target.varsDone) detectVars(target);   // 沒在編輯器分析過的（如手動輸入）背景補辨識
   });
 
   $("#delBtn").addEventListener("click", () => {

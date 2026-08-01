@@ -16,7 +16,7 @@
     gSel.style.display = groups.length ? "" : "none";
     gSel.value = railSelDropdownValue();
     renderProjRail(groups);
-    document.documentElement.classList.toggle("has-rail", railFolders.size > 0 || data.some(p => p.group || p.stack));
+    document.documentElement.classList.toggle("has-rail", railFolders.size > 0 || smarts.length > 0 || data.some(p => p.group || p.stack));
 
     // 分區整理檢視：依專案／系列分區顯示，隱藏單選過濾器
     const sectioned = viewMode === "sections";
@@ -24,11 +24,13 @@
     if (sectioned) gSel.style.display = "none";
 
     let list = data.filter(p => {
+      if (semSet && !semSet.has(p.id)) return false;   // 語意搜尋結果模式
+      if (smartCur && typeof smartMatch === "function" && !smartMatch(p, smartCur)) return false;   // 智慧集合
       if (filter === "image" && p.type !== "image") return false;
       if (filter === "video" && p.type !== "video") return false;
       if (filter === "fav" && !p.fav) return false;
       if (railSel.size && !railSelMatch(p)) return false;
-      if (q) {
+      if (q && !semSet) {   // 語意結果模式下不再套用字面關鍵字比對（否則會把語意命中的卡濾光）
         const hay = [p.title, p.prompt, p.neg, p.model, p.notes, p.group, p.tags.join(" "),
           GROUPS.flatMap(g => p[g]).join(" "), Object.values(p.params).join(" "),
           p.variants.map(v => v.label + " " + v.prompt).join(" ")].join(" ").toLowerCase();
@@ -38,6 +40,7 @@
     });
     const sort = $("#sort").value;
     list.sort((a, b) => {
+      if (semSet) return (semRank.get(a.id) ?? 1e9) - (semRank.get(b.id) ?? 1e9);   // 語意模式一律照相似度排
       if (sort === "az") return (a.title||"").localeCompare(b.title||"", "zh-Hant");
       if (sort === "edit") return b.edited - a.edited;
       if (sort === "use") return (b.use||0)-(a.use||0) || (b.lastUsed||0)-(a.lastUsed||0);
@@ -45,6 +48,7 @@
       return b.created - a.created;
     });
 
+    lastList = list;   // 看板檢視沿用同一份篩選結果
     const grid = $("#grid"), empty = $("#empty");
     $("#countLine").innerHTML = data.length ? `顯示 <b>${list.length}</b> / ${data.length} 則提示詞` : "";
     if (!list.length) {
@@ -233,6 +237,7 @@
     copy.variants = (copy.variants || []).map(v => ({ ...v, id: uid(), prompt: replaceDates(v.prompt || "") }));
     copy.imgs = []; copy.url = "";
     copy.use = 0; copy.lastUsed = 0; copy.fav = false;
+    copy.parent = p.id;   // 演化樹：記錄血統
     copy.created = Date.now(); copy.edited = Date.now();
     return copy;
   }
@@ -341,6 +346,12 @@
     if (pm.fps) out.push(`<span><b>${esc(pm.fps)}</b>fps</span>`);
     return out.join("");
   }
+  // 演化樹徽章：只有這則有血統關係（有來源或有衍生）時才出現（treeSize 定義在 pv-app-tree.js，載入較晚，故用防呆）
+  function treeBadge(p) {
+    if (typeof treeSize !== "function") return "";
+    const n = treeSize(p);
+    return n > 1 ? `<button class="tree-badge" data-act="tree" title="看這一支的演化樹">🌳 ${n} 代</button>` : "";
+  }
   function presetPills(p) {
     let out = "";
     GROUPS.forEach(g => p[g].forEach(en => { out += `<span class="ptag g-${g}">${esc(LABEL[en]||en)}</span>`; }));
@@ -373,6 +384,8 @@
           <span class="cat">${ICON[p.type]}${catLabel}</span>
           ${p.group ? `<span class="grp">${esc(p.group)}</span>` : ""}
           ${varBadge}
+          ${treeBadge(p)}
+          <button class="sim-btn" data-act="similar" title="找出庫裡語意最接近的作品">${ICON.sim}</button>
           <button class="star-btn ${p.fav?"on":""}" data-act="fav" title="收藏">${p.fav?ICON.starF:ICON.starO}</button>
         </div>
         <h3>${esc(p.title) || "（未命名）"}</h3>
@@ -389,6 +402,7 @@
       </div>
       ${varPop}
       <div class="card-foot">
+        <button class="foot-btn gen" data-act="gen" title="用目前的提示詞直接生成圖片">${ICON.gen}生成</button>
         <button class="foot-btn apply" data-act="apply">${ICON.wand}套用</button>
         <button class="foot-btn copy" data-act="copy">${ICON.copy}複製</button>
         <button class="foot-btn" data-act="edit">${ICON.edit}編輯</button>
@@ -411,6 +425,7 @@
         <div class="row-top">
           <h3>${esc(p.title) || "（未命名）"}</h3>
           ${p.group ? `<span class="grp">${esc(p.group)}</span>` : ""}
+          <button class="sim-btn" data-act="similar" title="找相似">${ICON.sim}</button>
           <button class="star-btn ${p.fav ? "on" : ""}" data-act="fav" title="收藏">${p.fav ? ICON.starF : ICON.starO}</button>
         </div>
         <pre class="prompt-text clamped row-prompt" data-act="expand">${esc(p.prompt)}</pre>
@@ -422,6 +437,7 @@
         </div>
       </div>
       <div class="row-acts">
+        <button class="foot-btn gen" data-act="gen" title="直接生成圖片">${ICON.gen}</button>
         <button class="foot-btn apply" data-act="apply" title="套用">${ICON.wand}</button>
         <button class="foot-btn copy" data-act="copy" title="複製">${ICON.copy}</button>
         <button class="foot-btn" data-act="edit" title="編輯">${ICON.edit}</button>
