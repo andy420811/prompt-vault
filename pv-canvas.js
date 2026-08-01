@@ -103,6 +103,13 @@ window.PVCanvas = (function () {
   .pvc-port { position:absolute; right:-9px; top:50%; transform:translateY(-50%); width:18px; height:18px; border-radius:50%;
       background:var(--accent,#4b45c6); border:2px solid var(--surface,#fff); cursor:crosshair; box-shadow:0 1px 3px rgba(0,0,0,.3); }
   .pvc-node.drop-target { outline:2px solid var(--accent,#4b45c6); outline-offset:2px; }
+  /* 收合中的節點畫成一疊紙（下游節點都藏在裡面） */
+  .pvc-node.folded { box-shadow:0 6px 20px -10px rgba(24,22,30,.3),
+      7px 7px 0 -1px var(--surface,#fff), 7px 7px 0 0 var(--line,#e0ddd1),
+      14px 14px 0 -1px var(--surface,#fff), 14px 14px 0 0 var(--line,#e0ddd1); }
+  .pvc-badge.fold { border-style:dashed; }
+  .pvc-node.folded .pvc-badge.fold { background:var(--accent-tint,#e7e5f7); color:var(--accent,#4b45c6); border-color:var(--accent,#4b45c6); border-style:solid; }
+  .pvc-edges path.folded { stroke-dasharray:6 5; opacity:.55; }
   .pvc-picker { position:absolute; top:14px; right:14px; width:320px; max-height:calc(100% - 28px); z-index:5; display:none; flex-direction:column;
       background:var(--surface,#fff); border:1px solid var(--line,#e0ddd1); border-radius:12px; box-shadow:0 20px 50px -18px rgba(24,22,30,.5); }
   .pvc-picker.show { display:flex; }
@@ -136,7 +143,10 @@ window.PVCanvas = (function () {
         <button class="pvc-b" id="pvcAssets" title="角色／風格資產庫">🎭 資產</button>
         <button class="pvc-b" id="pvcScript" title="貼腳本自動拆成分鏡">🎞 腳本</button>
         <button class="pvc-b" id="pvcStats" title="統計儀表板">📊 統計</button>
+        <button class="pvc-b" id="pvcFoldAll" title="把每一支演化（有下游的節點）收合成一疊／全部展開">⧉ 收合分支</button>
+        <button class="pvc-b primary" id="pvcFoldEvo" title="開著時：演化出新一代後，前面幾代自動收進最新那顆，畫布上這一支只留最新的">🧬 演化自動收合：開</button>
         <button class="pvc-b" id="pvcTidy" title="把所有節點排成整齊的網格">⬚ 自動排列</button>
+        <button class="pvc-b primary" id="pvcWire" title="開著時：庫裡新增的作品（腳本拆的分鏡、新一集、變體獨立…）自動變成節點並接上來源">🔗 自動串接：開</button>
         <span class="pvc-hint">節點上可直接編輯／生成／要變體想法／開新一集</span>
         <button class="pvc-b" id="pvcZoomOut" title="縮小">－</button>
         <span class="pvc-hint" id="pvcZoomLbl" style="min-width:40px;text-align:center">100%</span>
@@ -186,11 +196,20 @@ window.PVCanvas = (function () {
     ui.overlay.querySelector("#pvcAddNote").addEventListener("click", () => {
       const c = viewCenter(); addNode({ kind: "note", title: "", text: "", x: c.x - NODE_W / 2, y: c.y - 30 }); renderAll();
     });
+    ui.overlay.querySelector("#pvcFoldAll").addEventListener("click", foldAll);
+    ui.overlay.querySelector("#pvcFoldEvo").addEventListener("click", () => {
+      setFoldEvo(!autoFoldEvo());
+      say(autoFoldEvo() ? "演化出新一代後會自動收成一疊（只留最新的）" : "已關閉：演化後每一代都攤在畫布上");
+    });
     ui.overlay.querySelector("#pvcTidy").addEventListener("click", tidy);
+    ui.overlay.querySelector("#pvcWire").addEventListener("click", () => {
+      setAutoWire(!autoWire());
+      say(autoWire() ? "新作品完成後會自動接上畫布" : "已關閉自動串接（改用「＋ 匯入 Prompt」手動加）");
+    });
     // 主程式的其他功能：畫布上直接叫得到
     ui.overlay.querySelector("#pvcNewRec").addEventListener("click", () => {
       const f = fn("openEditor"); if (!f) return say("主程式尚未載入這個功能");
-      const d = appData(); pendingIds = d ? new Set(d.map(x => x.id)) : null;   // 存檔後由 refresh() 把新記錄放上畫布
+      pendingOnce = true;   // 存檔後由 catchNew() 把新記錄放上畫布（即使自動串接關著也收這一顆）
       f(null);
     });
     ui.overlay.querySelector("#pvcLib").addEventListener("click", () => { const b = document.querySelector("#libBtn"); b ? b.click() : say("主程式尚未載入這個功能"); });
@@ -280,9 +299,16 @@ window.PVCanvas = (function () {
 
   function startNodeDrag(n, nodeEl, e) {
     const w = toWorld(e); const offX = w.x - n.x, offY = w.y - n.y;
+    // 收合中的節點＝一疊，拖它時把藏在裡面的成員一起帶走（展開後才不會散在原地）
+    let pack = [];
+    if (n.fold) {
+      const f = foldMap();
+      pack = cur.nodes.filter(x => f.hidden.has(x.id) && visibleId(x.id, f) === n.id).map(x => ({ n: x, dx: x.x - n.x, dy: x.y - n.y }));
+    }
     docListen(ev => {
       if (pinching) return;
       const p = toWorld(ev); n.x = Math.round(p.x - offX); n.y = Math.round(p.y - offY);
+      pack.forEach(m => { m.n.x = n.x + m.dx; m.n.y = n.y + m.dy; });
       nodeEl.style.left = n.x + "px"; nodeEl.style.top = n.y + "px"; drawEdges();
     }, () => { cur.edited = Date.now(); save(); });
   }
@@ -358,6 +384,7 @@ window.PVCanvas = (function () {
 
   // ---------- 節點上的主程式功能 ----------
   function nodeAct(n, a, btn) {
+    if (a === "fold") return toggleFold(n);   // 收合／展開純粹是畫布上的事，筆記節點也能用
     const p = liveRec(n.ref);
     if (!p) { say("這則提示詞已不在庫裡"); refresh(); return; }
     const need = name => { const f = fn(name); if (!f) say("主程式尚未載入這個功能"); return f; };
@@ -399,15 +426,17 @@ window.PVCanvas = (function () {
     const mk = fn("newEpisodeFrom"), d = appData();
     if (!mk || !d) { say("主程式尚未載入這個功能"); return; }
     const copy = mk(p);
+    if (knownIds) knownIds.add(copy.id);   // 這顆自己接（連線標「新一集」），別讓 catchNew 再收一次
     d.unshift(copy); appSave(); appRender();
+    const at = freeSpot(n.x + (n.w || NODE_W) + 70, n.y, NODE_W, 240);
     const nn = addNode({
       kind: "prompt", ref: copy.id, ttype: copy.type === "video" ? "video" : "image",
-      title: copy.title || "", text: copy.prompt || "", img: "",
-      x: Math.round(n.x + (n.w || NODE_W) + 70), y: Math.round(n.y)
+      title: copy.title || "", text: copy.prompt || "", img: "", x: at.x, y: at.y
     });
     cur.edges.push({ id: uid(), from: n.id, to: nn.id, label: "新一集" });
+    const folded = foldIntoNewest(nn, n);   // 演化自動收合：這一支只留最新一代在畫布上
     cur.edited = Date.now(); save(); renderNodes(); drawEdges();
-    say("已建立新一集，日期已更新為今天");
+    say(folded ? "已建立新一集，前面幾代收進這一疊" : "已建立新一集，日期已更新為今天");
     const ideas = fn("episodeIdeas");
     if (ideas) ideas(copy, { newEp: true, onChange: refresh });
     else { const ed = fn("openEditor"); if (ed) ed(copy); }
@@ -467,8 +496,12 @@ window.PVCanvas = (function () {
     ["board", "🎬", "開啟這個系列的故事板"],
     ["episode", "✚", "以此建立新一集（含變體想法）"]
   ];
-  function nodeHTML(n) {
+  function nodeHTML(n, f) {
     const isNote = n.kind === "note";
+    const nDesc = f ? (f.desc.get(n.id) || 0) : 0;
+    const dir = foldDir(n);
+    const nCount = f ? (f.count.get(n.id) || 0) : 0;
+    const nFold = !!dir && nCount > 0;
     const p = isNote ? null : liveRec(n.ref);
     const gone = !isNote && !p;
     const typeLabel = isNote ? "📝 筆記" : (n.ttype === "video" ? "🎬 影片" : "🖼 圖像");
@@ -476,13 +509,16 @@ window.PVCanvas = (function () {
     const title = (p && !n.custom) ? (p.title || "") : (n.title || "");
     const text = p ? (p.prompt || "") : (n.text || "");
     const src = p ? ((p.imgs && p.imgs[0]) || n.img || "") : n.img;
-    const cls = (isNote ? "note" : "t-" + (n.ttype || "image")) + (src ? " has-img" : "");
+    const cls = (isNote ? "note" : "t-" + (n.ttype || "image")) + (src ? " has-img" : "") + (nFold ? " folded" : "");
     const img = (!isNote && src) ? `<div class="pvc-node-img"><img src="${src}" alt="" draggable="false"></div>` : "";
     const st = p ? statOf(p.status) : null;
     const w = n.w || NODE_W;
     const h = n.h || (isNote ? 150 : (src ? 330 : 240));   // 多了徽章列與功能列，預設高一點才看得到 prompt
-    const badges = p ? `<button class="pvc-fav${p.fav ? " on" : ""}" data-a="fav" title="收藏">★</button>
-        <span class="pvc-badge" data-a="status" title="點一下切換製作狀態">${st ? st.ico + " " + st.zh : "○ 未分類"}</span>` : "";
+    const badges = (p ? `<button class="pvc-fav${p.fav ? " on" : ""}" data-a="fav" title="收藏">★</button>
+        <span class="pvc-badge" data-a="status" title="點一下切換製作狀態">${st ? st.ico + " " + st.zh : "○ 未分類"}</span>` : "")
+      + (nFold
+        ? `<span class="pvc-badge fold" data-a="fold" title="${dir === "up" ? "展開：把前面幾代排回畫布" : "展開這一支"}">⧉ ${nCount} ${dir === "up" ? "代收合中" : "收合中"}</span>`
+        : (nDesc ? `<span class="pvc-badge fold" data-a="fold" title="把後面接的節點收合成一疊">⊟ 收合 ${nDesc}</span>` : ""));
     const meta = p ? `<div class="pvc-meta">${(p.tags || []).slice(0, 3).map(t => "#" + esc(t)).join(" ")}${p.use ? ` · 已用 ${p.use} 次` : ""}${p.variants && p.variants.length ? ` · ${p.variants.length} 變體` : ""}</div>` : "";
     const acts = (isNote || gone) ? "" : `<div class="pvc-acts">${ACTS
       .filter(a => a[0] !== "board" || p.stack)
@@ -504,7 +540,115 @@ window.PVCanvas = (function () {
       <div class="pvc-resize" title="拖曳改變節點大小"></div>
     </div>`;
   }
-  function renderNodes() { ui.nodes.innerHTML = cur.nodes.map(nodeHTML).join(""); }
+  function renderNodes() {
+    const f = foldMap();
+    ui.nodes.innerHTML = cur.nodes.filter(n => !f.hidden.has(n.id)).map(n => nodeHTML(n, f)).join("");
+  }
+
+  /* ---------- 節點堆疊：把一支演化收進一顆節點 ----------
+     以畫布上的連線方向為準，兩種方向：
+       n.fold = true / "down" → 藏「從這顆走得到的下游」（來源當疊頭，手動收合用）
+       n.fold = "up"          → 藏「走得到這顆的上游祖先」（最新一代當疊頭，演化自動收合用）
+     來源節點畫成一疊紙並標上收了幾顆；被藏起來的連線改接到代表它的那顆可見節點。 */
+  function graphMaps() {
+    const out = new Map(), inn = new Map();
+    cur.edges.forEach(e => {
+      if (!out.has(e.from)) out.set(e.from, []); out.get(e.from).push(e.to);
+      if (!inn.has(e.to)) inn.set(e.to, []); inn.get(e.to).push(e.from);
+    });
+    return { out, inn };
+  }
+  function walk(id, adj, byId) {   // 沿著 adj 一路走（含環偵測），回傳 Map(id → 距離)
+    const seen = new Map(); let layer = (adj.get(id) || []).slice(), depth = 1;
+    while (layer.length && depth < 200) {
+      const next = [];
+      layer.forEach(x => {
+        if (x === id || seen.has(x) || !byId.has(x)) return;
+        seen.set(x, depth); (adj.get(x) || []).forEach(y => next.push(y));
+      });
+      layer = next; depth++;
+    }
+    return seen;
+  }
+  const foldDir = n => (n.fold === "up" ? "up" : (n.fold ? "down" : ""));
+  function foldMap() {
+    const byId = new Map(cur.nodes.map(n => [n.id, n]));
+    const g = graphMaps();
+    const hidden = new Set(), rep = new Map(), count = new Map(), desc = new Map(), anc = new Map();
+    cur.nodes.forEach(n => {
+      const d = walk(n.id, g.out, byId), a = walk(n.id, g.inn, byId);
+      desc.set(n.id, d.size); anc.set(n.id, a.size);
+      const dir = foldDir(n); if (!dir) return;
+      const pack = dir === "up" ? a : d;
+      if (!pack.size) return;
+      count.set(n.id, pack.size);
+      pack.forEach((depth, id) => { hidden.add(id); if (!rep.has(id)) rep.set(id, n.id); });
+    });
+    // 巢狀收合：代表節點自己也被藏起來時，再往上找到真正看得到的那顆
+    rep.forEach((v, k) => {
+      let r = v, guard = 0;
+      while (hidden.has(r) && rep.has(r) && guard++ < 50) r = rep.get(r);
+      rep.set(k, r);
+    });
+    return { hidden, rep, count, desc, anc };
+  }
+  function visibleId(id, f) { return f.hidden.has(id) ? (f.rep.get(id) || id) : id; }
+  function toggleFold(n) {
+    const f = foldMap();
+    if (!foldDir(n) && !(f.desc.get(n.id) || 0)) { say("這顆節點後面沒有接東西"); return; }
+    if (foldDir(n)) {
+      const wasUp = foldDir(n) === "up";
+      const members = cur.nodes.filter(x => f.hidden.has(x.id) && f.rep.get(x.id) === n.id);
+      delete n.fold;
+      if (wasUp) spreadAncestors(n, members);   // 往上收的成員位置被疊在一起過，展開時重新排開
+      say("已展開這一支");
+    } else { n.fold = "down"; say("已收合這一支"); }
+    cur.edited = Date.now(); save(); renderNodes(); drawEdges();
+  }
+  // 展開「往上收」的疊：把祖先依世代排到疊頭左邊，避免疊在同一個位置
+  function spreadAncestors(n, members) {
+    const byId = new Map(cur.nodes.map(x => [x.id, x]));
+    const depth = walk(n.id, graphMaps().inn, byId);
+    members.forEach(m => {
+      const d = depth.get(m.id) || 1;
+      m.x = Math.round(n.x - d * ((n.w || NODE_W) + 70));
+      m.y = Math.round(n.y);
+    });
+  }
+  function foldAll() {
+    const f = foldMap();
+    const roots = cur.nodes.filter(n => (f.desc.get(n.id) || 0) > 0 && !f.hidden.has(n.id));
+    const anyFolded = cur.nodes.some(n => foldDir(n));
+    if (anyFolded) {
+      cur.nodes.filter(n => foldDir(n) === "up").forEach(n => {
+        spreadAncestors(n, cur.nodes.filter(x => f.hidden.has(x.id) && f.rep.get(x.id) === n.id));
+      });
+      cur.nodes.forEach(n => { delete n.fold; });
+    }
+    else if (!roots.length) { say("目前沒有可以收合的分支"); return; }
+    else roots.forEach(n => { n.fold = "down"; });
+    cur.edited = Date.now(); save(); renderNodes(); drawEdges();
+    say(anyFolded ? "已展開全部" : "已收合所有分支");
+  }
+  // 演化自動收合：新一代接上後，把上游整支收進新節點，畫布上這一支只留最新的那顆
+  function autoFoldEvo() { return store.foldEvo !== false; }
+  function setFoldEvo(on) {
+    store.foldEvo = !!on; save();
+    const b = ui && ui.overlay.querySelector("#pvcFoldEvo");
+    if (b) { b.textContent = on ? "🧬 演化自動收合：開" : "🧬 演化自動收合：關"; b.classList.toggle("primary", !!on); }
+  }
+  function foldIntoNewest(nn, anchor) {
+    if (!autoFoldEvo() || !anchor) return false;
+    delete anchor.fold;   // 上一代的疊頭讓位給新的一代
+    nn.fold = "up";
+    // 疊頭接手來源的位置（不會每演化一代就往右漂）；但同一個爸爸生第二個小孩時那裡已有疊，就留在原本排好的位置
+    const f = foldMap();
+    const taken = cur.nodes.some(x => x !== nn && !f.hidden.has(x.id) &&
+      anchor.x < x.x + (x.w || NODE_W) + 16 && anchor.x + NODE_W + 16 > x.x &&
+      anchor.y < x.y + (x.h || 240) + 16 && anchor.y + 240 + 16 > x.y);
+    if (!taken) { nn.x = anchor.x; nn.y = anchor.y; }
+    return true;
+  }
   // 把庫裡的現況寫回節點快照（圖片不存進畫布，避免撐爆 localStorage；顯示時直接讀庫）
   function syncNodes() {
     let dirty = false;
@@ -522,26 +666,81 @@ window.PVCanvas = (function () {
     if (dirty) save();
   }
   // 主程式重繪（存檔、生成、換狀態…）之後跟著更新畫布
-  let pendingIds = null;   // 按「＋ 新提示詞」時的既有 id；新記錄一存檔就自動落到畫布上
   function refresh() {
     if (!ui || !cur || !ui.overlay.classList.contains("show")) return;
-    catchNewRec();
+    const added = catchNew();
     syncNodes(); renderNodes(); drawEdges();
     ui.emptyMsg.hidden = cur.nodes.length > 0;
+    if (added) say(added === 1 ? "新作品已自動接上畫布" : `已把 ${added} 則新作品自動串上畫布`);
   }
-  function catchNewRec() {
-    if (!pendingIds) return;
-    const d = appData(); if (!d) return;
-    const fresh = d.find(x => !pendingIds.has(x.id));
-    if (!fresh) return;
-    pendingIds = null;
-    const c = viewCenter();
-    addNode({
-      kind: "prompt", ref: fresh.id, ttype: fresh.type === "video" ? "video" : "image",
-      title: fresh.title || "", text: fresh.prompt || "", img: "",
-      x: Math.round(c.x - NODE_W / 2), y: Math.round(c.y - 60)
+
+  /* ---------- 自動串接：畫布開著時，庫裡新增的記錄自動變節點並連線 ----------
+     來源不限畫布上的按鈕（腳本→分鏡、變體獨立、卡片複製…都算），規則：
+     1. 有 parent（新一集／副本／變體獨立）→ 接在父節點後面
+     2. 同一個堆疊已有節點 → 接在該堆疊最後一顆後面（腳本拆的分鏡因此自動串成一條）
+     3. 都沒有 → 放在畫面中央附近 */
+  let knownIds = null;      // 畫布開啟當下庫裡的 id；用來認出「後來才出現」的記錄
+  let pendingOnce = false;  // 關掉自動串接時，「＋ 新提示詞」仍收這一顆
+  const NEW_MAX = 30;       // 一次最多自動收 30 顆，避免大量匯入時把畫布灌爆
+  function resetKnown() { const d = appData(); knownIds = d ? new Set(d.map(x => x.id)) : null; }
+  function nodeOfRef(ref) { for (let i = cur.nodes.length - 1; i >= 0; i--) if (cur.nodes[i].ref === ref) return cur.nodes[i]; return null; }
+  function anchorFor(p) {
+    if (p.parent) { const a = nodeOfRef(p.parent); if (a) return { node: a, label: "衍生" }; }
+    if (p.stack) {
+      const mates = cur.nodes.filter(n => { const r = liveRec(n.ref); return r && r.stack === p.stack; });
+      if (mates.length) return { node: mates[mates.length - 1], label: p.sb ? "下一鏡" : "同系列" };
+    }
+    return null;
+  }
+  function overlaps(x, y, w, h) {
+    return cur.nodes.some(n => {
+      const nw = n.w || NODE_W, nh = n.h || 240;
+      return x < n.x + nw + 16 && x + w + 16 > n.x && y < n.y + nh + 16 && y + h + 16 > n.y;
     });
-    say("新提示詞已放上畫布");
+  }
+  function freeSpot(x, y, w, h) {   // 往下讓位，避免疊在既有節點上
+    for (let i = 0; i < 60 && overlaps(x, y, w, h); i++) y += 60;
+    return { x: Math.round(x), y: Math.round(y) };
+  }
+  function catchNew() {
+    const d = appData(); if (!d) return 0;
+    if (!knownIds) { resetKnown(); return 0; }
+    const fresh = d.filter(x => !knownIds.has(x.id));
+    d.forEach(x => knownIds.add(x.id));
+    if (!fresh.length) return 0;
+    const take = pendingOnce || autoWire();
+    pendingOnce = false;
+    if (!take) return 0;
+    // 只收「剛剛才建立的」：Ctrl+Z 還原舊記錄、雲端拉回舊資料都不該被當成新作品
+    const now = Date.now();
+    let list = fresh.filter(p => p.created && now - p.created < 5 * 60 * 1000 && !nodeOfRef(p.id));
+    if (!list.length) return 0;
+    if (list.length > NEW_MAX) { list = list.slice(0, NEW_MAX); say(`新作品超過 ${NEW_MAX} 則，只自動接上前 ${NEW_MAX} 則`); }
+    list.sort((a, b) => ((a.sb && a.sb.ord) || 0) - ((b.sb && b.sb.ord) || 0) || (a.created || 0) - (b.created || 0));
+    const c = viewCenter();
+    let n = 0;
+    list.forEach(p => {
+      const a = anchorFor(p);
+      const w = NODE_W, h = 240;
+      const at = a ? freeSpot(a.node.x + (a.node.w || NODE_W) + 70, a.node.y, w, h)
+                   : freeSpot(c.x - w / 2 + (cur.nodes.length % 5) * 26, c.y - 60, w, h);
+      const nn = addNode({
+        kind: "prompt", ref: p.id, ttype: p.type === "video" ? "video" : "image",
+        title: p.title || "", text: p.prompt || "", img: "", x: at.x, y: at.y
+      });
+      if (a) cur.edges.push({ id: uid(), from: a.node.id, to: nn.id, label: a.label });
+      // 血統關係（新一集／副本／變體獨立）才自動收合；分鏡鏈維持攤開比較好排戲
+      if (a && a.label === "衍生") foldIntoNewest(nn, a.node);
+      n++;
+    });
+    cur.edited = Date.now(); save();
+    return n;
+  }
+  function autoWire() { return store.autoWire !== false; }
+  function setAutoWire(on) {
+    store.autoWire = !!on; save();
+    const b = ui && ui.overlay.querySelector("#pvcWire");
+    if (b) { b.textContent = on ? "🔗 自動串接：開" : "🔗 自動串接：關"; b.classList.toggle("primary", !!on); }
   }
   let hooked = false;
   function hookRender() {
@@ -551,17 +750,22 @@ window.PVCanvas = (function () {
     hooked = true;
   }
   function drawEdges() {
-    const paths = cur.edges.map(e => {
-      const a = nodeCenter(e.from), b = nodeCenter(e.to);
-      return `<path data-id="${e.id}" d="${edgePath(a.x, a.y, b.x, b.y)}"/>`;
+    const f = foldMap();
+    // 收合起來的節點：連線改接到代表它的那顆；兩端變同一顆（＝整條都在同一疊裡）就不畫
+    const shown = cur.edges.map(e => ({ e, from: visibleId(e.from, f), to: visibleId(e.to, f) }))
+      .filter(x => x.from !== x.to);
+    const paths = shown.map(x => {
+      const a = nodeCenter(x.from), b = nodeCenter(x.to);
+      return `<path data-id="${x.e.id}"${f.hidden.has(x.e.from) || f.hidden.has(x.e.to) ? ' class="folded"' : ""} d="${edgePath(a.x, a.y, b.x, b.y)}"/>`;
     }).join("");
     // 保留可能存在的 temp path
     const temp = ui.edges.querySelector("path.temp");
     ui.edges.innerHTML = paths; if (temp) ui.edges.appendChild(temp);
-    ui.labels.innerHTML = cur.edges.map(e => {
-      const a = nodeCenter(e.from), b = nodeCenter(e.to); const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-      const txt = e.label ? esc(e.label) : "＋ 關係";
-      return `<div class="pvc-elabel${e.label ? "" : " empty"}" data-id="${e.id}" style="left:${mx}px;top:${my}px">${txt}<span class="pvc-edel" title="刪除連線">×</span></div>`;
+    ui.labels.innerHTML = shown.map(x => {
+      if (f.hidden.has(x.e.from) || f.hidden.has(x.e.to)) return "";   // 收合中的連線不放標籤，避免疊成一團
+      const a = nodeCenter(x.from), b = nodeCenter(x.to); const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      const txt = x.e.label ? esc(x.e.label) : "＋ 關係";
+      return `<div class="pvc-elabel${x.e.label ? "" : " empty"}" data-id="${x.e.id}" style="left:${mx}px;top:${my}px">${txt}<span class="pvc-edel" title="刪除連線">×</span></div>`;
     }).join("");
   }
   function editLabel(labEl, ed) {
@@ -593,6 +797,7 @@ window.PVCanvas = (function () {
     hookRender();
     if (!store.projects.length) newProject("我的專案");
     cur = curProject(); store.currentId = cur.id; save();
+    resetKnown(); setAutoWire(autoWire()); setFoldEvo(autoFoldEvo());
     ui.overlay.classList.add("show"); renderAll();
   }
   return { open };
