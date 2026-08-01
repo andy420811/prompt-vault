@@ -475,6 +475,7 @@
             </button>
             <button type="button" class="link-btn" id="addVarBlank" style="color:var(--ink-3)">新增空白變體</button>
             <button type="button" class="link-btn ai-link" id="aiVarBtn">✦ AI 建議變體</button>
+            <button type="button" class="link-btn" id="ideaBtn">💡 變體想法（可挑選）</button>
           </div>
         </div>
       </div>
@@ -483,6 +484,32 @@
       <button class="btn ghost del-side" id="delBtn" style="display:none;color:var(--danger)">刪除</button>
       <button class="btn ghost" onclick="closeEditor()">取消</button>
       <button class="btn primary" id="saveBtn">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- variant ideas（新一集／任何記錄都能叫出來） -->
+<div class="overlay" id="ideaOverlay">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:660px">
+    <div class="modal-head">
+      <h2 id="ideaTitle">💡 變體想法</h2>
+      <button class="icon-btn" id="ideaClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" id="ideaHint"></p>
+      <input id="ideaDir" placeholder="想要的變化方向（選填）：如 改成夜晚場景、換仰角鏡頭、更電影感、加暴雨" style="width:100%;font-size:12.5px">
+      <div class="pk-actions">
+        <button type="button" class="link-btn ai-link" id="ideaGo">✦ AI 想 5 個點子</button>
+        <button type="button" class="link-btn" id="ideaDice">🎲 離線靈感（不用 API）</button>
+        <button type="button" class="link-btn" id="ideaAll" style="color:var(--ink-3)">全部存為變體</button>
+      </div>
+      <div class="idea-list" id="ideaList"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="ideaEdit">✏️ 開啟編輯器</button>
+      <button class="btn primary" id="ideaDone">完成</button>
     </div>
   </div>
 </div>

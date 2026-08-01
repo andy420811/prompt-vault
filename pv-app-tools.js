@@ -1041,3 +1041,133 @@
     finally { btn.textContent = "開始反推"; btn.disabled = !vrevFrames.length; }
   });
 
+
+  // ---------- 💡 變體想法：挑選式的變化方向（新一集入口、編輯器、畫布共用）----------
+  const IDEA_SCHEMA = { type: "OBJECT", properties: { ideas: { type: "ARRAY", items: {
+    type: "OBJECT", properties: { label: { type: "STRING" }, desc: { type: "STRING" }, prompt: { type: "STRING" } }, required: ["label", "prompt"]
+  } } }, required: ["ideas"] };
+  const IDEA_SYS = "你是影像系列的創意企劃兼提示詞工程師。使用者給你一則生成提示詞，請提出 5 個方向明顯不同、可以直接拿去生成的變化想法。每個想法輸出三個欄位：\n- label：8~16 字繁體中文，具體寫出這個方向的特色（如「暴雨夜街＋霓虹反光」「清晨薄霧的空拍全景」），不要寫「版本二」這種空泛名稱；\n- desc：一句繁體中文，說明相對原版改了什麼、為什麼有趣；\n- prompt：完整可用的提示詞，語言與原文相同，只改動該方向相關的部分，保留主體與所有硬性要求。\n若使用者指定了變化方向，就逐項對應產生；未指定時自行從時段、天氣、場景、情緒、鏡頭、色調、風格、構圖等面向挑 5 個彼此差異明顯的方向。";
+  let ideaTarget = null, ideaItems = [], ideaOpts = {};
+  const ideaOv = $("#ideaOverlay");
+  const edOpen = () => $("#overlay").classList.contains("show");
+  const ideaEditing = () => edOpen() && editingId === (ideaTarget && ideaTarget.id || null);
+  function ideaRec() { try { return ideaTarget && ideaTarget.id ? data.find(x => x.id === ideaTarget.id) : null; } catch (e) { return null; } }
+  function ideaClose() { ideaOv.classList.remove("show"); }
+
+  // p 可以是庫裡的記錄，也可以是編輯器裡尚未儲存的暫時物件 {id:null,title,prompt}
+  window.episodeIdeas = function (p, opts) {
+    if (!p) return;
+    ideaTarget = p; ideaOpts = opts || {}; ideaItems = [];
+    $("#ideaTitle").textContent = ideaOpts.newEp ? "💡 這一集可以怎麼變？" : "💡 變體想法";
+    $("#ideaHint").innerHTML = (ideaOpts.newEp ? "新一集已建立（日期換成今天）。" : "") +
+      "挑到的想法會存成「<b>" + esc((p.title || "").slice(0, 20) || "未命名") + "</b>」的變體，不會蓋掉原本的提示詞。";
+    $("#ideaDir").value = ideaOpts.dir || "";
+    renderIdeas();
+    ideaOv.classList.add("show");
+    setTimeout(() => $("#ideaDir").focus(), 50);
+  };
+  function renderIdeas() {
+    const box = $("#ideaList");
+    if (!ideaItems.length) {
+      box.innerHTML = `<p class="idea-empty">按上面的 <b>✦ AI 想 5 個點子</b> 讓 AI 依這則提示詞提想法，<br>或用 <b>🎲 離線靈感</b> 直接從關鍵字字典抽 4 個方向（不需 API Key）。</p>`;
+      return;
+    }
+    box.innerHTML = ideaItems.map((it, i) => `
+      <div class="idea-card${it.added ? " on" : ""}">
+        <div class="idea-h"><span class="il">${esc(it.label || "變體")}</span>${it.added ? `<span class="ib">已存為變體</span>` : ""}</div>
+        ${it.desc ? `<div class="idea-d">${esc(it.desc)}</div>` : ""}
+        <div class="idea-p">${esc(it.prompt || "")}</div>
+        <div class="idea-acts">
+          <button type="button" class="pri" data-ia="add" data-i="${i}"${it.added ? " disabled" : ""}>＋ 存為變體</button>
+          <button type="button" data-ia="use" data-i="${i}">設為主提示詞</button>
+          <button type="button" data-ia="copy" data-i="${i}">複製</button>
+        </div>
+      </div>`).join("");
+  }
+  function ideaAdd(i) {
+    const it = ideaItems[i]; if (!it || it.added) return;
+    const v = { id: uid(), label: (it.label || "變體").slice(0, 40), prompt: it.prompt, note: (it.desc || "變體想法").trim() };
+    if (ideaEditing()) { syncVariants(); curVariants.push(v); renderVariants(); $("#blkVariants").classList.remove("closed"); }
+    else {
+      const rec = ideaRec(); if (!rec) { toast("這則提示詞已不在庫裡"); return; }
+      rec.variants = rec.variants || []; rec.variants.push(v); rec.edited = Date.now(); save(); render();
+    }
+    it.added = true; renderIdeas();
+    if (ideaOpts.onChange) ideaOpts.onChange();
+    return true;
+  }
+  function ideaUse(i) {
+    const it = ideaItems[i]; if (!it) return;
+    if (ideaEditing()) { $("#fPrompt").value = it.prompt; $("#fPrompt").dispatchEvent(new Event("input")); }
+    else {
+      const rec = ideaRec(); if (!rec) { toast("這則提示詞已不在庫裡"); return; }
+      rec.prompt = it.prompt; rec.varsDone = false; rec.edited = Date.now(); save(); render();
+    }
+    ideaTarget.prompt = it.prompt;
+    toast("已把「" + (it.label || "這個想法") + "」設為主提示詞");
+    if (ideaOpts.onChange) ideaOpts.onChange();
+  }
+  $("#ideaList").addEventListener("click", e => {
+    const btn = e.target.closest("[data-ia]"); if (!btn) return;
+    const i = +btn.dataset.i;
+    if (btn.dataset.ia === "add") { if (ideaAdd(i)) toast("已存成變體"); }
+    else if (btn.dataset.ia === "use") ideaUse(i);
+    else if (btn.dataset.ia === "copy") { const it = ideaItems[i]; if (it) navigator.clipboard.writeText(it.prompt).then(() => toast("已複製")).catch(() => toast("複製失敗")); }
+  });
+  $("#ideaClose").addEventListener("click", ideaClose);
+  $("#ideaDone").addEventListener("click", ideaClose);
+  $("#ideaEdit").addEventListener("click", () => { const rec = ideaRec(); ideaClose(); if (rec) openEditor(rec); });
+  $("#ideaAll").addEventListener("click", () => {
+    if (!ideaItems.length) { toast("還沒有想法，先按 ✦ AI 想點子 或 🎲 離線靈感"); return; }
+    let n = 0; ideaItems.forEach((it, i) => { if (!it.added && ideaAdd(i)) n++; });
+    toast(n ? `已存成 ${n} 個變體` : "都已經存過了");
+  });
+  // 離線靈感：從關鍵字字典各挑一個原文沒用過的方向
+  $("#ideaDice").addEventListener("click", () => {
+    const base = ((ideaTarget && ideaTarget.prompt) || "").trim();
+    if (!base) { toast("這則沒有提示詞內容"); return; }
+    const low = base.toLowerCase();
+    const axes = [["light", "光線"], ["style", "風格"], ["shot", "構圖"], ["camera", "運鏡"]];
+    const out = [];
+    axes.forEach(([g, zh]) => {
+      const pool = (PRESETS[g] || []).filter(o => !low.includes(o[1].toLowerCase()));
+      if (!pool.length) return;
+      const o = pool[Math.floor(Math.random() * pool.length)];
+      out.push({ label: zh + "改成「" + o[0] + "」", desc: "在原提示詞尾端加上 " + o[1] + "，其餘保持不變。", prompt: base.replace(/[,，\s]+$/, "") + ", " + o[1] });
+    });
+    if (!out.length) { toast("字典裡的方向都已在提示詞裡了" ); return; }
+    ideaItems = ideaItems.filter(x => x.added).concat(out);
+    renderIdeas();
+  });
+  $("#ideaGo").addEventListener("click", async () => {
+    const base = ((ideaTarget && ideaTarget.prompt) || "").trim();
+    if (!base) { toast("這則沒有提示詞內容"); return; }
+    if (!gemKey()) { toast("此功能需在 ⚙ 設定填入 API Key（Gemini 或 OpenRouter），或改用 🎲 離線靈感"); return; }
+    const dir = $("#ideaDir").value.trim();
+    const msg = [
+      "原始提示詞：\n" + base,
+      ideaTarget.title ? "作品標題：" + ideaTarget.title : "",
+      ideaOpts.newEp ? "情境：這是同一系列的「新一集」，請讓新一集和上一集有明顯區別，但維持系列調性。" : "",
+      dir ? "使用者想要的變化方向（請逐項對應產生）：\n" + dir : ""
+    ].filter(Boolean).join("\n\n");
+    const btn = $("#ideaGo"); const old = btn.textContent;
+    btn.textContent = "AI 想點子中…"; btn.disabled = true;
+    try {
+      const r = await aiCall(IDEA_SYS, msg, IDEA_SCHEMA);
+      const got = (r.ideas || []).filter(v => v.prompt).slice(0, 6);
+      ideaItems = ideaItems.filter(x => x.added).concat(got);
+      renderIdeas();
+      toast(got.length ? `AI 給了 ${got.length} 個想法，挑喜歡的存成變體` : "AI 沒有回傳想法");
+    } catch (e) { toast("AI 呼叫失敗（" + e.message + "）"); }
+    finally { btn.textContent = old; btn.disabled = false; }
+  });
+  // 編輯器變體區的入口：拿目前欄位內容當來源（可以是還沒儲存的新記錄）
+  $("#ideaBtn").addEventListener("click", () => {
+    const raw = $("#fPrompt").value.trim();
+    if (!raw) { toast("請先輸入提示詞"); return; }
+    window.episodeIdeas({ id: editingId, title: $("#fTitle").value.trim(), prompt: raw }, {});
+  });
+  // Esc 只關掉想法視窗（捕獲階段攔下 editor 的全域 Esc，否則整個編輯器會被關掉）
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && ideaOv.classList.contains("show")) { e.stopPropagation(); ideaClose(); }
+  }, true);

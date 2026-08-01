@@ -109,8 +109,10 @@
     if (act === "episode") {   // 以此卡為底建立新一集：日期換今天、同系列、開編輯器快改事件/標題
       const copy = newEpisodeFrom(p);
       data.unshift(copy); save(); render();
-      openEditor(copy);
       toast("已建立新一集，日期已更新為今天");
+      // 直接給變體想法（想法視窗裡有「開啟編輯器」可跳去改事件／標題）
+      if (typeof window.episodeIdeas === "function") window.episodeIdeas(copy, { newEp: true });
+      else openEditor(copy);
       return;
     }
     if (act === "dup") {
