@@ -153,10 +153,10 @@
     const overdue = videos.filter(v => v.status !== "pub" && v.due && v.due < now.toISOString().slice(0, 10)).length;
     const views = pub.reduce((s, v) => s + (v.views || 0), 0);
     const cards = [
-      ["全部影片", videos.length], ["製作中", wip], ["本月已發布", thisMonth],
-      ["逾期未發", overdue], ["累計觀看", nf(views)]
+      ["全部", videos.length, ""], ["製作中", wip, ""], ["本月已發布", thisMonth, ""],
+      ["逾期", overdue, overdue ? " warn" : ""], ["累計觀看", nf(views), ""]
     ];
-    $("#vStats").innerHTML = cards.map(([t, n]) => `<span class="vd-stat"><b>${n}</b>${t}</span>`).join("");
+    $("#vStats").innerHTML = cards.map(([t, n, c]) => `<span class="vd-stat${c}"><b>${n}</b>${t}</span>`).join("");
   }
   function renderSeriesOptions() {
     const set = [...new Set(videos.map(v => v.series).filter(Boolean))].sort();
@@ -165,24 +165,23 @@
     $("#vSeriesList").innerHTML = set.map(s => `<option value="${esc(s)}">`).join("");
   }
   function cardHTML(v) {
-    const th = thumbOf(v), r = doneRatio(v), dc = dueClass(v);
+    const th = thumbOf(v), done = v.todos.filter(t => t.done).length, r = doneRatio(v), dc = dueClass(v);
     return `<article class="vd-card" data-id="${v.id}" draggable="true">
-      <div class="vd-thumb">
-        ${th ? `<img src="${esc(th)}" alt="" loading="lazy">` : `<div class="ph">🎬</div>`}
-        <span class="kind">${v.kind === "short" ? "Shorts" : "長片"}</span>
-        ${v.views ? `<span class="views">▶ ${nf(v.views)}</span>` : ""}
-      </div>
+      ${th ? `<div class="vd-thumb"><img src="${esc(th)}" alt="" loading="lazy">
+        ${v.views ? `<span class="views">▶ ${nf(v.views)}</span>` : ""}</div>` : ""}
       <div class="vd-card-body">
         ${v.series ? `<div class="vd-ser">${esc(v.series)}${v.ep !== "" ? " EP" + esc(String(v.ep)) : ""}</div>` : ""}
         <h3>${esc(v.title || "未命名影片")}</h3>
         <div class="vd-meta">
-          ${v.due ? `<span class="vd-chip ${dc}">📅 ${dstr(v.due)}</span>` : ""}
+          ${v.kind === "short" ? `<span class="vd-chip k">Shorts</span>` : ""}
+          ${v.due ? `<span class="vd-chip ${dc}">${dc === "due" ? "⚠" : "📅"} ${dstr(v.due)}</span>` : ""}
           ${v.published ? `<span class="vd-chip">🚀 ${dstr(v.published)}</span>` : ""}
-          ${v.todos.length ? `<span class="vd-chip">☑ ${v.todos.filter(t => t.done).length}/${v.todos.length}</span>` : ""}
+          ${!th && v.views ? `<span class="vd-chip">▶ ${nf(v.views)}</span>` : ""}
+          ${v.todos.length ? `<span class="vd-chip">☑ ${done}/${v.todos.length}</span>` : ""}
           ${v.links.length ? `<span class="vd-chip">🗂 ${v.links.length}</span>` : ""}
           ${v.tags.slice(0, 2).map(t => `<span class="vd-chip">#${esc(t)}</span>`).join("")}
         </div>
-        ${v.todos.length ? `<div class="vd-prog"><i style="width:${Math.round(r * 100)}%"></i></div>` : ""}
+        ${v.todos.length ? `<div class="vd-prog${r === 1 ? " full" : ""}"><i style="width:${Math.round(r * 100)}%"></i></div>` : ""}
       </div>
     </article>`;
   }
@@ -190,31 +189,34 @@
     $("#vBoard").innerHTML = STAGES.map(s => {
       const items = list.filter(v => v.status === s.k);
       return `<section class="vd-col" data-stage="${s.k}">
-        <div class="vd-col-head"><span class="t">${s.ico} ${s.zh}</span><span class="n">${items.length}</span>
+        <div class="vd-col-head"><span class="dot"></span><span class="t">${s.zh}</span><span class="n">${items.length}</span>
           <button class="add" data-add="${s.k}" title="在這個階段新增影片">＋</button></div>
-        <div class="vd-col-body">${items.map(cardHTML).join("") || `<div class="vd-empty-col">拖曳卡片到這裡</div>`}</div>
+        <div class="vd-col-body">${items.map(cardHTML).join("") || `<div class="vd-empty-col">把卡片拖到這裡<br>或按 ＋ 新增</div>`}</div>
       </section>`;
     }).join("");
   }
   function renderList(list) {
     $("#vList").innerHTML = list.length ? list.map(v => {
-      const th = thumbOf(v), s = STAGE[v.status];
-      return `<article class="vd-row" data-id="${v.id}">
-        <div class="rt">${th ? `<img src="${esc(th)}" alt="" loading="lazy">` : ""}</div>
+      const th = thumbOf(v), s = STAGE[v.status], done = v.todos.filter(t => t.done).length;
+      return `<article class="vd-row" data-id="${v.id}" data-stage="${v.status}">
+        <div class="rt">${th ? `<img src="${esc(th)}" alt="" loading="lazy">` : (v.kind === "short" ? "▯" : "🎬")}</div>
         <div class="rmain">
           <h3>${v.series ? `<span style="color:var(--accent)">${esc(v.series)}${v.ep !== "" ? " EP" + esc(String(v.ep)) : ""}</span> · ` : ""}${esc(v.title || "未命名影片")}</h3>
           <div class="vd-meta">
-            <span class="vd-chip">${s.ico} ${s.zh}</span>
-            <span class="vd-chip">${v.kind === "short" ? "Shorts" : "長片"}</span>
+            <span class="vd-chip k">${s.ico} ${s.zh}</span>
+            ${v.kind === "short" ? `<span class="vd-chip">Shorts</span>` : ""}
             ${v.due ? `<span class="vd-chip ${dueClass(v)}">📅 ${dstr(v.due)}</span>` : ""}
             ${v.published ? `<span class="vd-chip">🚀 ${dstr(v.published)}</span>` : ""}
-            ${v.views ? `<span class="vd-chip">▶ ${nf(v.views)}</span>` : ""}
             ${v.links.length ? `<span class="vd-chip">🗂 ${v.links.length} 個 prompt</span>` : ""}
+            ${v.tags.slice(0, 3).map(t => `<span class="vd-chip">#${esc(t)}</span>`).join("")}
           </div>
         </div>
-        <div class="rside">${v.todos.length ? `<span class="vd-chip">☑ ${v.todos.filter(t => t.done).length}/${v.todos.length}</span>` : ""}</div>
+        <div class="rside">
+          ${v.views ? `<span class="vd-chip">▶ ${nf(v.views)}</span>` : ""}
+          ${v.todos.length ? `<span class="vd-chip">☑ ${done}/${v.todos.length}</span>` : ""}
+        </div>
       </article>`;
-    }).join("") : `<p class="vd-note" style="text-align:center;padding:40px">還沒有影片 — 按右上角「＋ 新影片」開始，或到設定用 YouTube 匯入既有影片。</p>`;
+    }).join("") : `<p class="vd-list-empty">還沒有影片<br>按右上角「＋ 新影片」開始，或到 ⚙ 設定用 YouTube 匯入既有影片</p>`;
   }
 
   // ---------- 編輯器 ----------

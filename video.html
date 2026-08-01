@@ -27,28 +27,30 @@
   </div>
 </header>
 
-<div class="vd-stats" id="vStats"></div>
-
-<div class="vd-bar">
-  <div class="seg">
-    <button id="vViewBoard" aria-pressed="true">看板</button>
-    <button id="vViewList" aria-pressed="false">清單</button>
+<div class="vd-toolbar">
+  <div class="vd-stats" id="vStats"></div>
+  <span class="vd-divider"></span>
+  <div class="vd-controls">
+    <div class="seg">
+      <button id="vViewBoard" aria-pressed="true">看板</button>
+      <button id="vViewList" aria-pressed="false">清單</button>
+    </div>
+    <select id="vSeries" title="依系列篩選"><option value="">全部系列</option></select>
+    <select id="vKind" title="依類型篩選">
+      <option value="">全部類型</option>
+      <option value="long">長片</option>
+      <option value="short">Shorts</option>
+    </select>
+    <select id="vSort" title="排序">
+      <option value="edited">最近編輯</option>
+      <option value="due">預定發布日</option>
+      <option value="published">發布日</option>
+      <option value="views">觀看數</option>
+      <option value="title">標題</option>
+    </select>
   </div>
-  <select id="vSeries" title="依系列篩選"><option value="">全部系列</option></select>
-  <select id="vKind" title="依類型篩選">
-    <option value="">全部類型</option>
-    <option value="long">長片</option>
-    <option value="short">Shorts</option>
-  </select>
-  <select id="vSort" title="排序">
-    <option value="edited">最近編輯</option>
-    <option value="due">預定發布日</option>
-    <option value="published">發布日</option>
-    <option value="views">觀看數</option>
-    <option value="title">標題</option>
-  </select>
   <span class="vd-spacer"></span>
-  <span class="vd-sub" id="vHint">拖曳卡片可換階段 · 點卡片編輯</span>
+  <span class="vd-sub" id="vHint">拖曳卡片換階段 · 點卡片編輯</span>
 </div>
 
 <div class="vd-board" id="vBoard"></div>

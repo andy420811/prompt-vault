@@ -319,8 +319,33 @@
   let dragGroupName = null;   // 正在拖的散裝系列名（只能丟進左側資料夾）
   let touchDrag = null;
   let suppressClickUntil = 0;
-  // 共用落點判定：把目前拖曳中的東西放到 targetEl 上
-  function commitDrop(targetEl) {
+  /* 放到空白處時，用座標判斷「這一區屬於哪一層堆疊」：取最靠近落點的卡片／堆疊標頭。
+     這樣把巢狀堆疊裡的東西拖到某一層的空白處，就會落在那一層，而不是一路跳到最外層。 */
+  function dropContext(x, y) {
+    if (x == null || y == null) return "";
+    let best = null, bd = Infinity;
+    $$("#grid > .card, #grid > .stack-head").forEach(el => {
+      if (el.classList.contains("dragging")) return;
+      if (dragStackPrefix) {   // 拖整疊時忽略自己這一疊的成員
+        const own = el.dataset.stack || (data.find(z => z.id === el.dataset.id) || {}).stack || "";
+        if (own === dragStackPrefix || (own + "/").startsWith(dragStackPrefix + "/")) return;
+      }
+      const r = el.getBoundingClientRect();
+      const dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
+      const dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
+      const d = Math.hypot(dx, dy);
+      if (d < bd) { bd = d; best = el; }
+    });
+    if (!best || bd > 280) return "";                                  // 離所有東西都很遠＝最外層
+    if (best.classList.contains("stack-head")) return best.dataset.stack || "";
+    if (best.classList.contains("pile")) {                             // 落在整疊卡旁邊＝它所在的那一層
+      return (best.dataset.stack || "").split("/").slice(0, -1).join("/");
+    }
+    const p = data.find(z => z.id === best.dataset.id);
+    return p ? (p.stack || "") : "";
+  }
+  // 共用落點判定：把目前拖曳中的東西放到 targetEl 上（x/y＝落點座標，用來判斷空白處屬於哪一層）
+  function commitDrop(targetEl, x, y) {
     if (!targetEl || !targetEl.closest) return;
     const onRemove = !!targetEl.closest("#removeZone");
     const pile = targetEl.closest(".card.pile"), head = targetEl.closest(".stack-head"), tcard = targetEl.closest(".card:not(.pile)");
@@ -330,6 +355,7 @@
       if (pile) dest = pile.dataset.stack;
       else if (head) dest = head.dataset.stack;
       else if (tcard) { const tp = data.find(x => x.id === tcard.dataset.id); if (tp) { if (!tp.stack) { tp.stack = uid(); tp.edited = Date.now(); } dest = tp.stack; } }
+      if (dest == null && targetEl.closest("#grid, #empty")) dest = dropContext(x, y);   // 空白處：落在哪一層就搬去那一層
       if (dest != null) nestStack(dragStackPrefix, dest);
       return;
     }
@@ -351,8 +377,16 @@
       }
     }
     if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); commitStacks(msg); return; }
-    // 沒落在任何卡片／堆疊上＝放到空白處 → 移出堆疊（拖到哪就移到哪的直覺）
-    if (!sid && dp.stack && targetEl.closest("#grid, #empty")) moveItemOut(dp);
+    // 沒落在任何卡片／堆疊上＝放到空白處 → 搬到「落點那一層」（拖到哪就到哪；離所有東西都遠才是移出到最外層）
+    if (!sid && targetEl.closest("#grid, #empty")) {
+      const ctx = dropContext(x, y);
+      if (ctx === dp.stack) return;                       // 同一層＝只是挪位置，資料不動
+      if (!ctx) { if (dp.stack) moveItemOut(dp); return; }
+      const old = dp.stack;
+      dp.stack = ctx; dp.edited = Date.now();
+      if (old) dissolveIfLonely(old);
+      commitStacks(`已移到「${stackName(ctx.split("/").pop())}」`);
+    }
   }
   function endDrag() {
     dragCardId = null; dragStackPrefix = null; dragGroupName = null;
@@ -392,7 +426,7 @@
   });
   $("#grid").addEventListener("drop", e => {
     if (!dragCardId && !dragStackPrefix) return;
-    e.preventDefault(); commitDrop(e.target); endDrag();
+    e.preventDefault(); commitDrop(e.target, e.clientX, e.clientY); endDrag();
   });
   $("#grid").addEventListener("dragend", endDrag);
   (() => {
@@ -401,7 +435,7 @@
     rz.addEventListener("dragleave", () => rz.classList.remove("over"));
     rz.addEventListener("drop", e => {
       if (!dragCardId && !dragStackPrefix) return; e.preventDefault();
-      commitDrop(rz); endDrag();
+      commitDrop(rz, e.clientX, e.clientY); endDrag();
     });
   })();
   // 左側 rail 拖放：把堆疊／作品／散裝系列拖進資料夾或其他堆疊節點；拖到「全部作品」＝移回最上層
@@ -486,7 +520,7 @@
       if (touchDrag.ghost) touchDrag.ghost.style.display = "none";
       const el = t ? document.elementFromPoint(t.clientX, t.clientY) : null;
       if (touchDrag.prefix) { dragStackPrefix = touchDrag.prefix; dragCardId = null; } else { dragCardId = touchDrag.id; dragStackPrefix = null; }
-      commitDrop(el || document.body);
+      commitDrop(el || document.body, t ? t.clientX : null, t ? t.clientY : null);
       dragCardId = null; dragStackPrefix = null;
       cleanupTouch();
       suppressClickUntil = Date.now() + 500;   // 避免拖曳後又觸發一次點擊
