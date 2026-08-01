@@ -2,16 +2,24 @@
    Classic script：與其他 pv-app-*.js 共用同一全域範疇，載入順序在 gen 之後、boot 之前，不可調換。
    向量存 IndexedDB key "vecs"，不上雲端、不進 undo。無金鑰時整組功能會提示改用一般搜尋。 */
 "use strict";
-  // 依序嘗試；Google 淘汰舊模型（回 404）時自動往下找，找到可用的就記起來
-  const SEM_MODELS = ["gemini-embedding-001", "text-embedding-004"];
-  const SEM_MODEL_KEY = "promptvault.semmodel";
-  const SEM_DIM = 768;                // gemini-embedding-001 預設 3072，截成 768 省空間（存前會重新正規化）
+  // 模型不寫死：先用偏好清單，打不通就跟 Google 要「這把金鑰實際可用的向量模型」（ListModels）再自動切換。
+  // text-embedding-004 已於 2026-01-14 關閉，留在清單末位只當最後備援。
+  const SEM_PREFER = ["gemini-embedding-001", "gemini-embedding-2", "text-embedding-004"];
+  const SEM_MODEL_KEY = "promptvault.semmodel";   // 存 {id, batch}：用哪個模型、支不支援批次
+  const SEM_DIM = 768;                // gemini-embedding 系列預設 3072，截成 768 省空間（存前會重新正規化）
   const SEM_BATCH = 90;               // 單次 batchEmbedContents 的上限（官方 100，留餘裕）
-  function semModel() {
-    const s = (localStorage.getItem(SEM_MODEL_KEY) || "").trim();
-    return SEM_MODELS.includes(s) ? s : SEM_MODELS[0];
+  const SEM_SEQ = 4;                  // 不支援批次時，逐筆呼叫的併發數
+  const GAPI = "https://generativelanguage.googleapis.com/v1beta/";
+  function semCfg() {
+    try {
+      const o = JSON.parse(localStorage.getItem(SEM_MODEL_KEY) || "null");
+      if (o && typeof o === "string") return { id: o, batch: true };          // 舊格式（只存字串）
+      if (o && o.id) return { id: o.id, batch: o.batch !== false };
+    } catch (e) {}
+    return { id: SEM_PREFER[0], batch: true };
   }
-  function semSetModel(m) { try { localStorage.setItem(SEM_MODEL_KEY, m); } catch (e) {} }
+  function semSetCfg(c) { try { localStorage.setItem(SEM_MODEL_KEY, JSON.stringify(c)); } catch (e) {} }
+  function semModel() { return semCfg().id; }
   let vecs = {};                      // { id: {h: 內容雜湊, v: number[] } }
   let vecsLoaded = false;
 
@@ -36,46 +44,78 @@
   function semSig(p) { return semModel() + "|" + semHash(semText(p)); }
   function semStale() { return data.filter(p => { const v = vecs[p.id]; return !v || v.h !== semSig(p); }); }
 
-  // ---------- Gemini embedding（多模型後備＋多金鑰輪替；一次一批）----------
-  async function embedOnce(model, texts, key) {
-    const req = texts.map(t => {
-      const o = { model: "models/" + model, content: { parts: [{ text: t.slice(0, 8000) }] }, taskType: "SEMANTIC_SIMILARITY" };
-      if (model.startsWith("gemini-embedding")) o.outputDimensionality = SEM_DIM;
-      return o;
-    });
+  // ---------- Gemini embedding（模型自動探索＋多金鑰輪替）----------
+  function semReq(model, text) {
+    const o = { model: "models/" + model, content: { parts: [{ text: String(text).slice(0, 8000) }] }, taskType: "SEMANTIC_SIMILARITY" };
+    if (model.startsWith("gemini-embedding")) o.outputDimensionality = SEM_DIM;
+    return o;
+  }
+  async function gapi(path, key, body) {
     let resp;
     try {
-      resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":batchEmbedContents", {
-        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-        body: JSON.stringify({ requests: req })
-      });
+      resp = await fetch(GAPI + path, body
+        ? { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body) }
+        : { headers: { "x-goog-api-key": key } });
     } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
     if (!resp.ok) throw await gemErr(resp, "Gemini 向量");
-    const j = await resp.json();
+    return resp.json();
+  }
+  async function embedMany(model, texts, key) {          // 批次：一次一包
+    const j = await gapi("models/" + model + ":batchEmbedContents", key, { requests: texts.map(t => semReq(model, t)) });
     const out = (j.embeddings || []).map(e => e.values);
     if (out.length !== texts.length) throw new Error("回傳向量數量不符");
+    return out;
+  }
+  async function embedSeq(model, texts, key) {           // 模型不支援批次 → 逐筆 :embedContent（少量併發）
+    const out = new Array(texts.length);
+    for (let i = 0; i < texts.length; i += SEM_SEQ) {
+      const part = texts.slice(i, i + SEM_SEQ);
+      const got = await Promise.all(part.map(t =>
+        gapi("models/" + model + ":embedContent", key, semReq(model, t)).then(j => j.embedding && j.embedding.values)));
+      got.forEach((v, k) => { if (!v) throw new Error("回傳向量為空"); out[i + k] = v; });
+    }
+    return out;
+  }
+  // 問 Google：這把金鑰現在有哪些向量模型可用（Google 淘汰模型時自動跟上，不用改程式）
+  async function semDiscover(key) {
+    const j = await gapi("models?pageSize=200", key);
+    const out = [];
+    (j.models || []).forEach(m => {
+      const ms = m.supportedGenerationMethods || [];
+      const batch = ms.includes("batchEmbedContents");
+      if (!batch && !ms.includes("embedContent")) return;
+      out.push({ id: String(m.name || "").replace(/^models\//, ""), batch });
+    });
+    out.sort((a, b) => {           // 偏好清單優先，其餘按名稱新的在前
+      const ia = SEM_PREFER.indexOf(a.id), ib = SEM_PREFER.indexOf(b.id);
+      if (ia !== ib) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      return a.id < b.id ? 1 : -1;
+    });
     return out;
   }
   async function embedBatch(texts) {
     const keys = gemKeys();
     if (!keys.length) throw new Error("語意功能需要 Gemini 金鑰（到 ⚙ 設定填入）");
-    const cur = semModel();
-    const models = [cur, ...SEM_MODELS.filter(m => m !== cur)];
-    let lastErr;
-    for (const m of models) {
-      let gone = false;
-      for (let i = 0; i < keys.length && !gone; i++) {
-        try {
-          const out = await embedOnce(m, texts, keys[i]);
-          if (m !== semModel()) { semSetModel(m); toast("原本的向量模型已停用，已改用 " + m + "（索引會重建）"); }
-          return out;
-        } catch (e) {
+    let cfg = semCfg(), lastErr, redone = false;
+    for (;;) {
+      let modelBad = false;
+      for (let i = 0; i < keys.length && !modelBad; i++) {
+        try { return await (cfg.batch ? embedMany : embedSeq)(cfg.id, texts, keys[i]); }
+        catch (e) {
           lastErr = e;
-          if (e.status === 404 || e.status === 400) gone = true;   // 模型不存在／不支援 → 換模型，不用再試其他金鑰
+          // 模型不存在／這個方法不支援 → 換金鑰也沒用，直接去重新探索
+          if (e.status === 404 || e.status === 400) modelBad = true;
         }
       }
+      if (!modelBad || redone) throw lastErr;
+      redone = true;
+      const list = await semDiscover(keys[0]).catch(e => { lastErr = e; return []; });
+      const best = list[0];
+      const next = (best && (best.id !== cfg.id || best.batch !== cfg.batch)) ? best : list[1];
+      if (!next) throw lastErr;
+      cfg = next; semSetCfg(cfg);
+      toast(`向量模型已自動切換為 ${cfg.id}${cfg.batch ? "" : "（逐筆模式）"}，索引將重建`);
     }
-    throw lastErr;
   }
   function norm(v) {
     let s = 0; for (let i = 0; i < v.length; i++) s += v[i] * v[i];
