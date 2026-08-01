@@ -111,7 +111,13 @@ window.PVCanvas = (function () {
   .pvc-node.note .pvc-node-title { font-size:13px; }
   .pvc-port { position:absolute; right:-9px; top:50%; transform:translateY(-50%); width:18px; height:18px; border-radius:50%;
       background:var(--accent,#4b45c6); border:2px solid var(--surface,#fff); cursor:crosshair; box-shadow:0 1px 3px rgba(0,0,0,.3); }
-  .pvc-node.drop-target { outline:2px solid var(--accent,#4b45c6); outline-offset:2px; }
+  .pvc-node.drop-target { outline:3px solid var(--accent,#4b45c6); outline-offset:3px; }
+  .pvc-node.drop-target::after { content:"放開＝收進這一疊"; position:absolute; left:50%; top:-12px; transform:translateX(-50%);
+      background:var(--accent,#4b45c6); color:#fff; font-size:11px; font-weight:600; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+  .pvc-unstack { position:absolute; left:50%; bottom:22px; transform:translateX(-50%); z-index:7; pointer-events:auto;
+      padding:12px 22px; border-radius:999px; font-size:13px; font-weight:600; color:var(--ink-2,#55535e);
+      background:var(--surface,#fff); border:2px dashed var(--line,#e0ddd1); box-shadow:0 12px 30px -14px rgba(24,22,30,.5); }
+  .pvc-unstack.hot { color:#fff; background:var(--danger,#b23b45); border-color:var(--danger,#b23b45); border-style:solid; }
   /* 收合中的節點畫成一疊紙（下游節點都藏在裡面） */
   .pvc-node.folded { box-shadow:0 6px 20px -10px rgba(24,22,30,.3),
       7px 7px 0 -1px var(--surface,#fff), 7px 7px 0 0 var(--line,#e0ddd1),
@@ -195,6 +201,7 @@ window.PVCanvas = (function () {
           <div class="pvc-nodes" id="pvcNodes"></div>
         </div>
         <div class="pvc-empty" id="pvcEmptyMsg" hidden></div>
+        <div class="pvc-unstack" id="pvcUnstack" hidden>⤵ 拖到這裡＝移出堆疊（解除連線）</div>
         <div class="pvc-picker" id="pvcPicker">
           <div class="pvc-picker-head"><input id="pvcPickQ" placeholder="搜尋要匯入的 prompt…"><button class="pvc-b" id="pvcPickClose">×</button></div>
           <div class="pvc-picker-list" id="pvcPickList"></div>
@@ -374,12 +381,70 @@ window.PVCanvas = (function () {
       const f = foldMap();
       pack = cur.nodes.filter(x => f.hidden.has(x.id) && visibleId(x.id, f) === n.id).map(x => ({ n: x, dx: x.x - n.x, dy: x.y - n.y }));
     }
+    const packIds = new Set(pack.map(m => m.n.id));
+    const linked = cur.edges.some(x => x.from === n.id || x.to === n.id);
+    const zone = ui.overlay.querySelector("#pvcUnstack");
+    if (linked) zone.hidden = false;   // 有關係才需要「移出堆疊」
+    nodeEl.style.pointerEvents = "none";   // 讓 elementFromPoint 看得到底下的節點
+    let target = null, overZone = false;
     docListen(ev => {
       if (pinching) return;
       const p = toWorld(ev); n.x = Math.round(p.x - offX); n.y = Math.round(p.y - offY);
       pack.forEach(m => { m.n.x = n.x + m.dx; m.n.y = n.y + m.dy; });
       nodeEl.style.left = n.x + "px"; nodeEl.style.top = n.y + "px"; drawEdges();
-    }, () => { cur.edited = Date.now(); save(); });
+      // 放置目標：另一顆節點＝加入那一疊；底部區域＝移出堆疊
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      ui.nodes.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
+      overZone = !!(linked && el && el.closest("#pvcUnstack"));
+      zone.classList.toggle("hot", overZone);
+      target = null;
+      const tn = !overZone && el && el.closest(".pvc-node");
+      if (tn && tn.dataset.id !== n.id && !packIds.has(tn.dataset.id)) {
+        target = cur.nodes.find(x => x.id === tn.dataset.id) || null;
+        if (target) tn.classList.add("drop-target");
+      }
+    }, () => {
+      nodeEl.style.pointerEvents = "";
+      zone.hidden = true; zone.classList.remove("hot");
+      ui.nodes.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
+      cur.edited = Date.now(); save();
+      if (overZone) unstackNode(n);
+      else if (target) joinPile(n, target);
+      else { renderNodes(); drawEdges(); }
+    });
+  }
+  /* ---------- 拖放改變堆疊 ----------
+     拖到另一顆節點上＝加入那一疊（對方還不是疊就當場變成疊頭）；
+     拖到底部「移出堆疊」＝解除自己的連線，前後會自動接起來，鏈子不會斷。 */
+  function detachNode(n) {
+    const ins = cur.edges.filter(e => e.to === n.id), outs = cur.edges.filter(e => e.from === n.id);
+    cur.edges = cur.edges.filter(e => e.from !== n.id && e.to !== n.id);
+    ins.forEach(i => outs.forEach(o => {   // 把上游接到下游，中間抽掉一顆不會斷鏈
+      if (i.from !== o.to && !cur.edges.some(x => x.from === i.from && x.to === o.to)) {
+        cur.edges.push({ id: uid(), from: i.from, to: o.to, label: i.label || o.label || "" });
+      }
+    }));
+    if (foldDir(n)) delete n.fold;   // 自己是疊頭就先攤開，成員不會憑空消失
+    return ins.length + outs.length;
+  }
+  function unstackNode(n) {
+    const cut = detachNode(n);
+    n.y = Math.round(n.y - 90);   // 從底部的放置區往上挪一點，才不會被蓋住
+    cur.edited = Date.now(); save(); renderNodes(true); drawEdges();
+    say(cut ? "已移出堆疊（解除 " + cut + " 條連線）" : "這顆本來就沒有連線");
+  }
+  function joinPile(n, target) {
+    if (n.id === target.id) return;
+    detachNode(n);   // 先離開原本的疊，再加入新的
+    const dir = foldDir(target);
+    // 往上收的疊（演化＝最新一代當疊頭）要把新成員接在前面，其餘都接在疊頭後面
+    if (dir === "up") cur.edges.push({ id: uid(), from: n.id, to: target.id, label: "同疊" });
+    else cur.edges.push({ id: uid(), from: target.id, to: n.id, label: "同疊" });
+    if (!dir) target.fold = "down";   // 對方還不是疊 → 當場成疊（這樣拖曳就能「新增堆疊」）
+    n.x = Math.round(target.x + 24); n.y = Math.round(target.y + 24);
+    cur.edited = Date.now(); save(); renderNodes(true); drawEdges();
+    const f = foldMap();
+    say(f.count.get(target.id) ? "已收進這一疊（共 " + f.count.get(target.id) + " 顆）" : "已接上這一顆");
   }
   function startResize(n, nodeEl, e) {
     csnap();
@@ -1010,7 +1075,7 @@ window.PVCanvas = (function () {
     syncNodes();
     renderProjSel(); applyPan(); updateZoomLabel(); renderNodes(); drawEdges();
     ui.emptyMsg.hidden = cur.nodes.length > 0;
-    ui.emptyMsg.textContent = cur.nodes.length ? "" : "空白畫布 — 按上方「＋ 匯入 Prompt」把庫裡的提示詞拉進來，或加文字節點，再拖右側藍點連線。";
+    ui.emptyMsg.textContent = cur.nodes.length ? "" : "空白畫布 — 按上方「＋ 匯入 Prompt」把庫裡的提示詞拉進來；拖右側藍點可連線，把一顆拖到另一顆上面就會收成一疊。";
     ui.picker.classList.remove("show");
   }
 

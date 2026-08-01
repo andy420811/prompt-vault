@@ -335,14 +335,24 @@
     }
     const dp = data.find(x => x.id === dragCardId); if (!dp) return;
     if (onRemove) { moveItemOut(dp); return; }
-    let sid = null;
+    let sid = null, msg = "已加入堆疊";
     if (pile) sid = pile.dataset.stack;
     else if (head) sid = head.dataset.stack;
     else if (tcard && tcard.dataset.id !== dragCardId) {
       const tp = data.find(x => x.id === tcard.dataset.id);
-      if (tp) { sid = tp.stack || uid(); if (!tp.stack) { tp.stack = sid; tp.edited = Date.now(); } }
+      if (tp) {
+        if (!tp.stack) { sid = uid(); tp.stack = sid; tp.edited = Date.now(); msg = "已建立新堆疊"; }
+        else if (tp.stack === dp.stack) {   // 同一疊裡把 A 疊到 B 上 → 在這一層底下開一個新的子堆疊
+          sid = tp.stack + "/" + uid();
+          tp.stack = sid; tp.edited = Date.now();
+          stackPath(tp).forEach(s => expandedStacks.add(s));
+          msg = "已在這一疊裡建立新的子堆疊";
+        } else sid = tp.stack;
+      }
     }
-    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); commitStacks("已加入堆疊"); }
+    if (sid && dp.stack !== sid) { dp.stack = sid; dp.edited = Date.now(); commitStacks(msg); return; }
+    // 沒落在任何卡片／堆疊上＝放到空白處 → 移出堆疊（拖到哪就移到哪的直覺）
+    if (!sid && dp.stack && targetEl.closest("#grid, #empty")) moveItemOut(dp);
   }
   function endDrag() {
     dragCardId = null; dragStackPrefix = null; dragGroupName = null;
@@ -363,7 +373,7 @@
       dragCardId = card.dataset.id;
       try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", dragCardId); } catch (_) {}
       const p = data.find(x => x.id === dragCardId);
-      rz.hidden = !(p && p.stack); rz.textContent = "🗑 拖到這裡移出堆疊";   // 有在堆疊裡才顯示「移出」區
+      rz.hidden = !(p && p.stack); rz.textContent = "🗑 拖到這裡或空白處＝移出堆疊";   // 有在堆疊裡才顯示「移出」區
     }
     card.classList.add("dragging");
   });
@@ -371,7 +381,11 @@
     if (!dragCardId && !dragStackPrefix) return;
     const t = e.target.closest(".card.pile, .stack-head, .card");
     $$("#grid .drop-over").forEach(el => el.classList.remove("drop-over"));
-    if (!t) return;
+    if (!t) {   // 空白處：拖曳中的作品若在堆疊裡，允許放下＝移出堆疊
+      const dp = dragCardId && data.find(x => x.id === dragCardId);
+      if (dp && dp.stack) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }
+      return;
+    }
     if (dragCardId && t.classList.contains("card") && !t.classList.contains("pile") && t.dataset.id === dragCardId) return;
     if (dragStackPrefix) { const tp = t.dataset.stack; if (tp && (tp + "/").startsWith(dragStackPrefix + "/")) return; }   // 不能丟進自己或子孫
     e.preventDefault(); e.dataTransfer.dropEffect = "move"; t.classList.add("drop-over");
