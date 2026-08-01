@@ -1,0 +1,109 @@
+/* Video Desk — 影片製作台專屬樣式（共用 pv-style.css 的變數與基礎元件） */
+
+.vd-sub { font-size: 12px; color: var(--ink-3); }
+.vd-link { font: inherit; font-size: 12.5px; font-weight: 600; text-decoration: none; color: var(--accent);
+  border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; white-space: nowrap; flex: 0 0 auto; }
+.vd-link:hover { border-color: var(--accent); background: var(--accent-tint); }
+
+/* ---- 統計列 ---- */
+.vd-stats { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 20px 0; }
+.vd-stat { display: flex; align-items: baseline; gap: 6px; padding: 6px 12px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--line); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.vd-stat b { font-size: 15px; color: var(--ink); font-family: var(--serif); }
+
+/* ---- 工具列 ---- */
+.vd-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 20px; }
+.vd-bar .seg { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; flex: 0 0 auto; }
+.vd-bar .seg button { font: inherit; font-size: 12.5px; border: none; background: var(--surface); color: var(--ink-2);
+  padding: 7px 13px; cursor: pointer; }
+.vd-bar .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.vd-bar select, .vd-bar input[type="search"] { font: inherit; font-size: 13px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--ink); border-radius: 10px; padding: 7px 11px; }
+.vd-spacer { flex: 1 1 auto; }
+
+/* ---- 看板 ---- */
+.vd-board { display: flex; gap: 12px; padding: 4px 20px 40px; overflow-x: auto; align-items: flex-start; }
+.vd-col { flex: 0 0 268px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px;
+  padding: 10px; min-height: 140px; }
+.vd-col.over { border-color: var(--accent); background: var(--accent-tint); }
+.vd-col-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.vd-col-head .t { font-size: 13px; font-weight: 700; color: var(--ink); }
+.vd-col-head .n { font-size: 11px; color: var(--ink-3); background: var(--paper); border: 1px solid var(--line);
+  border-radius: 999px; padding: 1px 8px; }
+.vd-col-head .add { margin-left: auto; border: none; background: none; color: var(--ink-3); font-size: 17px;
+  line-height: 1; cursor: pointer; padding: 0 3px; }
+.vd-col-head .add:hover { color: var(--accent); }
+.vd-col-body { display: flex; flex-direction: column; gap: 9px; }
+.vd-empty-col { font-size: 11.5px; color: var(--ink-3); text-align: center; padding: 14px 6px; line-height: 1.7; }
+
+/* ---- 影片卡 ---- */
+.vd-card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  cursor: pointer; box-shadow: 0 4px 14px -10px rgba(24, 22, 30, .35); }
+.vd-card:hover { border-color: var(--ink-3); }
+.vd-card.dragging { opacity: .45; }
+.vd-thumb { position: relative; aspect-ratio: 16/9; background: var(--surface-2); overflow: hidden; }
+.vd-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vd-thumb .ph { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: 22px; }
+.vd-thumb .kind { position: absolute; left: 7px; top: 7px; font-size: 10.5px; font-weight: 600; color: #fff;
+  background: rgba(10, 9, 16, .62); border-radius: 999px; padding: 2px 8px; }
+.vd-thumb .views { position: absolute; right: 7px; bottom: 7px; font-size: 10.5px; font-weight: 600; color: #fff;
+  background: rgba(10, 9, 16, .62); border-radius: 999px; padding: 2px 8px; }
+.vd-card-body { padding: 9px 11px 11px; }
+.vd-ser { font-size: 11px; font-weight: 700; color: var(--accent); margin-bottom: 2px; }
+.vd-card h3 { margin: 0 0 6px; font-size: 13.5px; line-height: 1.35; font-weight: 600; color: var(--ink);
+  word-break: break-word; }
+.vd-meta { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 10.5px; color: var(--ink-3); }
+.vd-chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 7px; white-space: nowrap; }
+.vd-chip.due { color: var(--danger); border-color: var(--danger); }
+.vd-chip.soon { color: var(--gold); border-color: var(--gold); }
+.vd-prog { height: 4px; border-radius: 999px; background: var(--surface-2); margin-top: 8px; overflow: hidden; }
+.vd-prog i { display: block; height: 100%; background: var(--accent); }
+
+/* ---- 清單檢視 ---- */
+.vd-list { padding: 4px 20px 40px; display: flex; flex-direction: column; gap: 8px; }
+.vd-row { display: flex; align-items: center; gap: 12px; padding: 9px 12px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.vd-row:hover { border-color: var(--ink-3); }
+.vd-row .rt { width: 92px; flex: 0 0 auto; aspect-ratio: 16/9; border-radius: 7px; overflow: hidden; background: var(--surface-2); }
+.vd-row .rt img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vd-row .rmain { flex: 1 1 auto; min-width: 0; }
+.vd-row h3 { margin: 0 0 3px; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.vd-row .rside { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; flex: 0 0 auto; }
+
+/* ---- 編輯器 ---- */
+.vd-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.vd-thumbbox { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.vd-thumbbox .pv { width: 220px; aspect-ratio: 16/9; border-radius: 10px; overflow: hidden; background: var(--surface-2);
+  border: 1px solid var(--line); flex: 0 0 auto; }
+.vd-thumbbox .pv img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vd-todo { display: flex; flex-direction: column; gap: 6px; }
+.vd-todo-row { display: flex; align-items: center; gap: 8px; }
+.vd-todo-row input[type="text"] { flex: 1 1 auto; min-width: 0; }
+.vd-todo-row .del { border: none; background: none; color: var(--ink-3); cursor: pointer; font-size: 15px; padding: 0 4px; }
+.vd-todo-row .del:hover { color: var(--danger); }
+.vd-todo-row.done input[type="text"] { text-decoration: line-through; color: var(--ink-3); }
+.vd-linked { display: flex; flex-direction: column; gap: 6px; }
+.vd-linked-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--surface-2);
+  border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
+.vd-linked-row .lt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-linked-row .lk { font-size: 11px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.vd-linked-row .del { border: none; background: none; color: var(--ink-3); cursor: pointer; padding: 0 3px; }
+.vd-linked-row .del:hover { color: var(--danger); }
+.vd-pick-list { max-height: 46vh; overflow: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.vd-pick { display: flex; gap: 9px; align-items: center; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 9px; cursor: pointer; background: var(--surface); }
+.vd-pick:hover { border-color: var(--accent); background: var(--accent-tint); }
+.vd-pick.on { border-color: var(--accent); background: var(--accent-tint); }
+.vd-pick .pi { width: 42px; height: 42px; border-radius: 7px; object-fit: cover; background: var(--surface-2); flex: 0 0 auto; }
+.vd-pick .pm { min-width: 0; flex: 1 1 auto; }
+.vd-pick .pt { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-pick .pp { font-size: 11px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- 提示 ---- */
+.vd-note { font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+.vd-warn { font-size: 12px; color: var(--danger); }
+@media (max-width: 640px) {
+  .vd-board { padding: 4px 12px 40px; }
+  .vd-col { flex: 0 0 84vw; }
+  .vd-bar, .vd-stats { padding-left: 12px; padding-right: 12px; }
+}

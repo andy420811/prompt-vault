@@ -1,0 +1,217 @@
+<!-- Video Desk — 影片製作台。需與 pv-style.css / video.css / video-app.js 放在同一資料夾 -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Video Desk — 影片製作台</title>
+<meta name="description" content="從企劃到發布的影片製作管理：看板、腳本、待辦、縮圖與 prompt 連動">
+<meta name="theme-color" content="#F4F2EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#131218" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="stylesheet" href="pv-style.css">
+<link rel="stylesheet" href="video.css">
+
+<header class="top">
+  <div class="top-inner">
+    <div class="brand">
+      <span class="mark">Video&nbsp;<em>Desk</em></span>
+      <span class="sub">影片製作台</span>
+    </div>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="vq" type="search" placeholder="搜尋標題、系列、標籤、腳本…" autocomplete="off">
+    </div>
+    <a class="vd-link" href="prompt-vault.html" title="回到提示詞庫">🗂 Prompt 庫</a>
+    <button class="icon-btn" id="vSetBtn" title="設定（YouTube 匯入、備份）">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+    <button class="btn primary" id="vAddBtn">＋ 新影片</button>
+  </div>
+</header>
+
+<div class="vd-stats" id="vStats"></div>
+
+<div class="vd-bar">
+  <div class="seg">
+    <button id="vViewBoard" aria-pressed="true">看板</button>
+    <button id="vViewList" aria-pressed="false">清單</button>
+  </div>
+  <select id="vSeries" title="依系列篩選"><option value="">全部系列</option></select>
+  <select id="vKind" title="依類型篩選">
+    <option value="">全部類型</option>
+    <option value="long">長片</option>
+    <option value="short">Shorts</option>
+  </select>
+  <select id="vSort" title="排序">
+    <option value="edited">最近編輯</option>
+    <option value="due">預定發布日</option>
+    <option value="published">發布日</option>
+    <option value="views">觀看數</option>
+    <option value="title">標題</option>
+  </select>
+  <span class="vd-spacer"></span>
+  <span class="vd-sub" id="vHint">拖曳卡片可換階段 · 點卡片編輯</span>
+</div>
+
+<div class="vd-board" id="vBoard"></div>
+<div class="vd-list" id="vList" hidden></div>
+
+<!-- ---------- 影片編輯器 ---------- -->
+<div class="overlay" id="vEditor">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:760px">
+    <div class="modal-head">
+      <h2 id="vEdTitle">新影片</h2>
+      <button class="icon-btn" id="vEdClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label for="vfTitle">影片標題</label>
+        <input id="vfTitle" placeholder="例：《裂痕》EP26標題：最後的備份">
+      </div>
+      <div class="vd-grid2">
+        <div class="field"><label for="vfSeries">系列 <span class="opt">選填</span></label>
+          <input id="vfSeries" list="vSeriesList" placeholder="裂痕、單集短片…"><datalist id="vSeriesList"></datalist></div>
+        <div class="field"><label for="vfEp">集數 <span class="opt">選填</span></label>
+          <input id="vfEp" type="number" min="0" placeholder="26"></div>
+        <div class="field"><label for="vfKind">類型</label>
+          <select id="vfKind"><option value="long">長片</option><option value="short">Shorts</option></select></div>
+        <div class="field"><label for="vfStatus">階段</label><select id="vfStatus"></select></div>
+        <div class="field"><label for="vfDue">預定發布日 <span class="opt">選填</span></label><input id="vfDue" type="date"></div>
+        <div class="field"><label for="vfPub">實際發布日 <span class="opt">選填</span></label><input id="vfPub" type="date"></div>
+      </div>
+
+      <div class="field">
+        <label for="vfUrl">YouTube 連結 <span class="opt">貼上就自動帶縮圖與標題</span></label>
+        <div class="vd-thumbbox">
+          <div style="flex:1 1 260px;min-width:200px">
+            <input id="vfUrl" type="url" placeholder="https://www.youtube.com/watch?v=…">
+            <div class="pk-actions" style="margin-top:6px">
+              <button type="button" class="link-btn" id="vfFetch">↻ 抓標題與縮圖</button>
+              <button type="button" class="link-btn" id="vfOpenYt" style="color:var(--ink-3)">↗ 開啟影片</button>
+            </div>
+            <p class="vd-note" id="vfStats"></p>
+          </div>
+          <div class="pv" id="vfThumb"></div>
+        </div>
+      </div>
+
+      <div class="field"><label for="vfTags">標籤 <span class="opt">逗號分隔</span></label><input id="vfTags" placeholder="恐怖, AI 生成, 台語"></div>
+
+      <div class="block" id="vBlkScript">
+        <div class="block-head" data-toggle><span class="bt">大綱與腳本</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <div class="field"><label for="vfOutline">一句話大綱</label><input id="vfOutline" placeholder="這集要講什麼、鉤子是什麼"></div>
+          <div class="field"><label for="vfScript">腳本／旁白</label>
+            <textarea id="vfScript" class="mono" style="min-height:150px" placeholder="貼腳本或逐字稿…（可到 Prompt 庫用「腳本 → 分鏡」拆鏡頭）"></textarea>
+          </div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vfToScript">🎞 拿這段腳本去 Prompt 庫拆分鏡</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="block" id="vBlkTodo">
+        <div class="block-head" data-toggle><span class="bt">製作待辦</span><span class="bn" id="vTodoCount">0</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <div class="vd-todo" id="vTodoList"></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vTodoAdd">＋ 新增待辦</button>
+            <button type="button" class="link-btn" id="vTodoPreset" style="color:var(--ink-3)">套用預設流程</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="block" id="vBlkLinked">
+        <div class="block-head" data-toggle><span class="bt">用到的 Prompt</span><span class="bn" id="vLinkCount">0</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">從 Prompt 庫挑出這支影片用到的提示詞或整組分鏡，點「開啟」會跳回庫裡那一筆。</p>
+          <div class="vd-linked" id="vLinkedList"></div>
+          <div class="pk-actions"><button type="button" class="link-btn" id="vLinkAdd">＋ 掛上 Prompt</button></div>
+        </div>
+      </div>
+
+      <div class="field"><label for="vfNotes">備註 <span class="opt">選填</span></label>
+        <textarea id="vfNotes" style="min-height:70px" placeholder="素材來源、生成設定、發布後的觀察…"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost del-side" id="vDelBtn" style="color:var(--danger)">刪除</button>
+      <button class="btn ghost" id="vNextEp">＋ 建立下一集</button>
+      <button class="btn ghost" id="vEdCancel">取消</button>
+      <button class="btn primary" id="vSaveBtn">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- 挑選 Prompt ---------- -->
+<div class="overlay" id="vPickOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:620px">
+    <div class="modal-head">
+      <h2>從 Prompt 庫挑選</h2>
+      <button class="icon-btn" id="vPickClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input id="vPickQ" type="search" placeholder="搜尋標題、提示詞、標籤…" style="width:100%">
+      <p class="vd-note" id="vPickInfo"></p>
+      <div class="vd-pick-list" id="vPickList"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn primary" id="vPickDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- 設定 ---------- -->
+<div class="overlay" id="vSetOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:600px">
+    <div class="modal-head">
+      <h2>設定與備份</h2>
+      <button class="icon-btn" id="vSetClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="block">
+        <div class="block-head" data-toggle><span class="bt">YouTube 匯入（選填）</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">不填金鑰也能用：貼影片連結就會帶縮圖與標題。填了 YouTube Data API 金鑰才能「一鍵拉整個頻道」與更新觀看數。</p>
+          <div class="field"><label for="vfChannel">頻道 ID</label><input id="vfChannel" placeholder="UCxxxxxxxx"></div>
+          <div class="field"><label for="vfApiKey">YouTube Data API 金鑰 <span class="opt">存在本機，不會上傳</span></label>
+            <input id="vfApiKey" type="password" placeholder="AIza…"></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vImportCh">⬇ 匯入頻道影片</button>
+            <button type="button" class="link-btn" id="vRefreshStats">↻ 更新觀看數</button>
+          </div>
+          <p class="vd-note" id="vSyncInfo"></p>
+        </div>
+      </div>
+      <div class="block">
+        <div class="block-head" data-toggle><span class="bt">備份</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">影片資料存在這台裝置（IndexedDB），跟 Prompt 庫分開。換裝置請用匯出／匯入。</p>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vExport">⬇ 匯出 JSON</button>
+            <button type="button" class="link-btn" id="vImport">⬆ 匯入 JSON</button>
+          </div>
+          <input type="file" id="vImportFile" accept="application/json" hidden>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" id="vSetDone">完成</button></div>
+  </div>
+</div>
+
+<div class="toast" id="vToast"></div>
+
+<script src="video-app.js"></script>

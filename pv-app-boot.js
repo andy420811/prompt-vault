@@ -127,3 +127,28 @@
   window.addEventListener("focus", () => {
     if (cloudBase() && !document.querySelector(".overlay.show")) cloudPull(false);
   });
+
+  /* ---------- 從影片製作台（video.html）跳過來的深層連結 ----------
+     #p=<記錄 id> → 開那一筆的編輯器；#script → 開「腳本 → 分鏡」並帶入 sessionStorage 的腳本。 */
+  function handleHashLink() {
+    const h = location.hash || "";
+    if (h.startsWith("#p=")) {
+      const id = decodeURIComponent(h.slice(3));
+      const open = () => {
+        const p = data.find(x => x.id === id);
+        if (p) { openEditor(p); toast("已從影片製作台開啟這一筆"); }
+        else toast("找不到這一則 prompt（可能已刪除）");
+        history.replaceState(null, "", location.pathname + location.search);
+      };
+      if (imagesHydrated) open(); else setTimeout(open, 400);
+      return;
+    }
+    if (h === "#script") {
+      let s = ""; try { s = sessionStorage.getItem("promptvault.script") || ""; } catch (e) {}
+      $("#scriptBtn").click();
+      if (s) { $("#scrText").value = s; try { sessionStorage.removeItem("promptvault.script"); } catch (e) {} toast("已帶入影片製作台的腳本"); }
+      history.replaceState(null, "", location.pathname + location.search);
+    }
+  }
+  handleHashLink();
+  window.addEventListener("hashchange", handleHashLink);
