@@ -350,7 +350,10 @@
   function treeBadge(p) {
     if (typeof treeSize !== "function") return "";
     const n = treeSize(p);
-    return n > 1 ? `<button class="tree-badge" data-act="tree" title="看這一支的演化樹">🌳 ${n} 代</button>` : "";
+    if (n <= 1) return "";
+    // 徽章顯示「這則自己是第幾代」（最初的是第 1 代，新一集是第 2 代…），tooltip 才講整支共幾件
+    const d = typeof treeDepth === "function" ? treeDepth(p) : n;
+    return `<button class="tree-badge" data-act="tree" title="第 ${d} 代 · 這一支共 ${n} 件，點看演化樹">🌳 第 ${d} 代</button>`;
   }
   function presetPills(p) {
     let out = "";

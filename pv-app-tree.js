@@ -36,6 +36,16 @@
     const ix = treeIndex();
     return ix.sizeByRoot.get(ix.rootOf.get(p.id)) || 1;
   }
+  // 這則自己是第幾代：最初的那則＝1，它的新一集＝2，以此類推
+  function treeDepth(p) {
+    const ix = treeIndex();
+    let cur = p, d = 1, guard = 0;
+    const seen = new Set();
+    while (cur && cur.parent && ix.byId.has(cur.parent) && !seen.has(cur.id) && guard++ < 200) {
+      seen.add(cur.id); cur = ix.byId.get(cur.parent); d++;
+    }
+    return d;
+  }
 
   // ---------- 與上一代的提示詞差異 ----------
   const treePhrases = s => (s || "").split(/[,，;；\n]/).map(x => x.trim()).filter(Boolean);

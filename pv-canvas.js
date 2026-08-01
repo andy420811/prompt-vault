@@ -46,6 +46,28 @@ window.PVCanvas = (function () {
   function statOf(k) { try { return PSTAT[k || ""] || null; } catch (e) { return null; } }
   function statAll() { try { return PSTATUS; } catch (e) { return []; } }
 
+  /* ---------- 影片製作台（video.html）的資料 ----------
+     兩邊共用同一個 IndexedDB（promptvault/kv），影片存在 key "videos"。
+     這裡只做「畫布上放影片企劃節點、把 prompt 掛上去」，其餘編輯還是回影片頁做。 */
+  const VSTAGES = [
+    { k: "idea", zh: "構想", ico: "💡" }, { k: "script", zh: "腳本", ico: "📝" },
+    { k: "assets", zh: "素材生成", ico: "🎨" }, { k: "edit", zh: "剪接", ico: "✂️" },
+    { k: "ready", zh: "待發布", ico: "📦" }, { k: "pub", zh: "已發布", ico: "🚀" }
+  ];
+  let vids = [];              // 影片快取（畫布開啟時載入）
+  function vidLoad() {
+    const g = fn("idbGet");
+    if (!g) return Promise.resolve([]);
+    return g("videos").then(v => { vids = Array.isArray(v) ? v : []; return vids; }).catch(() => []);
+  }
+  function vidSave() {
+    const s = fn("idbSet"); if (s) s("videos", vids);
+    try { localStorage.setItem("videodesk.v1", JSON.stringify(vids.map(v => Object.assign({}, v, { thumbs: [] })))); } catch (e) {}
+  }
+  const liveVid = id => vids.find(v => v.id === id) || null;
+  const vidThumb = v => (v.thumbs && v.thumbs[v.thumbPick || 0]) || v.thumb || (v.ytId ? `https://img.youtube.com/vi/${v.ytId}/hqdefault.jpg` : "");
+  const vidStage = k => VSTAGES.find(s => s.k === k) || VSTAGES[0];
+
   function newProject(name) {
     const p = { id: uid(), name: name || "未命名專案", nodes: [], edges: [], panX: 0, panY: 0, zoom: 1, created: Date.now(), edited: Date.now() };
     store.projects.push(p); store.currentId = p.id; save(); return p;
@@ -83,6 +105,9 @@ window.PVCanvas = (function () {
   .pvc-node.t-image { border-top:3px solid var(--img,#0e8c7e); }
   .pvc-node.t-video { border-top:3px solid var(--vid,#c46a16); }
   .pvc-node.note { border-top:3px solid var(--gold,#b0870f); background:#fffdf5; }
+  .pvc-node.vid { border-top:3px solid var(--accent,#4b45c6); }
+  .pvc-picker-mode { display:flex; gap:6px; padding:8px 10px 0; }
+  .pvc-picker-mode .pvc-b { flex:1 1 auto; font-size:12px; padding:5px 8px; }
   .pvc-node-head { display:flex; align-items:center; flex-wrap:wrap; gap:4px; padding:5px 8px; cursor:grab; user-select:none; }
   .pvc-node-head .sp { flex:1 1 auto; min-width:0; }
   .pvc-fav { border:none; background:none; cursor:pointer; font-size:13px; line-height:1; padding:0 1px; color:var(--gold,#b0870f); opacity:.3; flex:0 0 auto; }
@@ -179,6 +204,10 @@ window.PVCanvas = (function () {
           <button class="pvc-m" id="pvcTidy">⬚ 自動排列</button>
           <button class="pvc-m" id="pvcFoldAll">⧉ 收合分支／全部展開</button>
           <button class="pvc-m" id="pvcRelink">🔗 依血統重新串接並收疊</button>
+          <div class="pvc-menu-t">影片</div>
+          <button class="pvc-m" id="pvcVidNew">🎬 ＋ 新影片企劃</button>
+          <button class="pvc-m" id="pvcVidImport">🎬 匯入既有影片企劃</button>
+          <button class="pvc-m" id="pvcVidDesk">🎬 開啟影片製作台 ↗</button>
           <button class="pvc-m" id="pvcZoomReset">⌖ 縮放回 100%</button>
           <div class="pvc-menu-t">自動化</div>
           <button class="pvc-m" id="pvcWire">🔗 自動串接：開</button>
@@ -204,6 +233,7 @@ window.PVCanvas = (function () {
         <div class="pvc-unstack" id="pvcUnstack" hidden>⤵ 拖到這裡＝移出堆疊（解除連線）</div>
         <div class="pvc-picker" id="pvcPicker">
           <div class="pvc-picker-head"><input id="pvcPickQ" placeholder="搜尋要匯入的 prompt…"><button class="pvc-b" id="pvcPickClose">×</button></div>
+          <div class="pvc-picker-mode"><button class="pvc-b primary" id="pvcPickP">Prompt</button><button class="pvc-b" id="pvcPickV">🎬 影片企劃</button></div>
           <div class="pvc-picker-list" id="pvcPickList"></div>
         </div>
       </div>`;
@@ -240,6 +270,11 @@ window.PVCanvas = (function () {
     });
     ui.overlay.querySelector("#pvcFoldAll").addEventListener("click", foldAll);
     ui.overlay.querySelector("#pvcRelink").addEventListener("click", relinkAll);
+    ui.overlay.querySelector("#pvcVidNew").addEventListener("click", () => vidLoad().then(newVideoNode));
+    ui.overlay.querySelector("#pvcVidImport").addEventListener("click", () => vidLoad().then(() => { pickMode = "vid"; openPicker(); }));
+    ui.overlay.querySelector("#pvcVidDesk").addEventListener("click", () => window.open("video.html", "_blank", "noopener"));
+    ui.overlay.querySelector("#pvcPickP").addEventListener("click", () => { pickMode = "prompt"; renderPicker(); });
+    ui.overlay.querySelector("#pvcPickV").addEventListener("click", () => { pickMode = "vid"; vidLoad().then(renderPicker); });
     ui.overlay.querySelector("#pvcFoldEvo").addEventListener("click", () => {
       setFoldEvo(!autoFoldEvo());
       say(autoFoldEvo() ? "演化出新一代後會自動收成一疊（只留最新的）" : "已關閉：演化後每一代都攤在畫布上");
@@ -551,6 +586,7 @@ window.PVCanvas = (function () {
   // ---------- 節點上的主程式功能 ----------
   function nodeAct(n, a, btn) {
     if (a === "fold") return toggleFold(n);   // 收合／展開純粹是畫布上的事，筆記節點也能用
+    if (n.kind === "vid") return vidAct(n, a);
     const p = liveRec(n.ref);
     if (!p) { say("這則提示詞已不在庫裡"); refresh(); return; }
     const need = name => { const f = fn(name); if (!f) say("主程式尚未載入這個功能"); return f; };
@@ -587,6 +623,78 @@ window.PVCanvas = (function () {
       case "episode": return makeEpisode(n, p);
     }
   }
+  /* ---------- 影片企劃節點的動作 ---------- */
+  function vidAct(n, a) {
+    const v = liveVid(n.vref);
+    if (!v) { say("這支影片已不在影片製作台"); return; }
+    if (a === "vopen") { window.open("video.html#v=" + encodeURIComponent(v.id), "_blank", "noopener"); return; }
+    if (a === "vstage") {
+      const i = Math.max(0, VSTAGES.findIndex(s => s.k === v.status));
+      const next = VSTAGES[(i + 1) % VSTAGES.length];
+      v.status = next.k; v.edited = Date.now();
+      if (next.k === "pub" && !v.published) v.published = new Date().toISOString().slice(0, 10);
+      vidSave(); renderNodes(true);
+      say("影片階段改為「" + next.zh + "」");
+      return;
+    }
+    if (a === "vlink") {   // 畫布上跟這顆有連線的 prompt 節點 → 掛到這支影片
+      const ids = new Set();
+      cur.edges.forEach(e => {
+        const other = e.from === n.id ? e.to : (e.to === n.id ? e.from : null);
+        if (!other) return;
+        const x = cur.nodes.find(y => y.id === other);
+        if (x && x.kind !== "note" && x.kind !== "vid" && x.ref) ids.add(x.ref);
+      });
+      if (!ids.size) { say("先把 prompt 節點用連線接到這顆影片節點"); return; }
+      v.links = v.links || [];
+      let add = 0;
+      ids.forEach(id => { if (!v.links.includes(id)) { v.links.push(id); add++; } });
+      v.edited = Date.now(); vidSave(); renderNodes(true);
+      say(add ? `已把 ${add} 則 prompt 掛到「${v.title || "這支影片"}」` : "這些 prompt 已經掛上了");
+      return;
+    }
+    if (a === "vpull") {   // 影片已掛的 prompt → 拉進畫布並接到這顆
+      const list = (v.links || []).filter(id => liveRec(id));
+      if (!list.length) { say("這支影片還沒有掛任何 prompt（可在影片頁掛上）"); return; }
+      csnap();
+      let add = 0;
+      list.forEach((id, i) => {
+        let node = cur.nodes.find(x => x.ref === id);
+        if (!node) {
+          const p = liveRec(id);
+          const at = freeSpot(n.x + (n.w || NODE_W) + 70, n.y + i * 40, NODE_W, 240);
+          node = addNode({
+            kind: "prompt", ref: id, ttype: p.type === "video" ? "video" : "image",
+            title: p.title || "", text: p.prompt || "", img: "", x: at.x, y: at.y
+          });
+          add++;
+        }
+        if (!cur.edges.some(e => (e.from === n.id && e.to === node.id) || (e.from === node.id && e.to === n.id))) {
+          cur.edges.push({ id: uid(), from: n.id, to: node.id, label: "用在這支" });
+        }
+      });
+      cur.edited = Date.now(); save(); renderNodes(true); drawEdges();
+      say(add ? `已拉進 ${add} 則 prompt 並接上` : "這些 prompt 都已經在畫布上了");
+      return;
+    }
+  }
+  // 建立新的影片企劃（直接寫進影片製作台）並在畫布放一顆節點
+  function newVideoNode() {
+    const c = viewCenter();
+    const v = {
+      id: uid(), title: "新影片企劃", status: "idea", kind: "long", series: "", ep: "",
+      ytId: "", url: "", thumb: "", thumbs: [], thumbPick: 0, desc: "", hashtags: "", playlist: "",
+      chapters: [], order: 0, due: "", published: "", tags: [], outline: "", script: "", notes: "",
+      todos: [], links: [], views: 0, likes: 0, created: Date.now(), edited: Date.now()
+    };
+    vids.unshift(v); vidSave();
+    csnap();
+    const at = freeSpot(c.x - NODE_W / 2, c.y - 60, NODE_W, 210);
+    addNode({ kind: "vid", vref: v.id, title: v.title, text: "", x: at.x, y: at.y });
+    renderNodes(true); drawEdges(); ui.emptyMsg.hidden = true;
+    say("已建立影片企劃 — 用 🎬 到影片製作台補資料");
+  }
+
   // 以此節點為底建立新一集：庫裡新增記錄、畫布接上一顆節點與連線，接著直接給變體想法
   function makeEpisode(n, p) {
     const mk = fn("newEpisodeFrom"), d = appData();
@@ -628,8 +736,13 @@ window.PVCanvas = (function () {
   }
 
   // ---------- 匯入 picker ----------
+  let pickMode = "prompt";
   function openPicker() { ui.picker.classList.add("show"); ui.pickQ.value = ""; renderPicker(); ui.pickQ.focus(); }
   function renderPicker() {
+    ui.overlay.querySelector("#pvcPickP").classList.toggle("primary", pickMode !== "vid");
+    ui.overlay.querySelector("#pvcPickV").classList.toggle("primary", pickMode === "vid");
+    ui.pickQ.placeholder = pickMode === "vid" ? "搜尋影片企劃…" : "搜尋要匯入的 prompt…";
+    if (pickMode === "vid") return renderPickerVid();
     const q = ui.pickQ.value.trim().toLowerCase();
     const onCanvas = new Set(cur.nodes.map(n => n.ref).filter(Boolean));
     const list = promptList().filter(p => !q || (p.title + " " + p.prompt + " " + (p.tags || []).join(" ")).toLowerCase().includes(q));
@@ -641,6 +754,25 @@ window.PVCanvas = (function () {
       </div>`;
     }).join("")
       : `<div style="padding:14px;color:var(--ink-3);font-size:12.5px">庫裡沒有符合的 prompt。</div>`;
+  }
+  function renderPickerVid() {
+    const q = ui.pickQ.value.trim().toLowerCase();
+    const onCanvas = new Set(cur.nodes.filter(n => n.kind === "vid").map(n => n.vref));
+    const list = vids.filter(v => !q || ((v.title || "") + " " + (v.series || "") + " " + (v.tags || []).join(" ")).toLowerCase().includes(q));
+    ui.pickList.innerHTML = list.length ? list.slice(0, 60).map(v => {
+      const st = vidStage(v.status);
+      return `<div class="pvc-pick" data-vid="${v.id}">
+        <div class="pt">🎬 ${esc(v.title) || "（未命名影片）"}${onCanvas.has(v.id) ? " ・已在畫布" : ""}</div>
+        <div class="pp">${st.ico} ${st.zh}${v.due ? "　預定 " + esc(v.due) : ""}${v.published ? "　已發布 " + esc(v.published) : ""}</div>
+      </div>`;
+    }).join("") : `<div style="padding:14px;color:var(--ink-3);font-size:12.5px">影片製作台裡還沒有影片。用選單的「🎬 ＋ 新影片企劃」開一支。</div>`;
+  }
+  function pickerAddVid(id) {
+    const v = liveVid(id); if (!v) return;
+    csnap();
+    const c = viewCenter(), off = cur.nodes.length % 5 * 26;
+    addNode({ kind: "vid", vref: v.id, title: v.title || "", text: "", x: Math.round(c.x - NODE_W / 2 + off), y: Math.round(c.y - 60 + off) });
+    renderNodes(true); drawEdges(); renderPicker(); ui.emptyMsg.hidden = cur.nodes.length > 0;
   }
   function pickerAdd(id) {
     const p = liveRec(id); if (!p) return;
@@ -733,7 +865,41 @@ window.PVCanvas = (function () {
     ["board", "🎬", "開啟這個系列的故事板"],
     ["episode", "✚", "以此建立新一集（含變體想法）"]
   ];
+  // 影片企劃節點：標題／階段／縮圖讀影片製作台的現況
+  function vidNodeHTML(n, f) {
+    const v = liveVid(n.vref);
+    const nDesc = f ? (f.desc.get(n.id) || 0) : 0;
+    const dir = foldDir(n), nCount = f ? (f.count.get(n.id) || 0) : 0, nFold = !!dir && nCount > 0;
+    const w = n.w || NODE_W, h = n.h || (v && vidThumb(v) ? 300 : 210);
+    const st = v ? vidStage(v.status) : null;
+    const src = v ? vidThumb(v) : "";
+    const linked = v ? (v.links || []).length : 0;
+    const acts = v ? `<div class="pvc-acts">
+      <button class="pvc-a" data-a="vopen" title="到影片製作台編輯這支影片">🎬</button>
+      <button class="pvc-a" data-a="vstage" title="切換製作階段">⏭</button>
+      <button class="pvc-a" data-a="vlink" title="把畫布上連到這裡的 prompt 掛到這支影片">🔗</button>
+      <button class="pvc-a" data-a="vpull" title="把這支影片已掛的 prompt 拉進畫布並連線">⬇</button>
+    </div>` : "";
+    return `<div class="pvc-node vid${src ? " has-img" : ""}${nFold ? " folded" : ""}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
+      <div class="pvc-node-head">
+        <span class="pvc-node-type">🎬 影片企劃</span>
+        ${v ? `<span class="pvc-badge" data-a="vstage" title="點一下切換階段">${st.ico} ${st.zh}</span>` : ""}
+        ${nDesc ? `<span class="pvc-badge fold" data-a="fold">${nFold ? "⧉ " + nCount + " 收合中" : "⊟ 收合 " + nDesc}</span>` : ""}
+        <span class="sp"></span>
+        <button class="pvc-node-del" title="從畫布移除此節點（不會刪掉影片）">×</button>
+      </div>
+      ${src ? `<div class="pvc-node-img"><img src="${esc(src)}" alt="" draggable="false"></div>` : ""}
+      <div class="pvc-node-title" contenteditable="true" spellcheck="false">${esc(v ? (v.title || "未命名影片") : n.title)}</div>
+      <div class="pvc-node-body">${v ? esc([v.series ? v.series + (v.ep !== "" ? " EP" + v.ep : "") : "", v.due ? "預定 " + v.due : "", v.published ? "已發布 " + v.published : ""].filter(Boolean).join("　")) : ""}</div>
+      ${v ? `<div class="pvc-meta">🗂 ${linked} 則 prompt${v.todos && v.todos.length ? `　☑ ${v.todos.filter(t => t.done).length}/${v.todos.length}` : ""}</div>` : ""}
+      ${v ? "" : `<div class="pvc-warn">⚠ 這支影片已不在影片製作台</div>`}
+      ${acts}
+      <div class="pvc-port" title="從這裡拖曳連到另一個節點"></div>
+      <div class="pvc-resize" title="拖曳改變節點大小"></div>
+    </div>`;
+  }
   function nodeHTML(n, f) {
+    if (n.kind === "vid") return vidNodeHTML(n, f);
     const isNote = n.kind === "note";
     const nDesc = f ? (f.desc.get(n.id) || 0) : 0;
     const dir = foldDir(n);
@@ -903,7 +1069,7 @@ window.PVCanvas = (function () {
   function syncNodes() {
     let dirty = false;
     cur.nodes.forEach(n => {
-      if (n.kind === "note" || !n.ref) return;
+      if (n.kind === "note" || n.kind === "vid" || !n.ref) return;
       const p = liveRec(n.ref);
       if (!p) { if (!n.gone) { n.gone = true; dirty = true; } return; }
       const t = p.type === "video" ? "video" : "image";
@@ -1082,7 +1248,8 @@ window.PVCanvas = (function () {
   // picker 清單點擊（委派）
   document.addEventListener("click", e => {
     const pick = e.target.closest && e.target.closest(".pvc-pick");
-    if (pick && ui && ui.pickList.contains(pick)) pickerAdd(pick.dataset.id);
+    if (!pick || !ui || !ui.pickList.contains(pick)) return;
+    if (pick.dataset.vid) pickerAddVid(pick.dataset.vid); else pickerAdd(pick.dataset.id);
   });
 
   function open() {
@@ -1091,6 +1258,7 @@ window.PVCanvas = (function () {
     if (!store.projects.length) newProject("我的專案");
     cur = curProject(); store.currentId = cur.id; save();
     resetKnown(); setAutoWire(autoWire()); setFoldEvo(autoFoldEvo());
+    vidLoad().then(() => { if (ui.overlay.classList.contains("show")) renderNodes(true); });
     ui.overlay.classList.add("show"); renderAll();
   }
   return { open };

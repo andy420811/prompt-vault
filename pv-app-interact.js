@@ -108,6 +108,14 @@
     }
     if (act === "episode") {   // 以此卡為底建立新一集：日期換今天、同系列、開編輯器快改事件/標題
       const copy = newEpisodeFrom(p);
+      // 沒有堆疊的話，把「原始＋新一集」自動堆成一疊（同一支的各代收在一起）
+      if (!p.stack) {
+        const seg = uid();
+        p.stack = seg; p.edited = Date.now();
+        copy.stack = seg;
+        if (!stackNames[seg]) { stackNames[seg] = (p.title || "新系列").replace(/（副本）$/, "").slice(0, 20); saveStackNames(); }
+        expandedStacks.add(seg);
+      }
       data.unshift(copy); save(); render();
       // 不搶畫面：變體想法收到右下角常駐，點一下才開（想法視窗裡有「開啟編輯器」可跳去改事件／標題）
       if (typeof window.ideaDockAdd === "function") {

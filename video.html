@@ -34,7 +34,9 @@
     <div class="seg">
       <button id="vViewBoard" aria-pressed="true">看板</button>
       <button id="vViewList" aria-pressed="false">清單</button>
+      <button id="vViewCal" aria-pressed="false">月曆</button>
     </div>
+    <button class="vd-link" id="vStatsBtn" title="頻道統計">📊 統計</button>
     <select id="vSeries" title="依系列篩選"><option value="">全部系列</option></select>
     <select id="vKind" title="依類型篩選">
       <option value="">全部類型</option>
@@ -55,6 +57,16 @@
 
 <div class="vd-board" id="vBoard"></div>
 <div class="vd-list" id="vList" hidden></div>
+<div class="vd-cal" id="vCal" hidden>
+  <div class="vd-cal-bar">
+    <button class="vd-link" id="vCalPrev">‹ 上個月</button>
+    <b id="vCalLabel"></b>
+    <button class="vd-link" id="vCalNext">下個月 ›</button>
+    <button class="vd-link" id="vCalToday">今天</button>
+    <span class="vd-sub">📅＝預定發布　🚀＝已發布　點格子可在該日新增</span>
+  </div>
+  <div class="vd-cal-grid" id="vCalGrid"></div>
+</div>
 
 <!-- ---------- 影片編輯器 ---------- -->
 <div class="overlay" id="vEditor">
@@ -99,6 +111,45 @@
 
       <div class="field"><label for="vfTags">標籤 <span class="opt">逗號分隔</span></label><input id="vfTags" placeholder="恐怖, AI 生成, 台語"></div>
 
+      <div class="block" id="vBlkThumb">
+        <div class="block-head" data-toggle><span class="bt">縮圖候選</span><span class="bn" id="vThumbCount">0</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">可以放多張候選做 A/B，點一下選為主縮圖（卡片與清單就顯示它）。也可以直接 Ctrl+V 貼上圖片。</p>
+          <div class="vd-thumbs" id="vThumbList"></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vThumbAdd">＋ 上傳縮圖</button>
+            <button type="button" class="link-btn" id="vThumbYt" style="color:var(--ink-3)">用 YouTube 縮圖</button>
+          </div>
+          <input type="file" id="vThumbFile" accept="image/*" multiple hidden>
+        </div>
+      </div>
+
+      <div class="block" id="vBlkPublish">
+        <div class="block-head" data-toggle><span class="bt">發布資料（標題／說明／章節）</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <div class="field"><label for="vfDesc">說明欄草稿</label>
+            <textarea id="vfDesc" style="min-height:110px" placeholder="這集在講什麼、相關連結、追蹤資訊…"></textarea></div>
+          <div class="field"><label>章節 <span class="opt">時間＋標題，會自動照時間排序</span></label>
+            <div class="vd-chaps" id="vChapList"></div>
+            <div class="pk-actions">
+              <button type="button" class="link-btn" id="vChapAdd">＋ 新增章節</button>
+              <button type="button" class="link-btn" id="vChapCopy" style="color:var(--ink-3)">複製章節文字</button>
+            </div>
+          </div>
+          <div class="vd-grid2">
+            <div class="field"><label for="vfHash">Hashtags <span class="opt">選填</span></label><input id="vfHash" placeholder="#AI短片 #裂痕"></div>
+            <div class="field"><label for="vfPlaylist">播放清單 <span class="opt">選填</span></label><input id="vfPlaylist" placeholder="裂痕系列"></div>
+          </div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vCopyPack">📋 複製整包發布文案（標題＋說明＋章節＋標籤）</button>
+          </div>
+        </div>
+      </div>
+
       <div class="block" id="vBlkScript">
         <div class="block-head" data-toggle><span class="bt">大綱與腳本</span>
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
@@ -135,6 +186,13 @@
           <p class="hint">從 Prompt 庫挑出這支影片用到的提示詞或整組分鏡，點「開啟」會跳回庫裡那一筆。</p>
           <div class="vd-linked" id="vLinkedList"></div>
           <div class="pk-actions"><button type="button" class="link-btn" id="vLinkAdd">＋ 掛上 Prompt</button></div>
+          <p class="hint" style="margin-top:10px">從掛上的 prompt 直接把內容抓進這支影片：</p>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vImpImgs">🖼 結果圖 → 縮圖候選</button>
+            <button type="button" class="link-btn" id="vImpShots">🎞 分鏡 → 腳本</button>
+            <button type="button" class="link-btn" id="vImpChaps">⏱ 分鏡 → 章節</button>
+            <button type="button" class="link-btn" id="vImpTags" style="color:var(--ink-3)">🏷 併入標籤</button>
+          </div>
         </div>
       </div>
 
@@ -143,6 +201,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn ghost del-side" id="vDelBtn" style="color:var(--danger)">刪除</button>
+      <button class="btn ghost" id="vDupBtn">複製為新企劃</button>
       <button class="btn ghost" id="vNextEp">＋ 建立下一集</button>
       <button class="btn ghost" id="vEdCancel">取消</button>
       <button class="btn primary" id="vSaveBtn">儲存</button>
@@ -160,6 +219,10 @@
       </button>
     </div>
     <div class="modal-body">
+      <div class="seg" id="vPickMode" style="display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;margin-bottom:10px">
+        <button type="button" id="vPickItems" aria-pressed="true">單則 prompt</button>
+        <button type="button" id="vPickStacks" aria-pressed="false">整個系列／分鏡堆疊</button>
+      </div>
       <input id="vPickQ" type="search" placeholder="搜尋標題、提示詞、標籤…" style="width:100%">
       <p class="vd-note" id="vPickInfo"></p>
       <div class="vd-pick-list" id="vPickList"></div>
@@ -211,6 +274,23 @@
       </div>
     </div>
     <div class="modal-foot"><button class="btn primary" id="vSetDone">完成</button></div>
+  </div>
+</div>
+
+<!-- ---------- 頻道統計 ---------- -->
+<div class="overlay" id="vStatsOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:620px">
+    <div class="modal-head">
+      <h2>頻道統計</h2>
+      <button class="icon-btn" id="vStatsClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="vStatsBody"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="vExportCsv">⬇ 匯出 CSV</button>
+      <button class="btn primary" id="vStatsDone">完成</button>
+    </div>
   </div>
 </div>
 
