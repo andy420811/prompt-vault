@@ -372,8 +372,18 @@
   // 使用者只貼 prompt 就按儲存 → 卡片會是「未命名」。這裡在存檔後背景跑一次分析，
   // 只填「原本空白」的欄位（不覆蓋使用者自己填的），完成後 save(true)+render()。
   const enrichIds = new Set();          // 正在補完的記錄 id（同一筆不重複跑）
+  // 比 AI_SCHEMA 多要三個欄位（同一次呼叫拿完，不多花 API）
+  const ENRICH_SCHEMA = JSON.parse(JSON.stringify(AI_SCHEMA));
+  ENRICH_SCHEMA.properties.summary = { type: "STRING" };
+  ENRICH_SCHEMA.properties.neg = { type: "STRING" };
+  ENRICH_SCHEMA.properties.en = { type: "STRING" };
+  const ENRICH_SYS = AI_SYS + " 另外三個欄位：summary 用一句 20 字內繁中說明這則 prompt 的用途（如：頻道開場的城市空拍 B-roll）；neg 給這類生成常見且安全的負面提示詞，英文逗號分隔 3~8 個（如 blurry, lowres, extra fingers, watermark），prompt 本身已寫負面描述就留空；en 僅在 prompt 主要是中文時輸出忠實對應的英文版（逐句對應、不加詞不改內容、保留【】佔位符），否則留空。";
+  // 這則記錄「還沒被分析過」的判準：沒標題／沒標籤／變數沒辨識過（改過 prompt 會讓 varsDone 變 false → 會重跑）
   function needsEnrich(p) {
     return !!p && !!(p.prompt || "").trim() && (!p.title.trim() || !p.tags.length || !p.varsDone);
+  }
+  function needsBasic(p) {   // 批次入口用的較嚴格判準（避免匯入一大包就狂打 API）
+    return !!p && !!(p.prompt || "").trim() && (!p.title.trim() || !p.tags.length);
   }
   async function enrichRecord(p, opts) {
     if (!p || !(p.prompt || "").trim() || enrichIds.has(p.id)) return;
@@ -381,7 +391,7 @@
     enrichIds.add(id);
     let r = null, byAI = false;
     if (gemKey()) {
-      try { r = await aiCall(AI_SYS, prompt, AI_SCHEMA); byAI = true; }
+      try { r = await aiCall(ENRICH_SYS, prompt, ENRICH_SCHEMA); byAI = true; }
       catch (e) { r = null; }                     // 靜默退回離線規則（下次存檔會再試）
     }
     enrichIds.delete(id);
@@ -403,6 +413,13 @@
     GROUPS.forEach(g => (r[g] || []).forEach(v => { if (LABEL[v] && !t[g].includes(v)) { t[g].push(v); changed++; } }));
     (r.tags || []).forEach(tg => { if (tg && !t.tags.includes(tg)) { t.tags.push(String(tg).slice(0, 20)); changed++; } });
     if (r.constraint && !t.notes.includes(r.constraint)) { t.notes = (t.notes ? t.notes + "；" : "") + r.constraint; changed++; }
+    if (r.summary && !t.notes.trim()) { t.notes = String(r.summary).slice(0, 60); changed++; }
+    if (r.neg && !t.neg.trim()) { t.neg = String(r.neg).slice(0, 200); changed++; }
+    // 中文 prompt → 存一份忠實英文版當變體（多數生成工具吃英文效果較好）
+    if (r.en && String(r.en).trim() && !t.variants.some(v => v.label === "英文版")) {
+      t.variants.push({ id: uid(), label: "英文版", prompt: String(r.en).trim(), note: "AI 背景補完的忠實英文版" });
+      changed++;
+    }
     if (byAI && Array.isArray(r.variables) && typeof cleanVars === "function") {
       t.vars = cleanVars(t.prompt, r.variables);
       t.varsDone = true;
@@ -412,6 +429,37 @@
     t.edited = Date.now();
     save(true);                                    // 背景補完不佔用復原步
     render();
-    toast(`${byAI ? "AI" : "離線"}背景補完：${t.title || "此則"}${t.vars.length ? `・變數 ${t.vars.length} 個` : ""}`);
+    if (!o.quiet) toast(`${byAI ? "AI" : "離線"}背景補完：${t.title || "此則"}${t.vars.length ? `・變數 ${t.vars.length} 個` : ""}`);
+  }
+
+  // 批次入口（JSON 匯入等）：排隊逐筆補完，共用右下角進度小視窗、可取消
+  const ENRICH_MAX = 30;                // 一次最多補幾則（避免匯入大包資料狂打 API）
+  let enrichQ = [], enrichBusy = false, enrichStop = false;
+  function enrichMany(list, opts) {
+    const o = opts || {};
+    const todo = (list || []).filter(p => p && !enrichQ.includes(p.id) && (o.basic ? needsBasic(p) : needsEnrich(p)));
+    if (!todo.length) return 0;
+    const take = todo.slice(0, ENRICH_MAX);
+    enrichQ.push(...take.map(p => p.id));
+    if (!enrichBusy) runEnrichQ(o);
+    if (todo.length > take.length) toast(`背景補完只處理前 ${ENRICH_MAX} 則（其餘可之後開編輯器儲存時再補）`);
+    return take.length;
+  }
+  async function runEnrichQ(opts) {
+    enrichBusy = true; enrichStop = false;
+    const bg = typeof bgJobShow === "function";
+    let done = 0;
+    if (bg) bgJobShow("背景補完提示詞資料", done + enrichQ.length, () => { enrichStop = true; });
+    while (enrichQ.length && !enrichStop) {
+      const id = enrichQ.shift();               // ⚠ 不可寫在 find 的判斷式裡（會每比對一筆就 shift 一次）
+      const p = data.find(x => x.id === id);
+      if (p) await enrichRecord(p, { ...opts, quiet: true });
+      done++;
+      if (bg) bgJobTick(done, done + enrichQ.length);
+    }
+    const left = enrichQ.length;
+    enrichQ = []; enrichBusy = false;
+    if (bg) bgJobDone();
+    toast(left ? `已取消，補完 ${done} 則（剩 ${left} 則未處理）` : `背景補完完成：${done} 則`);
   }
 

@@ -230,7 +230,7 @@
     const target = normalize({ ...rec, id: uid(), fav: false, created: Date.now(), edited: Date.now() });
     data.unshift(target);
     save(); render();
-    detectVars(target);
+    enrichRecord(target, { type: false });   // 型別沿用使用者在編輯器選的，其餘空欄位背景補完
     toast("已建立為獨立提示詞：" + (target.title || "未命名"));
   }
   $("#addVarFromMain").addEventListener("click", () => {
@@ -491,12 +491,14 @@
     if (!Array.isArray(arr)) arr = [arr];
     const existing = new Set(data.map(p => p.id));
     let added = 0;
+    const fresh = [];
     arr.forEach(p => {
       if (!p || !p.prompt) return;
       const rec = normalize({ ...p, id: (p.id && !existing.has(p.id)) ? p.id : uid() });
-      existing.add(rec.id); data.push(rec); added++;
+      existing.add(rec.id); data.push(rec); fresh.push(rec); added++;
     });
     save(); render();
+    enrichMany(fresh, { basic: true });   // 匯入來源沒標題／沒標籤的，背景補完（有進度視窗可取消）
     return added;
   }
   $("#importFile").addEventListener("change", e => {
