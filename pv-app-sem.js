@@ -2,8 +2,16 @@
    Classic script：與其他 pv-app-*.js 共用同一全域範疇，載入順序在 gen 之後、boot 之前，不可調換。
    向量存 IndexedDB key "vecs"，不上雲端、不進 undo。無金鑰時整組功能會提示改用一般搜尋。 */
 "use strict";
-  const SEM_MODEL = "text-embedding-004";
+  // 依序嘗試；Google 淘汰舊模型（回 404）時自動往下找，找到可用的就記起來
+  const SEM_MODELS = ["gemini-embedding-001", "text-embedding-004"];
+  const SEM_MODEL_KEY = "promptvault.semmodel";
+  const SEM_DIM = 768;                // gemini-embedding-001 預設 3072，截成 768 省空間（存前會重新正規化）
   const SEM_BATCH = 90;               // 單次 batchEmbedContents 的上限（官方 100，留餘裕）
+  function semModel() {
+    const s = (localStorage.getItem(SEM_MODEL_KEY) || "").trim();
+    return SEM_MODELS.includes(s) ? s : SEM_MODELS[0];
+  }
+  function semSetModel(m) { try { localStorage.setItem(SEM_MODEL_KEY, m); } catch (e) {} }
   let vecs = {};                      // { id: {h: 內容雜湊, v: number[] } }
   let vecsLoaded = false;
 
@@ -24,34 +32,48 @@
     for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
     return h.toString(36) + ":" + s.length;
   }
-  function semStale() { return data.filter(p => { const v = vecs[p.id]; return !v || v.h !== semHash(semText(p)); }); }
+  // 向量的有效性簽章：內容雜湊＋模型名（換模型＝換向量空間，舊向量一律作廢重算）
+  function semSig(p) { return semModel() + "|" + semHash(semText(p)); }
+  function semStale() { return data.filter(p => { const v = vecs[p.id]; return !v || v.h !== semSig(p); }); }
 
-  // ---------- Gemini embedding（多金鑰輪替；一次一批）----------
+  // ---------- Gemini embedding（多模型後備＋多金鑰輪替；一次一批）----------
+  async function embedOnce(model, texts, key) {
+    const req = texts.map(t => {
+      const o = { model: "models/" + model, content: { parts: [{ text: t.slice(0, 8000) }] }, taskType: "SEMANTIC_SIMILARITY" };
+      if (model.startsWith("gemini-embedding")) o.outputDimensionality = SEM_DIM;
+      return o;
+    });
+    let resp;
+    try {
+      resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":batchEmbedContents", {
+        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({ requests: req })
+      });
+    } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
+    if (!resp.ok) throw await gemErr(resp, "Gemini 向量");
+    const j = await resp.json();
+    const out = (j.embeddings || []).map(e => e.values);
+    if (out.length !== texts.length) throw new Error("回傳向量數量不符");
+    return out;
+  }
   async function embedBatch(texts) {
     const keys = gemKeys();
     if (!keys.length) throw new Error("語意功能需要 Gemini 金鑰（到 ⚙ 設定填入）");
-    const body = JSON.stringify({
-      requests: texts.map(t => ({
-        model: "models/" + SEM_MODEL,
-        content: { parts: [{ text: t.slice(0, 8000) }] },
-        taskType: "SEMANTIC_SIMILARITY"
-      }))
-    });
+    const cur = semModel();
+    const models = [cur, ...SEM_MODELS.filter(m => m !== cur)];
     let lastErr;
-    for (let i = 0; i < keys.length; i++) {
-      try {
-        let resp;
+    for (const m of models) {
+      let gone = false;
+      for (let i = 0; i < keys.length && !gone; i++) {
         try {
-          resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + SEM_MODEL + ":batchEmbedContents", {
-            method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": keys[i] }, body
-          });
-        } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
-        if (!resp.ok) throw new Error("Gemini HTTP " + resp.status);
-        const j = await resp.json();
-        const out = (j.embeddings || []).map(e => e.values);
-        if (out.length !== texts.length) throw new Error("回傳向量數量不符");
-        return out;
-      } catch (e) { lastErr = e; }
+          const out = await embedOnce(m, texts, keys[i]);
+          if (m !== semModel()) { semSetModel(m); toast("原本的向量模型已停用，已改用 " + m + "（索引會重建）"); }
+          return out;
+        } catch (e) {
+          lastErr = e;
+          if (e.status === 404 || e.status === 400) gone = true;   // 模型不存在／不支援 → 換模型，不用再試其他金鑰
+        }
+      }
     }
     throw lastErr;
   }
@@ -81,13 +103,22 @@
       if (semCancel) break;
       const chunk = todo.slice(i, i + SEM_BATCH);
       bgJobTick(done, todo.length, `第 ${i + 1}～${Math.min(i + SEM_BATCH, todo.length)} 則…`);
-      try {
-        const out = await embedBatch(chunk.map(semText));
-        chunk.forEach((p, k) => { if (out[k]) vecs[p.id] = { h: semHash(semText(p)), v: norm(out[k]) }; });
+      let out = null, err = null;
+      for (let attempt = 0; attempt < 2 && !semCancel; attempt++) {
+        try { out = await embedBatch(chunk.map(semText)); err = null; break; }
+        catch (e) {
+          err = e;
+          if (e.status !== 429 || attempt) break;     // 只有額度限制才等一次再試
+          bgJobTick(done, todo.length, "額度限制，等 25 秒後重試…");
+          await new Promise(r => setTimeout(r, 25000));
+        }
+      }
+      if (out) {
+        chunk.forEach((p, k) => { if (out[k]) vecs[p.id] = { h: semSig(p), v: norm(out[k]) }; });
         done += chunk.length;
-      } catch (e) {
+      } else {
         fail += chunk.length;
-        if (i === 0) { bgJobDone(); semIndexing = false; toast("建立索引失敗（" + e.message + "）"); semRefreshUI(); return false; }
+        if (i === 0) { bgJobDone(); semIndexing = false; toast("建立索引失敗（" + (err ? err.message : "未知錯誤") + "）"); semRefreshUI(); return false; }
       }
       bgJobTick(done, todo.length);
     }
@@ -141,7 +172,7 @@
   // 找相似：以某一則當查詢向量
   async function semSimilar(p) {
     if (!vecsLoaded) await vecsLoad();
-    if (!vecs[p.id] || vecs[p.id].h !== semHash(semText(p))) {
+    if (!vecs[p.id] || vecs[p.id].h !== semSig(p)) {
       if (!(await semBuildIndex(false))) return;
     }
     const base = vecs[p.id];

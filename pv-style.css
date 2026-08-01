@@ -42,6 +42,8 @@
   }
 
   * { box-sizing: border-box; }
+  /* hidden 屬性一律要蓋得過作者的 display 規則（.kanban{display:flex} 這種會讓 el.hidden=true 失效，看板就關不掉） */
+  [hidden] { display: none !important; }
   body { margin:0; background:var(--paper); color:var(--ink); font-family:var(--sans);
     line-height:1.5; -webkit-font-smoothing:antialiased; }
   ::selection { background: var(--accent-tint); }

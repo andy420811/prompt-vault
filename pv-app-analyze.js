@@ -176,6 +176,21 @@
     ? "線上版無法連外，AI 功能請改用本機 HTML 檔"
     : "無法連線（請檢查網路，或關閉擋廣告/隱私擴充功能再試）");
   function gemIdx(n) { const i = +(localStorage.getItem(GEM_IDX) || 0); return (i >= 0 && i < n) ? i : 0; }
+  // Gemini 失敗回應 → 看得懂的錯誤（會讀掉 body，呼叫端不要再讀一次）。gen／sem 也共用這支。
+  async function gemErr(resp, what) {
+    let detail = "";
+    try { const j = await resp.json(); detail = (j && j.error && j.error.message) || ""; } catch (e) {}
+    const s = resp.status;
+    const hint =
+      s === 400 ? "請求被拒（金鑰無效或這個模型不吃這組參數）" :
+      s === 401 || s === 403 ? "金鑰無效、或這把金鑰沒有此模型的權限" :
+      s === 404 ? "找不到這個模型（Google 會淘汰舊模型，請改用新的模型名稱）" :
+      s === 429 ? "額度用完或請求太密集（免費方案配額很少，等一下再試，或到 Google AI Studio 開啟計費／換一把金鑰）" :
+      s >= 500 ? "Google 伺服器忙碌，稍後再試" : "";
+    const e = new Error(`${what} HTTP ${s}${hint ? "：" + hint : ""}${detail ? "（" + detail.slice(0, 120) + "）" : ""}`);
+    e.status = s;
+    return e;
+  }
   async function gemCall(key, sys, user, schema) {
     let resp;
     try {
@@ -189,7 +204,7 @@
       })
       });
     } catch (e) { throw netErr(); }
-    if (!resp.ok) { const e = new Error("HTTP " + resp.status); e.status = resp.status; throw e; }
+    if (!resp.ok) throw await gemErr(resp, "Gemini");
     const j = await resp.json();
     const txt = j?.candidates?.[0]?.content?.parts?.[0]?.text;
     if (!txt) throw new Error("空回應");

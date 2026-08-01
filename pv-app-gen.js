@@ -67,7 +67,7 @@
             })
           });
         } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
-        if (!resp.ok) { const e = new Error("Gemini HTTP " + resp.status); e.status = resp.status; throw e; }
+        if (!resp.ok) throw await gemErr(resp, "Gemini 圖像");
         const j = await resp.json();
         const part = (j?.candidates?.[0]?.content?.parts || []).find(x => x.inlineData && x.inlineData.data);
         if (!part) throw new Error("回應中沒有圖片（模型可能不支援出圖）");
@@ -123,8 +123,21 @@
       const p = data.find(x => x.id === ids[i]);
       if (!p) continue;
       bgJobTick(i, ids.length, `第 ${i + 1} 則生成中…`);
-      try { await genOne(p); ok++; }
-      catch (e) { fail++; if (i === 0) toast("生成失敗（" + e.message + "）"); }
+      let done = false;
+      for (let attempt = 0; attempt < 2 && !genQueueCancel; attempt++) {
+        try { await genOne(p); ok++; done = true; break; }
+        catch (e) {
+          if (e.status === 429 && !attempt) {      // 撞到速率限制 → 等 25 秒再試一次
+            bgJobTick(i, ids.length, "額度限制，等 25 秒後重試…");
+            await new Promise(r => setTimeout(r, 25000));
+            continue;
+          }
+          fail++;
+          if (i === 0 || e.status === 429) toast("生成失敗（" + e.message + "）");
+          break;
+        }
+      }
+      if (!done && genQueueCancel) break;
       render();
       bgJobTick(i + 1, ids.length);
     }
