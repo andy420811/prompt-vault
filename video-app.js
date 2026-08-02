@@ -96,10 +96,8 @@
     const c = cfg();
     if (!c.channel) setCfg({ channel: "UCCxQbx0erwfctMmCiKenrEQ" });   // 預設帶入使用者的頻道
     render();
-    // Prompt 庫（唯讀）：拿來掛連結與顯示縮圖
-    const d = await idbGet("data");
-    if (Array.isArray(d)) prompts = d;
-    else { try { const ls = JSON.parse(localStorage.getItem("promptvault.v2")); if (Array.isArray(ls)) prompts = ls; } catch (e) {} }
+    // Prompt 庫：讀來掛連結與顯示內容（只有「腳本→分鏡」會寫回去）
+    await reloadPrompts();
     if (editingId !== null || $("#vEditor").classList.contains("show")) renderLinked();
   }
 
@@ -180,7 +178,13 @@
   }
   function cardHTML(v) {
     const th = thumbOf(v), done = v.todos.filter(t => t.done).length, r = doneRatio(v), dc = dueClass(v);
+    const next = STAGES[STAGES.findIndex(s => s.k === v.status) + 1];
     return `<article class="vd-card" data-id="${v.id}" draggable="true">
+      <div class="vd-quick">
+        ${v.ytId ? `<button type="button" data-q="play" title="在這裡播放">▶</button>` : ""}
+        ${next ? `<button type="button" data-q="next" title="推進到「${next.zh}」">⏭</button>` : ""}
+        <button type="button" data-q="dup" title="複製為新企劃">⧉</button>
+      </div>
       ${th ? `<div class="vd-thumb"><img src="${esc(th)}" alt="" loading="lazy">
         ${v.views ? `<span class="views">▶ ${nf(v.views)}</span>` : ""}</div>` : ""}
       <div class="vd-card-body">
@@ -337,12 +341,21 @@
     $("#vLinkCount").textContent = curLinks.length;
     $("#vLinkedList").innerHTML = curLinks.map(id => {
       const p = promptById(id);
-      return `<div class="vd-linked-row" data-id="${id}">
+      const sb = p && p.sb ? `<span class="vd-chip">鏡 ${(+p.sb.ord || 0) + 1}${p.sb.dur ? " · " + esc(String(p.sb.dur)) + "s" : ""}</span>` : "";
+      return `<div class="vd-linked-row" data-id="${id}"${p ? ` data-open="${id}" style="cursor:pointer" title="點一下在這裡看內容"` : ""}>
         <span class="lt">${p ? (p.type === "video" ? "🎬 " : "🖼 ") + esc(p.title || "未命名") : "⚠ 這則 prompt 已不在庫裡"}</span>
-        ${p ? `<a class="lk" href="prompt-vault.html#p=${encodeURIComponent(id)}" target="_blank" rel="noopener">開啟 ↗</a>` : ""}
+        ${sb}
+        ${p ? `<button type="button" class="lk" data-open="${id}">👁 內容</button>` : ""}
         <button type="button" class="del" data-unlink="${id}" title="移除">✕</button>
       </div>`;
     }).join("") || `<p class="hint">尚未掛任何 prompt。</p>`;
+  }
+  // 重新從 Prompt 庫讀一次（在另一個分頁改過庫裡的資料時用）
+  async function reloadPrompts() {
+    const d = await idbGet("data");
+    if (Array.isArray(d)) prompts = d;
+    else { try { const ls = JSON.parse(localStorage.getItem("promptvault.v2")); if (Array.isArray(ls)) prompts = ls; } catch (e) {} }
+    return prompts.length;
   }
   function collect() {
     const tags = $("#vfTags").value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
@@ -577,8 +590,33 @@
   $("#vViewList").addEventListener("click", () => { view = "list"; localStorage.setItem("videodesk.view", view); render(); });
   $("#vViewCal").addEventListener("click", () => { view = "cal"; localStorage.setItem("videodesk.view", view); render(); });
 
-  // 卡片點擊／新增
+  // 卡片快捷鈕（滑過卡片右上角出現）：播放／推進階段／複製
+  function dupVideo(v) {
+    const copy = normalize(Object.assign({}, v, {
+      id: uid(), title: (v.title || "未命名") + "（副本）", status: "idea",
+      due: "", published: "", url: "", ytId: "", views: 0, likes: 0,
+      todos: v.todos.map(t => ({ t: t.t, done: false })),
+      created: Date.now(), edited: Date.now(), order: 0
+    }));
+    videos.unshift(copy); save(); render();
+    return copy;
+  }
   document.addEventListener("click", e => {
+    const q = e.target.closest("[data-q]");
+    if (q) {
+      e.stopPropagation();
+      const card = q.closest(".vd-card"); const v = videos.find(x => x.id === (card && card.dataset.id));
+      if (!v) return;
+      if (q.dataset.q === "play") { openPlayer(v.ytId, v.title); return; }
+      if (q.dataset.q === "dup") { dupVideo(v); toast("已複製為新企劃（進度歸零）"); return; }
+      const i = STAGES.findIndex(s => s.k === v.status), nx = STAGES[i + 1];
+      if (!nx) { toast("已經在最後一個階段了"); return; }
+      v.status = nx.k;
+      if (nx.k === "pub" && !v.published) v.published = new Date().toISOString().slice(0, 10);
+      v.edited = Date.now(); save(); render();
+      toast(`已推進到「${nx.zh}」`);
+      return;
+    }
     const more = e.target.closest("[data-more]");
     if (more) { const k = more.dataset.more; colShow[k] = capOf(k) + 20; render(); return; }
     const add = e.target.closest("[data-add]");
@@ -702,17 +740,9 @@
     } finally { btn.textContent = "↻ 抓標題與縮圖"; btn.disabled = false; }
   });
   $("#vfOpenYt").addEventListener("click", () => {
-    const id = ytIdFrom($("#vfUrl").value);
-    if (!id) { toast("還沒有連結"); return; }
-    window.open("https://www.youtube.com/watch?v=" + id, "_blank", "noopener");
+    openPlayer(ytIdFrom($("#vfUrl").value), $("#vfTitle").value.trim());
   });
-  $("#vfToScript").addEventListener("click", () => {
-    const s = $("#vfScript").value.trim();
-    if (!s) { toast("腳本是空的"); return; }
-    try { sessionStorage.setItem("promptvault.script", s); } catch (e) {}
-    window.open("prompt-vault.html#script", "_blank", "noopener");
-    toast("已把腳本帶到 Prompt 庫的「腳本 → 分鏡」");
-  });
+  $("#vfToScript").addEventListener("click", openScriptSplit);
 
   // 待辦
   $("#vTodoAdd").addEventListener("click", () => { curTodos.push({ t: "", done: false }); renderTodos(); });
@@ -742,8 +772,15 @@
     setTimeout(() => $("#vPickQ").focus(), 60);
   });
   $("#vLinkedList").addEventListener("click", e => {
-    const d = e.target.closest("[data-unlink]"); if (!d) return;
-    curLinks = curLinks.filter(x => x !== d.dataset.unlink); renderLinked();
+    const d = e.target.closest("[data-unlink]");
+    if (d) { curLinks = curLinks.filter(x => x !== d.dataset.unlink); renderLinked(); return; }
+    const o = e.target.closest("[data-open]");
+    if (o) openPreview(o.dataset.open);
+  });
+  $("#vLinkReload").addEventListener("click", async () => {
+    const n = await reloadPrompts();
+    renderLinked(); renderPick();
+    toast(n ? `已重新讀取 Prompt 庫（${n} 則）` : "還是讀不到 Prompt 庫的資料");
   });
   let pickMode = "items";
   function stackList() {
@@ -870,6 +907,562 @@
   $("#vPickClose").addEventListener("click", () => $("#vPickOv").classList.remove("show"));
   $("#vPickDone").addEventListener("click", () => $("#vPickOv").classList.remove("show"));
 
+  /* =========================================================================
+     Prompt 內容預覽 — 掛上的 prompt 直接在這一頁展開，不跳回 Prompt 庫
+     ========================================================================= */
+  let pvId = null;
+  function stackNamesMap() {
+    try { return JSON.parse(localStorage.getItem("promptvault.stacknames")) || {}; } catch (e) { return {}; }
+  }
+  function pvText(p) {
+    const lines = [p.title || "未命名", "", p.prompt || ""];
+    if (p.neg) lines.push("", "負面詞：" + p.neg);
+    if (p.model) lines.push("", "模型：" + p.model);
+    const par = Object.entries(p.params || {}).filter(([, v]) => v).map(([k, v]) => k + "=" + v);
+    if (par.length) lines.push("參數：" + par.join(" / "));
+    if ((p.tags || []).length) lines.push("標籤：" + p.tags.join(", "));
+    if (p.notes) lines.push("", p.notes);
+    return lines.join("\n");
+  }
+  function openPreview(id) { pvId = id; renderPreview(); $("#vPromptOv").classList.add("show"); }
+  function closePreview() { $("#vPromptOv").classList.remove("show"); pvId = null; }
+  function renderPreview() {
+    const p = promptById(pvId), i = curLinks.indexOf(pvId);
+    $("#vPvPrev").disabled = i <= 0;
+    $("#vPvNext").disabled = i < 0 || i >= curLinks.length - 1;
+    $("#vPvCopy").disabled = !p;
+    if (!p) {
+      $("#vPvTitle").textContent = "找不到這則 prompt";
+      $("#vPvBody").innerHTML = `<p class="vd-pv-miss">這則 prompt 已經不在 Prompt 庫裡了。<br>可能是在庫裡被刪掉，或這台裝置還沒開過 Prompt 庫。</p>`;
+      return;
+    }
+    $("#vPvTitle").textContent = (p.type === "video" ? "🎬 " : "🖼 ") + (p.title || "未命名");
+    const names = stackNamesMap();
+    const seg = p.stack ? String(p.stack).split("/").pop() : "";
+    const chips = [p.type === "video" ? "影片" : "圖像"];
+    if (p.model) chips.push(esc(p.model));
+    Object.entries(p.params || {}).forEach(([k, v]) => { if (v) chips.push(esc(k + "：" + v)); });
+    if (seg) chips.push("📚 " + esc(names[seg] || seg));
+    if (p.sb) chips.push("鏡 " + ((+p.sb.ord || 0) + 1)
+      + (p.sb.dur ? " · " + esc(String(p.sb.dur)) + " 秒" : "") + (p.sb.trans ? " · " + esc(p.sb.trans) : ""));
+    (p.tags || []).forEach(t => chips.push("#" + esc(t)));
+    const kw = ["camera", "style", "light", "shot"].reduce((a, g) => a.concat(Array.isArray(p[g]) ? p[g] : []), []);
+    const imgs = (p.imgs || []).slice(0, 8);
+    const vars = Array.isArray(p.variants) ? p.variants : [];
+    $("#vPvBody").innerHTML = `
+      <div class="vd-pv-kv">${chips.map(c => `<span class="vd-chip">${c}</span>`).join("")}</div>
+      ${imgs.length ? `<div class="vd-pv-imgs">${imgs.map(s => `<img src="${s}" alt="" data-zoom>`).join("")}</div>` : ""}
+      <div class="vd-pv-sec"><p class="vd-pv-h">提示詞</p><pre class="vd-pv-pre">${esc(p.prompt || "（空白）")}</pre></div>
+      ${p.neg ? `<div class="vd-pv-sec"><p class="vd-pv-h">負面詞</p><pre class="vd-pv-pre neg">${esc(p.neg)}</pre></div>` : ""}
+      ${kw.length ? `<div class="vd-pv-sec"><p class="vd-pv-h">關鍵字</p><div class="vd-pv-kv">${kw.map(k => `<span class="vd-chip">${esc(k)}</span>`).join("")}</div></div>` : ""}
+      ${p.notes ? `<div class="vd-pv-sec"><p class="vd-pv-h">備註／旁白</p><pre class="vd-pv-pre">${esc(p.notes)}</pre></div>` : ""}
+      ${vars.length ? `<div class="vd-pv-sec"><p class="vd-pv-h">變體（${vars.length}）</p>${vars.map(v => `
+        <div style="margin-bottom:8px"><b style="font-size:12px;color:var(--ink-2)">${esc(v.label || "未命名")}</b>
+        <pre class="vd-pv-pre">${esc(v.prompt || "")}</pre></div>`).join("")}</div>` : ""}
+      <div class="pk-actions">
+        <button type="button" class="link-btn" data-pvact="prompt">複製提示詞</button>
+        <button type="button" class="link-btn" data-pvact="all">複製整份</button>
+        ${imgs.length ? `<button type="button" class="link-btn" data-pvact="thumb">🖼 加進縮圖候選</button>` : ""}
+        <a class="link-btn" style="color:var(--ink-3)" href="prompt-vault.html#p=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">在 Prompt 庫編輯 ↗</a>
+      </div>`;
+  }
+  function pvStep(d) {
+    const i = curLinks.indexOf(pvId);
+    if (i < 0) return;
+    const j = i + d;
+    if (j < 0 || j >= curLinks.length) return;
+    pvId = curLinks[j]; renderPreview();
+  }
+  $("#vPvBody").addEventListener("click", e => {
+    const z = e.target.closest("[data-zoom]");
+    if (z) { z.classList.toggle("big"); return; }
+    const a = e.target.closest("[data-pvact]"); if (!a) return;
+    const p = promptById(pvId); if (!p) return;
+    if (a.dataset.pvact === "prompt") copyText(p.prompt || "", "提示詞已複製");
+    else if (a.dataset.pvact === "all") copyText(pvText(p), "已複製整份內容");
+    else if (a.dataset.pvact === "thumb") {
+      let n = 0;
+      (p.imgs || []).forEach(src => { if (src && !curThumbs.includes(src)) { curThumbs.push(src); n++; } });
+      if (!n) { toast("這些圖已經在候選裡了"); return; }
+      renderThumbs(); $("#vBlkThumb").classList.remove("closed");
+      toast(`已加入 ${n} 張候選縮圖`);
+    }
+  });
+  $("#vPvPrev").addEventListener("click", () => pvStep(-1));
+  $("#vPvNext").addEventListener("click", () => pvStep(1));
+  $("#vPvCopy").addEventListener("click", () => { const p = promptById(pvId); if (p) copyText(p.prompt || "", "提示詞已複製"); });
+  $("#vPvClose").addEventListener("click", closePreview);
+  $("#vPvDone").addEventListener("click", closePreview);
+
+  /* =========================================================================
+     AI 引擎 — 與 Prompt 庫共用同一組金鑰（localStorage promptvault.*）
+     代理優先 → Gemini（多金鑰輪替）→ OpenRouter
+     ========================================================================= */
+  const AI_GEM = "promptvault.geminikeys", AI_GEM_OLD = "promptvault.geminikey", AI_GIDX = "promptvault.geminikeyidx";
+  const AI_MODEL = "promptvault.geminimodel", AI_OR = "promptvault.orkeys", AI_OIDX = "promptvault.oridx";
+  const AI_ORM = "promptvault.ormodels", AI_PURL = "promptvault.proxyurl", AI_PPW = "promptvault.proxypw";
+  const AI_DEF_MODEL = "gemini-2.5-flash";
+  function lsKeys(k) {
+    try { const v = JSON.parse(localStorage.getItem(k) || "[]"); return Array.isArray(v) ? v.filter(x => typeof x === "string" && x.trim()) : []; }
+    catch (e) { return []; }
+  }
+  function gemKeys() {
+    const old = localStorage.getItem(AI_GEM_OLD);
+    if (old) { try { localStorage.setItem(AI_GEM, JSON.stringify([old])); localStorage.removeItem(AI_GEM_OLD); } catch (e) {} }
+    return lsKeys(AI_GEM);
+  }
+  const orKeys = () => lsKeys(AI_OR);
+  const gemModel = () => (localStorage.getItem(AI_MODEL) || "").trim() || AI_DEF_MODEL;
+  function orModels() {
+    try { const m = JSON.parse(localStorage.getItem(AI_ORM) || "{}"); return { text: m.text || "deepseek/deepseek-chat-v3-0324:free" }; }
+    catch (e) { return { text: "deepseek/deepseek-chat-v3-0324:free" }; }
+  }
+  function proxyCfg() {
+    try { return { url: (localStorage.getItem(AI_PURL) || "").trim(), pw: localStorage.getItem(AI_PPW) || "" }; }
+    catch (e) { return { url: "", pw: "" }; }
+  }
+  const hasAiKey = () => !!(proxyCfg().url || gemKeys().length || orKeys().length);
+  const netErr = () => new Error("無法連線（請檢查網路，或關閉擋廣告／隱私擴充功能再試）");
+  async function gemHttpErr(resp) {
+    let detail = "";
+    try { const j = await resp.json(); detail = (j && j.error && j.error.message) || ""; } catch (e) {}
+    const s = resp.status;
+    const hint = s === 400 ? "請求被拒（金鑰無效或這個模型不吃這組參數）"
+      : (s === 401 || s === 403) ? "金鑰無效或沒有此模型的權限"
+      : s === 404 ? "找不到這個模型（Google 會淘汰舊模型，請在設定換新的模型名稱）"
+      : s === 429 ? "額度用完或請求太密集，等一下再試或換一把金鑰"
+      : s >= 500 ? "Google 伺服器忙碌，稍後再試" : "";
+    const e = new Error(`Gemini HTTP ${s}${hint ? "：" + hint : ""}${detail ? "（" + detail.slice(0, 120) + "）" : ""}`);
+    e.status = s; return e;
+  }
+  async function gemOne(key, sys, user, schema) {
+    let resp;
+    try {
+      resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + gemModel() + ":generateContent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: sys }] },
+          contents: [{ role: "user", parts: [{ text: user }] }],
+          generationConfig: { responseMimeType: "application/json", responseSchema: schema, temperature: 0.6 }
+        })
+      });
+    } catch (e) { throw netErr(); }
+    if (!resp.ok) throw await gemHttpErr(resp);
+    const j = await resp.json();
+    const txt = j && j.candidates && j.candidates[0] && j.candidates[0].content
+      && j.candidates[0].content.parts && j.candidates[0].content.parts[0] && j.candidates[0].content.parts[0].text;
+    if (!txt) throw new Error("空回應");
+    return JSON.parse(txt);
+  }
+  async function gemini(sys, user, schema) {
+    const keys = gemKeys();
+    if (!keys.length) throw new Error("未設定 Gemini 金鑰");
+    let start = +(localStorage.getItem(AI_GIDX) || 0); if (!(start >= 0 && start < keys.length)) start = 0;
+    let lastErr;
+    for (let n = 0; n < keys.length; n++) {
+      const i = (start + n) % keys.length;
+      try {
+        const out = await gemOne(keys[i], sys, user, schema);
+        if (i !== start) { try { localStorage.setItem(AI_GIDX, i); } catch (e) {} toast(`金鑰 #${start + 1} 失效，已改用 #${i + 1}`); }
+        return out;
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr;
+  }
+  async function openrouter(sys, user, schema) {
+    const keys = orKeys();
+    if (!keys.length) throw new Error("未設定 OpenRouter 金鑰");
+    let start = +(localStorage.getItem(AI_OIDX) || 0); if (!(start >= 0 && start < keys.length)) start = 0;
+    let lastErr;
+    for (let n = 0; n < keys.length; n++) {
+      const i = (start + n) % keys.length;
+      let resp;
+      try {
+        try {
+          resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": "Bearer " + keys[i] },
+            body: JSON.stringify({
+              model: orModels().text,
+              messages: [
+                { role: "system", content: sys + "\n\n只輸出一個符合以下結構的純 JSON 物件（不要 markdown 圍欄、不要任何其他文字）：\n" + JSON.stringify(schema) },
+                { role: "user", content: user }
+              ],
+              temperature: 0.6
+            })
+          });
+        } catch (e) { throw netErr(); }
+        if (!resp.ok) { const e = new Error("OpenRouter HTTP " + resp.status); e.status = resp.status; throw e; }
+        const j = await resp.json();
+        let txt = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+        if (!txt) throw new Error("空回應");
+        txt = txt.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+        const s = txt.indexOf("{"), en = txt.lastIndexOf("}");
+        if (s === -1 || en === -1) throw new Error("非 JSON 回應");
+        const out = JSON.parse(txt.slice(s, en + 1));
+        if (i !== start) { try { localStorage.setItem(AI_OIDX, i); } catch (e) {} }
+        return out;
+      } catch (e) {
+        lastErr = e;
+        if (e.status === 404) { lastErr = new Error("OpenRouter 模型不存在（404）— 請到 Prompt 庫的 ⚙ 設定換一個 :free 模型"); break; }
+      }
+    }
+    throw lastErr;
+  }
+  async function proxyCall(sys, user, schema) {
+    const { url, pw } = proxyCfg();
+    let resp;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Proxy-Password": pw },
+        body: JSON.stringify({ sys, user, schema })
+      });
+    } catch (e) { throw netErr(); }
+    if (resp.status === 401) throw new Error("代理密碼錯誤");
+    const j = await resp.json().catch(() => null);
+    if (!resp.ok) throw new Error(j && j.error ? j.error : "代理 HTTP " + resp.status);
+    if (!j) throw new Error("代理空回應");
+    return j;
+  }
+  async function aiCall(sys, user, schema) {
+    if (proxyCfg().url) return proxyCall(sys, user, schema);
+    const g = gemKeys().length, o = orKeys().length;
+    if (!g && !o) throw new Error("未設定金鑰");
+    let gErr;
+    if (g) { try { return await gemini(sys, user, schema); } catch (e) { gErr = e; } }
+    if (o) {
+      try { const out = await openrouter(sys, user, schema); if (g) toast("Gemini 失敗，已改用 OpenRouter"); return out; }
+      catch (e) { throw new Error((gErr ? "Gemini：" + gErr.message + "；" : "") + "OpenRouter：" + e.message); }
+    }
+    throw gErr;
+  }
+  // 沒金鑰時直接把設定視窗打開到 AI 那一段，不用讓使用者自己找
+  function needKey() {
+    if (hasAiKey()) return true;
+    toast("這個功能要用 AI，請先填金鑰");
+    openSettings(true);
+    return false;
+  }
+  // 執行中的計時提示（AI 通常 5～30 秒）
+  function busy(el, label) {
+    const t0 = Date.now();
+    const tick = () => { el.textContent = `${label}（${Math.round((Date.now() - t0) / 1000)} 秒）…`; };
+    tick();
+    const id = setInterval(tick, 500);
+    return () => { clearInterval(id); };
+  }
+
+  /* =========================================================================
+     腳本 → 分鏡（在這一頁跑完，可寫回腳本／章節，或建進 Prompt 庫並自動掛上）
+     ========================================================================= */
+  const enumOf = g => (typeof PRESETS !== "undefined" && PRESETS[g]) ? PRESETS[g].map(x => x[1]) : [];
+  function shotSchema() {
+    const kw = g => { const e = enumOf(g); return e.length ? { type: "ARRAY", items: { type: "STRING", enum: e } } : { type: "ARRAY", items: { type: "STRING" } }; };
+    return {
+      type: "OBJECT",
+      properties: {
+        title: { type: "STRING" },
+        shots: { type: "ARRAY", items: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING" }, prompt: { type: "STRING" }, narration: { type: "STRING" },
+            dur: { type: "STRING" }, trans: { type: "STRING" }, note: { type: "STRING" },
+            camera: kw("camera"), style: kw("style"), light: kw("light"), shot: kw("shot"),
+            tags: { type: "ARRAY", items: { type: "STRING" } }
+          },
+          required: ["prompt"]
+        } }
+      },
+      required: ["shots"]
+    };
+  }
+  const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 一律用英文，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
+  let scrShots = [], scrMeta = null;
+  function openScriptSplit() {
+    $("#vScrText").value = $("#vfScript").value.trim();
+    $("#vScrName").value = $("#vfTitle").value.trim().slice(0, 40);
+    $("#vScrStatus").textContent = "";
+    scrShots = []; scrMeta = null;
+    $("#vScrResult").innerHTML = ""; $("#vScrFoot").hidden = true;
+    $("#vScrOv").classList.add("show");
+    setTimeout(() => $("#vScrText").focus(), 60);
+  }
+  function closeScriptSplit() { $("#vScrOv").classList.remove("show"); }
+  function renderShots() {
+    $("#vScrResult").innerHTML = scrShots.map((s, i) => `
+      <div class="vd-shot">
+        <div class="sh"><span class="sn">鏡 ${i + 1}</span><span class="st">${esc(s.title || "未命名")}</span>
+          ${s.dur ? `<span class="vd-chip">${esc(String(s.dur))} 秒</span>` : ""}
+          ${s.trans ? `<span class="vd-chip">${esc(s.trans)}</span>` : ""}</div>
+        <p class="sp">${esc(s.prompt || "")}</p>
+        ${s.narration ? `<p class="snar">旁白：${esc(s.narration)}</p>` : ""}
+        ${s.note ? `<p class="snar">重點：${esc(s.note)}</p>` : ""}
+      </div>`).join("");
+    $("#vScrFoot").hidden = !scrShots.length;
+  }
+  function shotsText() {
+    return scrShots.map((s, i) => {
+      const head = `【鏡 ${i + 1}】${s.title || "未命名"}` + (s.dur ? `（${s.dur} 秒）` : "");
+      const nar = s.narration ? `\n旁白：${s.narration}` : "";
+      const note = s.note ? `\n重點：${s.note}` : "";
+      return `${head}${nar}${note}\nPrompt：${(s.prompt || "").trim()}`;
+    }).join("\n\n");
+  }
+  $("#vScrGo").addEventListener("click", async () => {
+    const text = $("#vScrText").value.trim();
+    if (!text) { toast("請先貼上腳本或旁白"); return; }
+    if (!needKey()) return;
+    const type = $("#vScrType").value === "image" ? "image" : "video";
+    const dur = $("#vScrDur").value.trim(), cnt = $("#vScrCount").value, styleTxt = $("#vScrStyle").value.trim();
+    const ask = [
+      "【腳本／旁白】\n" + text,
+      styleTxt ? "【視覺方向】" + styleTxt + "（每一鏡的 prompt 都要吃到這個風格）" : "",
+      cnt ? "【鏡頭數】請剛好拆成 " + cnt + " 個鏡頭" : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
+      dur ? "【每鏡預設秒數】約 " + dur + " 秒，長短依內容微調" : "",
+      "【分鏡類型】" + (type === "video" ? "影片動態鏡頭" : "靜態畫面")
+    ].filter(Boolean).join("\n\n");
+    const btn = $("#vScrGo"); btn.disabled = true;
+    const stop = busy($("#vScrStatus"), "AI 拆鏡中");
+    try {
+      const r = await aiCall(SCR_SYS, ask, shotSchema());
+      const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
+      if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
+      scrShots = shots;
+      scrMeta = { type, dur, name: ($("#vScrName").value.trim() || String(r.title || "").trim() || "腳本分鏡").slice(0, 40) };
+      if (!$("#vScrName").value.trim()) $("#vScrName").value = scrMeta.name;
+      renderShots();
+      stop(); $("#vScrStatus").textContent = `拆出 ${shots.length} 個鏡頭 — 下面可以直接套用`;
+    } catch (e) {
+      stop(); $("#vScrStatus").textContent = "失敗：" + e.message; toast("拆鏡失敗：" + e.message);
+    } finally { btn.disabled = false; }
+  });
+  $("#vScrToScript").addEventListener("click", () => {
+    if (!scrShots.length) return;
+    const cur = $("#vfScript").value.trim(), txt = shotsText();
+    $("#vfScript").value = cur ? cur + "\n\n" + txt : txt;
+    $("#vBlkScript").classList.remove("closed");
+    closeScriptSplit(); toast(`已把 ${scrShots.length} 個鏡頭寫進腳本`);
+  });
+  $("#vScrToChaps").addEventListener("click", () => {
+    if (!scrShots.length) return;
+    let sec = 0; const add = [];
+    scrShots.forEach((s, i) => {
+      const mm = String(Math.floor(sec / 60)).padStart(2, "0"), ss = String(sec % 60).padStart(2, "0");
+      add.push({ t: `${mm}:${ss}`, n: (s.title || `鏡 ${i + 1}`).slice(0, 40) });
+      sec += Math.max(1, Math.round(+(String(s.dur || scrMeta && scrMeta.dur || 5).replace(/[^\d.]/g, "")) || 5));
+    });
+    curChaps = add; renderChaps(); $("#vBlkPublish").classList.remove("closed");
+    closeScriptSplit(); toast(`已排出 ${add.length} 個章節（時間可再微調）`);
+  });
+  $("#vScrCopy").addEventListener("click", () => { if (scrShots.length) copyText(shotsText(), "分鏡文字已複製"); });
+  // 把分鏡寫進 Prompt 庫（唯一會改到庫裡資料的地方）：寫前重讀一次，盡量不蓋掉別處的變動
+  function shotToRec(s, i, total, type, defDur, seg, now) {
+    const sec = String(s.dur || defDur || "").replace(/[^\d.]/g, "");
+    const pick = g => { const en = enumOf(g); const v = Array.isArray(s[g]) ? s[g] : []; return en.length ? v.filter(x => en.includes(x)) : v.filter(Boolean); };
+    const rec = {
+      id: uid(), type: type === "image" ? "image" : "video",
+      title: String(s.title || "").trim().slice(0, 40) || `分鏡 ${i + 1}`,
+      prompt: String(s.prompt || "").trim(),
+      neg: "", model: "", url: "", group: "", notes: s.narration ? "旁白：" + s.narration : "",
+      stack: seg, parent: "", status: "",
+      tags: Array.isArray(s.tags) ? s.tags.filter(Boolean) : [],
+      params: {}, imgs: [], variants: [], vars: [], varsDone: false, fav: false, use: 0, lastUsed: 0,
+      camera: pick("camera"), style: pick("style"), light: pick("light"), shot: pick("shot"),
+      created: now + (total - i), edited: now + (total - i),   // 讓第 1 鏡排在「最近新增」最前
+      sb: { ord: i, dur: sec, trans: String(s.trans || "").trim(), note: String(s.note || s.narration || "").trim() }
+    };
+    if (rec.type === "video" && sec) rec.params.duration = sec;
+    return rec;
+  }
+  async function vaultAdd(recs, seg, name) {
+    let arr = await idbGet("data");
+    if (!Array.isArray(arr)) {
+      try { const ls = JSON.parse(localStorage.getItem("promptvault.v2")); if (Array.isArray(ls)) arr = ls; } catch (e) {}
+    }
+    arr = Array.isArray(arr) ? arr : [];
+    arr.unshift(...recs);
+    const ok = await idbSet("data", arr);
+    if (!ok) throw new Error("寫不進資料庫（IndexedDB 被瀏覽器擋住？）");
+    try {
+      localStorage.setItem("promptvault.v2", JSON.stringify(arr.map(p => Object.assign({}, p, { imgs: [] }))));
+      localStorage.setItem("promptvault.fmt", "idb");
+      localStorage.setItem("promptvault.updated", String(Date.now()));
+    } catch (e) {}
+    if (seg && name) {
+      const names = stackNamesMap(); names[seg] = name;
+      try { localStorage.setItem("promptvault.stacknames", JSON.stringify(names)); } catch (e) {}
+    }
+    prompts = arr;
+  }
+  $("#vScrToVault").addEventListener("click", async () => {
+    if (!scrShots.length) return;
+    const btn = $("#vScrToVault"); btn.disabled = true;
+    const stop = busy($("#vScrStatus"), "建立分鏡中");
+    try {
+      const seg = uid(), now = Date.now();
+      const name = ($("#vScrName").value.trim() || (scrMeta && scrMeta.name) || "腳本分鏡").slice(0, 40);
+      const type = (scrMeta && scrMeta.type) || "video", defDur = (scrMeta && scrMeta.dur) || "";
+      const recs = scrShots.map((s, i) => shotToRec(s, i, scrShots.length, type, defDur, seg, now));
+      await vaultAdd(recs, seg, name);
+      recs.forEach(r => { if (!curLinks.includes(r.id)) curLinks.push(r.id); });
+      renderLinked(); $("#vBlkLinked").classList.remove("closed");
+      stop(); closeScriptSplit();
+      toast(`已在 Prompt 庫建立「${name}」${recs.length} 個分鏡並掛到這支影片（Prompt 庫若開著請重新整理）`);
+    } catch (e) {
+      stop(); $("#vScrStatus").textContent = "失敗：" + e.message; toast("建立失敗：" + e.message);
+    } finally { btn.disabled = false; }
+  });
+  $("#vScrClose").addEventListener("click", closeScriptSplit);
+
+  /* =========================================================================
+     AI 文案 — 標題／說明欄／hashtag，以及大綱與鉤子
+     ========================================================================= */
+  const PACK_SYS = "你是華語 YouTube 頻道的內容企劃。根據使用者給的影片資訊，產出可以直接用的發布文案。titles 給 5 個不同角度的繁體中文標題（每個 30 字內，具體、有鉤子、不要瞎誇大、不要編號）；desc 給說明欄草稿（繁體中文，3～6 行，第一行就要能留住觀眾，可含一行本集重點）；hashtags 給 3～6 個以空白分隔的 # 標籤；tags 給 5～10 個繁體中文關鍵字（不含 #）。只回 JSON。";
+  const PACK_SCHEMA = { type: "OBJECT", properties: {
+    titles: { type: "ARRAY", items: { type: "STRING" } }, desc: { type: "STRING" },
+    hashtags: { type: "STRING" }, tags: { type: "ARRAY", items: { type: "STRING" } }
+  }, required: ["titles"] };
+  const OUT_SYS = "你是華語 YouTube 頻道的編劇。根據使用者給的影片資訊，產出這一集的骨架。outline 給一句話大綱（繁體中文，40 字內，講清楚這集在幹嘛）；hook 給開場 10 秒的鉤子台詞（繁體中文，兩句內）；beats 給 4～8 個段落大綱，每個一句話（繁體中文）。只回 JSON。";
+  const OUT_SCHEMA = { type: "OBJECT", properties: {
+    outline: { type: "STRING" }, hook: { type: "STRING" }, beats: { type: "ARRAY", items: { type: "STRING" } }
+  }, required: ["outline"] };
+  let aiMode = "pack";
+  function aiBrief() {
+    const t = $("#vfTitle").value.trim(), ser = $("#vfSeries").value.trim(), ep = $("#vfEp").value.trim();
+    const parts = [
+      t ? "【目前標題】" + t : "",
+      ser ? "【系列】" + ser + (ep ? " EP" + ep : "") : "",
+      "【類型】" + ($("#vfKind").value === "short" ? "YouTube Shorts 直式短片" : "長片"),
+      $("#vfTags").value.trim() ? "【既有標籤】" + $("#vfTags").value.trim() : "",
+      $("#vfOutline").value.trim() ? "【大綱】" + $("#vfOutline").value.trim() : "",
+      $("#vfScript").value.trim() ? "【腳本】\n" + $("#vfScript").value.trim().slice(0, 4000) : "",
+      $("#vfNotes").value.trim() ? "【備註】" + $("#vfNotes").value.trim() : "",
+      $("#vAiBrief").value.trim() ? "【特別要求】" + $("#vAiBrief").value.trim() : ""
+    ].filter(Boolean);
+    return parts.join("\n\n");
+  }
+  function openAi(mode) {
+    aiMode = mode;
+    $("#vAiHead").textContent = mode === "pack" ? "AI 想標題與說明欄" : "AI 寫大綱與鉤子";
+    $("#vAiBrief").value = "";
+    $("#vAiStatus").textContent = "";
+    $("#vAiResult").innerHTML = "";
+    $("#vAiOv").classList.add("show");
+    if (!$("#vfScript").value.trim() && !$("#vfOutline").value.trim() && !$("#vfTitle").value.trim())
+      $("#vAiStatus").textContent = "提示：先填一點標題／大綱／腳本，AI 才有東西可以想。";
+  }
+  function closeAi() { $("#vAiOv").classList.remove("show"); }
+  function aiOpts(items, act, label) {
+    return `<p class="vd-pv-h">${label}</p><div class="vd-ai-list">${items.map((s, i) => `
+      <button type="button" class="vd-ai-opt" data-act="${act}" data-val="${esc(s)}">
+        <span class="num">${i + 1}</span><span>${esc(s)}</span><span class="len">${[...s].length} 字</span>
+      </button>`).join("")}</div>`;
+  }
+  $("#vAiGo").addEventListener("click", async () => {
+    if (!needKey()) return;
+    const brief = aiBrief();
+    if (!brief.trim()) { toast("這支影片還沒有任何內容可以參考"); return; }
+    const btn = $("#vAiGo"); btn.disabled = true;
+    const stop = busy($("#vAiStatus"), "AI 思考中");
+    try {
+      if (aiMode === "pack") {
+        const r = await aiCall(PACK_SYS, brief, PACK_SCHEMA);
+        const titles = (Array.isArray(r.titles) ? r.titles : []).filter(Boolean);
+        const tags = (Array.isArray(r.tags) ? r.tags : []).filter(Boolean);
+        $("#vAiResult").innerHTML =
+          (titles.length ? aiOpts(titles, "title", "標題候選（點一下換上去）") : "") +
+          (r.desc ? `<p class="vd-pv-h">說明欄草稿</p><pre class="vd-pv-pre">${esc(r.desc)}</pre>
+            <div class="pk-actions" style="margin:8px 0 14px">
+              <button type="button" class="link-btn" data-act="desc" data-val="${esc(r.desc)}">套用到說明欄</button>
+              <button type="button" class="link-btn" style="color:var(--ink-3)" data-act="descAppend" data-val="${esc(r.desc)}">附加在後面</button>
+            </div>` : "") +
+          (r.hashtags ? `<p class="vd-pv-h">Hashtags</p><div class="pk-actions" style="margin-bottom:14px">
+              <span class="vd-chip">${esc(r.hashtags)}</span>
+              <button type="button" class="link-btn" data-act="hash" data-val="${esc(r.hashtags)}">套用</button></div>` : "") +
+          (tags.length ? `<p class="vd-pv-h">建議標籤</p><div class="pk-actions">
+              <span class="vd-chip">${esc(tags.join("、"))}</span>
+              <button type="button" class="link-btn" data-act="tags" data-val="${esc(tags.join(","))}">併入標籤欄</button></div>` : "");
+      } else {
+        const r = await aiCall(OUT_SYS, brief, OUT_SCHEMA);
+        const beats = (Array.isArray(r.beats) ? r.beats : []).filter(Boolean);
+        const beatTxt = beats.map((b, i) => `${i + 1}. ${b}`).join("\n");
+        $("#vAiResult").innerHTML =
+          (r.outline ? `<p class="vd-pv-h">一句話大綱</p><div class="vd-ai-list">
+            <button type="button" class="vd-ai-opt" data-act="outline" data-val="${esc(r.outline)}"><span>${esc(r.outline)}</span></button></div>` : "") +
+          (r.hook ? `<p class="vd-pv-h">開場鉤子</p><pre class="vd-pv-pre">${esc(r.hook)}</pre>
+            <div class="pk-actions" style="margin:8px 0 14px">
+              <button type="button" class="link-btn" data-act="script" data-val="${esc("【開場鉤子】" + r.hook)}">寫進腳本開頭</button></div>` : "") +
+          (beats.length ? `<p class="vd-pv-h">段落大綱</p><pre class="vd-pv-pre">${esc(beatTxt)}</pre>
+            <div class="pk-actions" style="margin-top:8px">
+              <button type="button" class="link-btn" data-act="scriptAppend" data-val="${esc("【段落大綱】\n" + beatTxt)}">附加到腳本</button>
+              <button type="button" class="link-btn" style="color:var(--ink-3)" data-act="todos" data-val="${esc(beats.join("\n"))}">變成製作待辦</button></div>` : "");
+      }
+      stop(); $("#vAiStatus").textContent = "點一下就套用到編輯器（記得最後按儲存）";
+    } catch (e) {
+      stop(); $("#vAiStatus").textContent = "失敗：" + e.message; toast("AI 失敗：" + e.message);
+    } finally { btn.disabled = false; }
+  });
+  $("#vAiResult").addEventListener("click", e => {
+    const b = e.target.closest("[data-act]"); if (!b) return;
+    const val = b.dataset.val || "";
+    switch (b.dataset.act) {
+      case "title": $("#vfTitle").value = val; toast("標題已換上"); break;
+      case "desc": $("#vfDesc").value = val; $("#vBlkPublish").classList.remove("closed"); toast("說明欄已套用"); break;
+      case "descAppend": {
+        const cur = $("#vfDesc").value.trim();
+        $("#vfDesc").value = cur ? cur + "\n\n" + val : val;
+        $("#vBlkPublish").classList.remove("closed"); toast("已附加到說明欄"); break;
+      }
+      case "hash": $("#vfHash").value = val; $("#vBlkPublish").classList.remove("closed"); toast("hashtag 已套用"); break;
+      case "tags": {
+        const now = $("#vfTags").value.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+        const set = new Set(now); val.split(",").map(s => s.trim()).filter(Boolean).forEach(t => set.add(t));
+        $("#vfTags").value = [...set].join(", ");
+        toast(`已併入 ${set.size - now.length} 個標籤`); break;
+      }
+      case "outline": $("#vfOutline").value = val; $("#vBlkScript").classList.remove("closed"); toast("大綱已套用"); break;
+      case "script": {
+        const cur = $("#vfScript").value.trim();
+        $("#vfScript").value = cur ? val + "\n\n" + cur : val;
+        $("#vBlkScript").classList.remove("closed"); toast("已寫進腳本開頭"); break;
+      }
+      case "scriptAppend": {
+        const cur = $("#vfScript").value.trim();
+        $("#vfScript").value = cur ? cur + "\n\n" + val : val;
+        $("#vBlkScript").classList.remove("closed"); toast("已附加到腳本"); break;
+      }
+      case "todos": {
+        let n = 0;
+        val.split("\n").map(s => s.trim()).filter(Boolean).forEach(t => {
+          if (!curTodos.some(x => x.t === t)) { curTodos.push({ t, done: false }); n++; }
+        });
+        renderTodos(); $("#vBlkTodo").classList.remove("closed"); toast(`已加入 ${n} 個待辦`); break;
+      }
+    }
+  });
+  $("#vAiPack").addEventListener("click", () => openAi("pack"));
+  $("#vAiOutline").addEventListener("click", () => openAi("outline"));
+  $("#vAiClose").addEventListener("click", closeAi);
+  $("#vAiDone").addEventListener("click", closeAi);
+
+  /* ---------- YouTube 內嵌播放（不跳站） ---------- */
+  function openPlayer(id, title) {
+    if (!id) { toast("還沒有 YouTube 連結"); return; }
+    $("#vPlayTitle").textContent = title || "影片預覽";
+    $("#vPlayBox").innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0" title="YouTube" allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture" allowfullscreen></iframe>`;
+    $("#vPlayOut").href = "https://www.youtube.com/watch?v=" + id;
+    $("#vPlayOv").classList.add("show");
+  }
+  function closePlayer() { $("#vPlayBox").innerHTML = ""; $("#vPlayOv").classList.remove("show"); }
+  $("#vPlayClose").addEventListener("click", closePlayer);
+  $("#vPlayDone").addEventListener("click", closePlayer);
+
+  // 點視窗外的暗色區＝關閉（新視窗都吃這一套）
+  [["#vPromptOv", closePreview], ["#vScrOv", closeScriptSplit], ["#vAiOv", closeAi], ["#vPlayOv", closePlayer]]
+    .forEach(([sel, fn]) => $(sel).addEventListener("click", e => { if (e.target === $(sel)) fn(); }));
+
   // ---------- 頻道統計 ----------
   function renderStatsPanel() {
     const pub = videos.filter(v => v.status === "pub");
@@ -917,16 +1510,58 @@
     toast("已匯出 CSV");
   });
 
-  // 設定
-  $("#vSetBtn").addEventListener("click", () => {
+  // 設定（含 AI 金鑰；金鑰與 Prompt 庫共用同一組 localStorage）
+  function loadAiFields() {
+    $("#vaiGem").value = gemKeys().join("\n");
+    $("#vaiModel").value = (localStorage.getItem(AI_MODEL) || "").trim();
+    $("#vaiOr").value = orKeys().join("\n");
+    const p = proxyCfg();
+    $("#vaiProxy").value = p.url; $("#vaiProxyPw").value = p.pw;
+    aiState();
+  }
+  function aiState() {
+    const g = gemKeys().length, o = orKeys().length, px = proxyCfg().url;
+    const bits = [];
+    if (px) bits.push("後端代理");
+    if (g) bits.push(`Gemini ${g} 把（${gemModel()}）`);
+    if (o) bits.push(`OpenRouter ${o} 把`);
+    $("#vAiState").textContent = bits.length ? "已設定" : "未設定";
+    $("#vaiInfo").textContent = bits.length
+      ? "目前會用：" + bits.join(" → ")
+      : "還沒有任何金鑰 — 腳本拆分鏡與 AI 文案會停用。Gemini 金鑰可在 Google AI Studio 免費申請。";
+  }
+  function saveAiFields() {
+    const split = s => s.split(/[\n,，\s]+/).map(x => x.trim()).filter(Boolean);
+    try {
+      localStorage.setItem(AI_GEM, JSON.stringify(split($("#vaiGem").value)));
+      localStorage.setItem(AI_OR, JSON.stringify(split($("#vaiOr").value)));
+      const m = $("#vaiModel").value.trim();
+      if (m) localStorage.setItem(AI_MODEL, m); else localStorage.removeItem(AI_MODEL);
+      const u = $("#vaiProxy").value.trim();
+      if (u) localStorage.setItem(AI_PURL, u); else localStorage.removeItem(AI_PURL);
+      const pw = $("#vaiProxyPw").value;
+      if (pw) localStorage.setItem(AI_PPW, pw); else localStorage.removeItem(AI_PPW);
+    } catch (e) { toast("金鑰存不進瀏覽器（空間已滿？）"); }
+    aiState();
+  }
+  function saveSettings() {
+    setCfg({ channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim() });
+    saveAiFields();
+  }
+  function openSettings(focusAi) {
     const c = cfg();
     $("#vfChannel").value = c.channel || "";
     $("#vfApiKey").value = c.apiKey || "";
     $("#vSyncInfo").textContent = "";
+    loadAiFields();
+    // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開
+    $$("#vSetOv .block").forEach((b, i) => b.classList.toggle("closed", focusAi ? i !== 1 : false));
     $("#vSetOv").classList.add("show");
-  });
-  $("#vSetClose").addEventListener("click", () => { setCfg({ channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim() }); $("#vSetOv").classList.remove("show"); });
-  $("#vSetDone").addEventListener("click", () => { setCfg({ channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim() }); $("#vSetOv").classList.remove("show"); toast("已儲存設定"); });
+    if (focusAi) setTimeout(() => $("#vaiGem").focus(), 80);
+  }
+  $("#vSetBtn").addEventListener("click", () => openSettings(false));
+  $("#vSetClose").addEventListener("click", () => { saveSettings(); $("#vSetOv").classList.remove("show"); });
+  $("#vSetDone").addEventListener("click", () => { saveSettings(); $("#vSetOv").classList.remove("show"); toast("已儲存設定"); });
   $("#vImportCh").addEventListener("click", importChannel);
   $("#vRefreshStats").addEventListener("click", refreshStats);
   $("#vExport").addEventListener("click", () => {
@@ -958,9 +1593,14 @@
   // ---------- 鍵盤 ----------
   document.addEventListener("keydown", e => {
     if (e.key === "Escape") {
+      // 由上往下關：設定可能是被「需要金鑰」從別的視窗叫出來的，所以排在前面
+      if ($("#vPlayOv").classList.contains("show")) { closePlayer(); return; }
+      if ($("#vSetOv").classList.contains("show")) { saveSettings(); $("#vSetOv").classList.remove("show"); return; }
+      if ($("#vPromptOv").classList.contains("show")) { closePreview(); return; }
+      if ($("#vAiOv").classList.contains("show")) { closeAi(); return; }
+      if ($("#vScrOv").classList.contains("show")) { closeScriptSplit(); return; }
       if ($("#vPickOv").classList.contains("show")) { $("#vPickOv").classList.remove("show"); return; }
       if ($("#vStatsOv").classList.contains("show")) { $("#vStatsOv").classList.remove("show"); return; }
-      if ($("#vSetOv").classList.contains("show")) { $("#vSetOv").classList.remove("show"); return; }
       if ($("#vEditor").classList.contains("show")) closeEditor();
       return;
     }

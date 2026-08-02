@@ -101,7 +101,7 @@
             <input id="vfUrl" type="url" placeholder="https://www.youtube.com/watch?v=…">
             <div class="pk-actions" style="margin-top:6px">
               <button type="button" class="link-btn" id="vfFetch">↻ 抓標題與縮圖</button>
-              <button type="button" class="link-btn" id="vfOpenYt" style="color:var(--ink-3)">↗ 開啟影片</button>
+              <button type="button" class="link-btn" id="vfOpenYt" style="color:var(--ink-3)">▶ 在這裡播放</button>
             </div>
             <p class="vd-note" id="vfStats"></p>
           </div>
@@ -133,6 +133,10 @@
         <div class="block-body">
           <div class="field"><label for="vfDesc">說明欄草稿</label>
             <textarea id="vfDesc" style="min-height:110px" placeholder="這集在講什麼、相關連結、追蹤資訊…"></textarea></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vAiPack">✨ AI 想標題與說明欄</button>
+            <span class="vd-sub">用大綱／腳本／系列直接產生 5 個標題、說明欄草稿與 hashtag</span>
+          </div>
           <div class="field"><label>章節 <span class="opt">時間＋標題，會自動照時間排序</span></label>
             <div class="vd-chaps" id="vChapList"></div>
             <div class="pk-actions">
@@ -157,10 +161,11 @@
         <div class="block-body">
           <div class="field"><label for="vfOutline">一句話大綱</label><input id="vfOutline" placeholder="這集要講什麼、鉤子是什麼"></div>
           <div class="field"><label for="vfScript">腳本／旁白</label>
-            <textarea id="vfScript" class="mono" style="min-height:150px" placeholder="貼腳本或逐字稿…（可到 Prompt 庫用「腳本 → 分鏡」拆鏡頭）"></textarea>
+            <textarea id="vfScript" class="mono" style="min-height:150px" placeholder="貼腳本或逐字稿…（可用下面的「腳本 → 分鏡」直接拆鏡頭）"></textarea>
           </div>
           <div class="pk-actions">
-            <button type="button" class="link-btn" id="vfToScript">🎞 拿這段腳本去 Prompt 庫拆分鏡</button>
+            <button type="button" class="link-btn" id="vfToScript">🎞 腳本 → 分鏡（在這裡直接拆）</button>
+            <button type="button" class="link-btn" id="vAiOutline" style="color:var(--ink-3)">✨ AI 寫大綱與鉤子</button>
           </div>
         </div>
       </div>
@@ -183,9 +188,12 @@
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
         </div>
         <div class="block-body">
-          <p class="hint">從 Prompt 庫挑出這支影片用到的提示詞或整組分鏡，點「開啟」會跳回庫裡那一筆。</p>
+          <p class="hint">從 Prompt 庫挑出這支影片用到的提示詞或整組分鏡。點一列就在這裡展開內容（不會跳走），可直接複製提示詞。</p>
           <div class="vd-linked" id="vLinkedList"></div>
-          <div class="pk-actions"><button type="button" class="link-btn" id="vLinkAdd">＋ 掛上 Prompt</button></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vLinkAdd">＋ 掛上 Prompt</button>
+            <button type="button" class="link-btn" id="vLinkReload" style="color:var(--ink-3)">↻ 重新讀取 Prompt 庫</button>
+          </div>
           <p class="hint" style="margin-top:10px">從掛上的 prompt 直接把內容抓進這支影片：</p>
           <div class="pk-actions">
             <button type="button" class="link-btn" id="vImpImgs">🖼 結果圖 → 縮圖候選</button>
@@ -260,6 +268,23 @@
         </div>
       </div>
       <div class="block">
+        <div class="block-head" data-toggle><span class="bt">AI 金鑰（與 Prompt 庫共用）</span><span class="bn" id="vAiState"></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">腳本拆分鏡、AI 想標題與說明欄都在這一頁直接跑，用的是跟 Prompt 庫同一組金鑰（存在這台裝置的瀏覽器，不會上傳）。在這裡填等於在 Prompt 庫也填好了。</p>
+          <div class="field"><label for="vaiGem">Gemini 金鑰 <span class="opt">一行一把，會自動輪替</span></label>
+            <textarea id="vaiGem" class="mono" style="min-height:64px" placeholder="AIza…"></textarea></div>
+          <div class="vd-grid2">
+            <div class="field"><label for="vaiModel">Gemini 模型</label><input id="vaiModel" placeholder="gemini-2.5-flash"></div>
+            <div class="field"><label for="vaiOr">OpenRouter 金鑰 <span class="opt">備援，選填</span></label><input id="vaiOr" type="password" placeholder="sk-or-…"></div>
+            <div class="field"><label for="vaiProxy">後端代理網址 <span class="opt">選填，填了優先走它</span></label><input id="vaiProxy" placeholder="https://…workers.dev/ai"></div>
+            <div class="field"><label for="vaiProxyPw">代理密碼 <span class="opt">選填</span></label><input id="vaiProxyPw" type="password"></div>
+          </div>
+          <p class="vd-note" id="vaiInfo"></p>
+        </div>
+      </div>
+      <div class="block">
         <div class="block-head" data-toggle><span class="bt">備份</span>
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
         </div>
@@ -294,6 +319,105 @@
   </div>
 </div>
 
+<!-- ---------- Prompt 內容預覽（不跳頁） ---------- -->
+<div class="overlay" id="vPromptOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:720px">
+    <div class="modal-head">
+      <h2 id="vPvTitle">Prompt</h2>
+      <button class="icon-btn" id="vPvClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="vPvBody"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="vPvPrev">‹ 上一則</button>
+      <button class="btn ghost" id="vPvNext">下一則 ›</button>
+      <span class="vd-spacer"></span>
+      <button class="btn ghost" id="vPvCopy">複製提示詞</button>
+      <button class="btn primary" id="vPvDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- 腳本 → 分鏡（在這一頁直接跑） ---------- -->
+<div class="overlay" id="vScrOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:720px">
+    <div class="modal-head">
+      <h2>腳本 → 分鏡</h2>
+      <button class="icon-btn" id="vScrClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">AI 會把旁白拆成一個個鏡頭，並寫好可以直接餵給生成模型的英文提示詞。拆完可以寫回腳本、排成章節，或整組建進 Prompt 庫變成分鏡堆疊並掛到這支影片上。</p>
+      <div class="field"><label for="vScrText">腳本／旁白</label>
+        <textarea id="vScrText" class="mono" style="min-height:130px" placeholder="貼上這一集的旁白或逐字稿…"></textarea></div>
+      <div class="vd-grid2">
+        <div class="field"><label for="vScrName">分鏡堆疊名稱 <span class="opt">選填</span></label><input id="vScrName" placeholder="留空就用 AI 給的標題"></div>
+        <div class="field"><label for="vScrStyle">視覺方向 <span class="opt">選填</span></label><input id="vScrStyle" placeholder="冷色調寫實、35mm 底片感…"></div>
+        <div class="field"><label for="vScrCount">鏡頭數</label>
+          <select id="vScrCount"><option value="">自動判斷</option><option>4</option><option>6</option><option>8</option><option>10</option><option>12</option><option>16</option></select></div>
+        <div class="field"><label for="vScrDur">每鏡秒數 <span class="opt">選填</span></label><input id="vScrDur" type="number" min="1" placeholder="5"></div>
+        <div class="field"><label for="vScrType">分鏡類型</label>
+          <select id="vScrType"><option value="video">影片動態鏡頭</option><option value="image">靜態畫面</option></select></div>
+      </div>
+      <div class="pk-actions">
+        <button type="button" class="btn primary" id="vScrGo" style="padding:9px 18px">🎬 開始拆鏡</button>
+        <span class="vd-note" id="vScrStatus"></span>
+      </div>
+      <div class="vd-shots" id="vScrResult"></div>
+    </div>
+    <div class="modal-foot" id="vScrFoot" hidden>
+      <button class="btn ghost" id="vScrToScript">寫進腳本</button>
+      <button class="btn ghost" id="vScrToChaps">排成章節</button>
+      <button class="btn ghost" id="vScrCopy">複製全部</button>
+      <button class="btn primary" id="vScrToVault">建進 Prompt 庫並掛上</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- AI 文案（標題／說明欄／大綱） ---------- -->
+<div class="overlay" id="vAiOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:680px">
+    <div class="modal-head">
+      <h2 id="vAiHead">AI 想標題與說明欄</h2>
+      <button class="icon-btn" id="vAiClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="field"><label for="vAiBrief">要 AI 特別注意什麼 <span class="opt">選填</span></label>
+        <input id="vAiBrief" placeholder="例：標題要留懸念、不要爆雷結局"></div>
+      <div class="pk-actions">
+        <button type="button" class="btn primary" id="vAiGo" style="padding:9px 18px">✨ 產生</button>
+        <span class="vd-note" id="vAiStatus"></span>
+      </div>
+      <div id="vAiResult"></div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" id="vAiDone">完成</button></div>
+  </div>
+</div>
+
+<!-- ---------- YouTube 內嵌播放（不跳站） ---------- -->
+<div class="overlay" id="vPlayOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:900px">
+    <div class="modal-head">
+      <h2 id="vPlayTitle">影片預覽</h2>
+      <button class="icon-btn" id="vPlayClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div class="vd-player" id="vPlayBox"></div>
+    </div>
+    <div class="modal-foot">
+      <a class="btn ghost" id="vPlayOut" href="#" target="_blank" rel="noopener">在 YouTube 開啟 ↗</a>
+      <button class="btn primary" id="vPlayDone">關閉</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="vToast"></div>
 
+<script src="pv-vocab.js"></script>
 <script src="video-app.js"></script>
