@@ -44,6 +44,10 @@ function keysFrom(s) {
   return (s || "").split(/[\n,]+/).map((x) => x.trim()).filter(Boolean);
 }
 
+// 隨機起點輪替：分散各把 key 的每分鐘用量。Worker 無狀態，
+// 每次請求都重新從隨機起點掃過所有 key，被限流的 key 過了那分鐘就會自動再被用到（不會永久棄用）。
+const rot = (arr) => { if (arr.length < 2) return arr.slice(); const i = Math.floor(Math.random() * arr.length); return arr.slice(i).concat(arr.slice(0, i)); };
+
 async function callGemini(key, model, sys, user, schema) {
   const parts = typeof user === "string" ? [{ text: user }] : user;
   const r = await fetch(
@@ -260,6 +264,34 @@ export default {
       return json({ ok: true, id, url: new URL(request.url).origin + "/s/" + id, stripped: payload.stripped });
     }
 
+    // ---------- Gemini 通用轉發：/gem（語意向量、圖片生成等，金鑰由後端注入）----------
+    // 前端送 {path, body?}：path 是 v1beta 底下的相對路徑（只放行 models 開頭），
+    // 有 body 就 POST、沒 body 就 GET（ListModels 探索用）。回應原樣轉回（含錯誤狀態碼），
+    // 讓前端沿用自己的 gemErr 錯誤轉譯與模型自動探索邏輯。
+    if (path.endsWith("/gem")) {
+      if (request.method !== "POST") return json({ error: "只接受 POST" }, 405);
+      let b;
+      try { b = await request.json(); } catch (e) { return json({ error: "請求格式錯誤" }, 400); }
+      const gp = String(b.path || "");
+      if (!/^models(\/[\w.-]+:\w+)?(\?[\w=&]*)?$/.test(gp)) return json({ error: "path 不合法" }, 400);
+      const keys = keysFrom(env.GEMINI_KEYS);
+      if (!keys.length) return json({ error: "後端未設定 GEMINI_KEYS" }, 500);
+      let last = null;
+      for (const k of rot(keys)) {
+        let r;
+        try {
+          r = await fetch("https://generativelanguage.googleapis.com/v1beta/" + gp, b.body !== undefined
+            ? { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": k }, body: JSON.stringify(b.body) }
+            : { headers: { "x-goog-api-key": k } });
+        } catch (e) { last = { status: 502, text: JSON.stringify({ error: { message: "後端連不上 Gemini" } }) }; continue; }
+        const text = await r.text();
+        if (r.ok) return new Response(text, { headers: { "Content-Type": "application/json", ...CORS } });
+        last = { status: r.status, text };
+        if (r.status === 400 || r.status === 404) break;   // 模型／參數問題，換金鑰也沒用 → 原樣回給前端處理
+      }
+      return new Response(last.text, { status: last.status, headers: { "Content-Type": "application/json", ...CORS } });
+    }
+
     // ---------- AI 代理 ----------
     if (request.method !== "POST") return json({ error: "只接受 POST" }, 405);
     let body;
@@ -273,9 +305,6 @@ export default {
     const orText = env.OR_TEXT_MODEL || "deepseek/deepseek-chat-v3-0324:free";
     const orVision = env.OR_VISION_MODEL || "google/gemini-2.0-flash-exp:free";
 
-    // 隨機起點輪替：分散各把 key 的每分鐘用量。Worker 無狀態，
-    // 每次請求都重新從隨機起點掃過所有 key，被限流的 key 過了那分鐘就會自動再被用到（不會永久棄用）。
-    const rot = (arr) => { if (arr.length < 2) return arr.slice(); const i = Math.floor(Math.random() * arr.length); return arr.slice(i).concat(arr.slice(0, i)); };
     let gErr = "", oErr = "";
     for (const k of rot(gKeys)) {
       try { return json(await callGemini(k, gModel, sys, user, schema)); }

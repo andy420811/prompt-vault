@@ -54,7 +54,7 @@
        整疊（pile）代表它底下所有可見成員，一次全選／全取消——所以不必為了選取把堆疊攤開，
        版面才能維持跟勾選前一模一樣。整疊上「雙擊」＝展開（兩次單擊剛好互相抵銷，選取不會殘留）。 */
     if (selectMode || e.ctrlKey || e.metaKey) {
-      if (!selectMode) { selectMode = true; $("#selectBtn").setAttribute("aria-pressed", "true"); }
+      if (!selectMode) { selectMode = true; $("#selectBtn").setAttribute("aria-pressed", "true"); $("#grid").classList.add("selecting"); }   // 沒有 render()，勾選框的 CSS 靠這個 class 才會出現
       if (e.shiftKey && selAnchor && selectRange(selAnchor, card)) { /* 範圍選取（只加不減）*/ }
       else {
         const ids = unitIds(card);

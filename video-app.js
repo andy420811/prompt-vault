@@ -1027,6 +1027,18 @@
     $$(".vd-card.dragging").forEach(el => el.classList.remove("dragging"));
     $$(".vd-col.over").forEach(el => el.classList.remove("over"));
   });
+  /* 落點用「指標的 Y 座標」算，不要靠 e.target：
+     丟在欄位裡的空白處（標頭、卡片之間的縫、底部留白、「顯示更多」按鈕）時 e.target 不是卡片，
+     舊碼一律當成「沒有落點」而把卡片排到整欄最後 —— 這就是卡片老是跑到最下面的原因。
+     現在：指標在某張卡的上半部就插在它前面；比所有卡片都低才真的放到最後。 */
+  function dropTarget(col, y) {
+    const cards = $$(".vd-card", col).filter(c => c.dataset.id !== dragId);
+    for (const c of cards) {
+      const r = c.getBoundingClientRect();
+      if (y < r.top + r.height / 2) return c;
+    }
+    return null;
+  }
   document.addEventListener("dragover", e => {
     if (!dragId) return;
     const col = e.target.closest(".vd-col"); if (!col) return;
@@ -1034,34 +1046,36 @@
     $$(".vd-col.over").forEach(el => el.classList.remove("over"));
     $$(".vd-card.drop-before").forEach(el => el.classList.remove("drop-before"));
     col.classList.add("over");
-    const over = e.target.closest(".vd-card");
-    if (over && over.dataset.id !== dragId) over.classList.add("drop-before");   // 放在這張前面
+    const over = dropTarget(col, e.clientY);
+    if (over) over.classList.add("drop-before");   // 放在這張前面（沒有＝放到最後）
   });
   document.addEventListener("drop", e => {
     if (!dragId) return;
     const col = e.target.closest(".vd-col"); if (!col) return;
     e.preventDefault();
     const v = videos.find(x => x.id === dragId);
-    const before = e.target.closest(".vd-card");
+    const before = dropTarget(col, e.clientY);
     $$(".vd-card.drop-before").forEach(el => el.classList.remove("drop-before"));
     if (v) {
       const stage = col.dataset.stage, moved = v.status !== stage;
-      // 只拖了一點點、指標還停在自己身上＝根本沒移動，維持原位（以前這裡會當成「沒有落點」
-      // 而把卡片丟到整欄最後面，在有上限的欄位裡就直接看不見了）
-      if (!moved && before && before.dataset.id === v.id) { dragId = null; return; }
       const mates = videos.filter(x => x.status === stage && x.id !== v.id).sort(colCmp(stage));
+      // 依落點重排同一欄的順序（放在 before 那張前面；沒有 before＝指標比所有卡片都低＝放到最後）
+      const at = before ? mates.findIndex(x => x.id === before.dataset.id) : mates.length;
+      const next = mates.slice();
+      next.splice(at < 0 ? next.length : at, 0, v);
+      // 位置根本沒變（拖一點點又放開、放回原本的縫）就什麼都不做：不佔掉 Ctrl+Z 那一步，也不用跳 toast
+      const cur = videos.filter(x => x.status === stage).sort(colCmp(stage));
+      if (!moved && cur.length === next.length && cur.every((x, i) => x.id === next[i].id)) { dragId = null; return; }
       snapMove([v, ...mates]);   // 這一步可以 Ctrl+Z 復原
       if (moved) {
         v.status = stage;
         if (stage === "pub" && !v.published) v.published = new Date().toISOString().slice(0, 10);
       }
-      // 依落點重排同一欄的順序（放在 before 那張前面；沒有 before＝放到最後）
-      const at = before && before.dataset.id !== v.id ? mates.findIndex(x => x.id === before.dataset.id) : mates.length;
-      mates.splice(at < 0 ? mates.length : at, 0, v);
-      mates.forEach((x, i) => { x.order = i; });
+      const seq = next;
+      seq.forEach((x, i) => { x.order = i; });
       v.edited = Date.now();
       // 落點超過這一欄的顯示上限就把上限撐開，別讓卡片掉到「顯示更多」後面像是不見了
-      const idx = mates.indexOf(v);
+      const idx = seq.indexOf(v);
       if (idx >= capOf(stage)) colShow[stage] = idx + 6;
       save(); render();
       const el = $(`.vd-card[data-id="${v.id}"]`);

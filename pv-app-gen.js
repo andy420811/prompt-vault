@@ -47,12 +47,27 @@
     if (!blob.size || !/^image\//.test(blob.type)) throw new Error("回傳的不是圖片");
     return blob;
   }
-  // Gemini 圖像：沿用 gemKeys() 的多金鑰輪替，回傳 base64 → Blob
+  // Gemini 圖像：有後端代理走 /gem（金鑰由後端注入＋輪替），否則沿用 gemKeys() 的多金鑰輪替。回傳 base64 → Blob
   async function genGemini(p) {
-    const keys = gemKeys();
-    if (!keys.length) throw new Error("未設定 Gemini 金鑰");
     const c = genCfg(), sz = genSize(p.params && p.params.ar);
     const ask = genPromptOf(p) + `\n\n（輸出一張圖，長寬比 ${sz.w}:${sz.h}）`;
+    const body = {
+      contents: [{ role: "user", parts: [{ text: ask }] }],
+      generationConfig: { responseModalities: ["IMAGE"] }
+    };
+    const parse = async resp => {
+      if (!resp.ok) throw await gemErr(resp, "Gemini 圖像");
+      const j = await resp.json();
+      const part = (j?.candidates?.[0]?.content?.parts || []).find(x => x.inlineData && x.inlineData.data);
+      if (!part) throw new Error("回應中沒有圖片（模型可能不支援出圖）");
+      const bin = atob(part.inlineData.data);
+      const buf = new Uint8Array(bin.length);
+      for (let k = 0; k < bin.length; k++) buf[k] = bin.charCodeAt(k);
+      return new Blob([buf], { type: part.inlineData.mimeType || "image/png" });
+    };
+    if (proxyCfg().url) return parse(await proxyGem("models/" + c.gmodel + ":generateContent", body));
+    const keys = gemKeys();
+    if (!keys.length) throw new Error("未設定 Gemini 金鑰（或到 ⚙ 設定填後端代理）");
     let lastErr;
     for (let i = 0; i < keys.length; i++) {
       try {
@@ -61,20 +76,10 @@
           resp = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + c.gmodel + ":generateContent", {
             method: "POST",
             headers: { "Content-Type": "application/json", "x-goog-api-key": keys[i] },
-            body: JSON.stringify({
-              contents: [{ role: "user", parts: [{ text: ask }] }],
-              generationConfig: { responseModalities: ["IMAGE"] }
-            })
+            body: JSON.stringify(body)
           });
         } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
-        if (!resp.ok) throw await gemErr(resp, "Gemini 圖像");
-        const j = await resp.json();
-        const part = (j?.candidates?.[0]?.content?.parts || []).find(x => x.inlineData && x.inlineData.data);
-        if (!part) throw new Error("回應中沒有圖片（模型可能不支援出圖）");
-        const bin = atob(part.inlineData.data);
-        const buf = new Uint8Array(bin.length);
-        for (let k = 0; k < bin.length; k++) buf[k] = bin.charCodeAt(k);
-        return new Blob([buf], { type: part.inlineData.mimeType || "image/png" });
+        return await parse(resp);
       } catch (e) { lastErr = e; }   // 這組金鑰失敗 → 換下一組
     }
     throw lastErr;
@@ -169,7 +174,8 @@
     $("#genProv").value = c.prov; $("#genPModel").value = c.pmodel;
     $("#genPToken").value = c.ptoken; $("#genGModel").value = c.gmodel;
     $("#genCfgStatus").textContent = c.prov === "gemini"
-      ? (gemKeys().length ? "目前：Gemini 圖像" : "目前：Gemini 圖像 ⚠ 尚未填 Gemini 金鑰")
+      ? (proxyCfg().url ? "目前：Gemini 圖像（走後端代理）"
+        : gemKeys().length ? "目前：Gemini 圖像" : "目前：Gemini 圖像 ⚠ 尚未填 Gemini 金鑰或後端代理")
       : (c.ptoken ? "目前：Pollinations" : "目前：Pollinations ⚠ 尚未填 token，會被擋下");
   }
   $("#genCfgSave").addEventListener("click", () => {

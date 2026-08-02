@@ -300,6 +300,21 @@
     if (!j) throw new Error("代理空回應");
     return j;
   }
+  // 後端代理的 Gemini 通用轉發（/gem）：語意向量、圖片生成走這裡，金鑰由後端注入。
+  // 回傳原始 Response（含 Gemini 的錯誤狀態碼），呼叫端沿用 gemErr 轉譯錯誤。sem／gen 共用。
+  async function proxyGem(path, body) {
+    const { url, pw } = proxyCfg();
+    let resp;
+    try {
+      resp = await fetch(url.replace(/\/+$/, "") + "/gem", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Proxy-Password": pw },
+        body: JSON.stringify(body === undefined ? { path } : { path, body })
+      });
+    } catch (e) { throw netErr(); }
+    if (resp.status === 401) throw new Error("代理密碼錯誤");
+    return resp;
+  }
   // unified dispatcher: 代理優先 → 否則 Gemini → OpenRouter
   async function aiCall(sys, user, schema) {
     if (proxyCfg().url) return proxyCall(sys, user, schema);

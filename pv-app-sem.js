@@ -52,11 +52,15 @@
   }
   async function gapi(path, key, body) {
     let resp;
-    try {
-      resp = await fetch(GAPI + path, body
-        ? { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body) }
-        : { headers: { "x-goog-api-key": key } });
-    } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
+    if (proxyCfg().url) {
+      resp = await proxyGem(path, body);   // 走後端代理：金鑰由後端注入，key 參數不用
+    } else {
+      try {
+        resp = await fetch(GAPI + path, body
+          ? { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body) }
+          : { headers: { "x-goog-api-key": key } });
+      } catch (e) { throw new Error(IS_SANDBOX ? "線上版無法連外" : "無法連線 Gemini"); }
+    }
     if (!resp.ok) throw await gemErr(resp, "Gemini 向量");
     return resp.json();
   }
@@ -94,8 +98,9 @@
     return out;
   }
   async function embedBatch(texts) {
-    const keys = gemKeys();
-    if (!keys.length) throw new Error("語意功能需要 Gemini 金鑰（到 ⚙ 設定填入）");
+    // 有後端代理＝輪替在後端做，前端只跑一輪（放一個佔位 key，gapi 不會用到它）
+    const keys = proxyCfg().url ? [""] : gemKeys();
+    if (!keys.length) throw new Error("語意功能需要 Gemini 金鑰或後端代理（到 ⚙ 設定填入）");
     let cfg = semCfg(), lastErr, redone = false;
     for (;;) {
       let modelBad = false;
@@ -135,7 +140,7 @@
     if (!vecsLoaded) await vecsLoad();
     const todo = semStale();
     if (!todo.length) { if (!silent) toast("語意索引已是最新"); return true; }
-    if (!gemKeys().length) { if (!silent) toast("語意功能需要 Gemini 金鑰（到 ⚙ 設定填入）"); return false; }
+    if (!gemKeys().length && !proxyCfg().url) { if (!silent) toast("語意功能需要 Gemini 金鑰或後端代理（到 ⚙ 設定填入）"); return false; }
     semIndexing = true; semCancel = false;
     bgJobShow(`建立語意索引（${todo.length} 則）`, todo.length, () => { semCancel = true; });
     let done = 0, fail = 0;
