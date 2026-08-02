@@ -155,6 +155,17 @@
       if (imagesHydrated) open(); else setTimeout(open, 400);
       return;
     }
+    if (h.startsWith("#sb=")) {   // 影片製作台：掛上的分鏡堆疊 → 直接開故事板
+      const seg = decodeURIComponent(h.slice(4));
+      const has = () => data.some(x => (x.stack || "") === seg || (x.stack || "").indexOf(seg + "/") === 0);
+      const go = () => {
+        if (typeof openStoryboard === "function" && has()) openStoryboard(seg);
+        else toast("找不到這組分鏡（可能已刪除）");
+        history.replaceState(null, "", location.pathname + location.search);
+      };
+      if (imagesHydrated) go(); else setTimeout(go, 400);
+      return;
+    }
     if (h === "#script") {
       let s = ""; try { s = sessionStorage.getItem("promptvault.script") || ""; } catch (e) {}
       $("#scriptBtn").click();
@@ -164,3 +175,60 @@
   }
   handleHashLink();
   window.addEventListener("hashchange", handleHashLink);
+
+  /* ---------- 三區串連：Prompt 庫 ↔ 影片製作台 ↔ 畫布 ----------
+     編輯器頂部顯示「這一則被哪些影片用到」與「在畫布上的哪一顆」，點了直接跳過去。
+     影片資料是唯讀取用（IDB key "videos"，退回 localStorage `videodesk.v1` 去圖鏡像）。 */
+  let vidCache = null;
+  async function vidsForLink() {
+    if (vidCache) return vidCache;
+    let list = await idbGet("videos");
+    if (!Array.isArray(list)) {
+      try { const ls = JSON.parse(localStorage.getItem("videodesk.v1")); if (Array.isArray(ls)) list = ls; } catch (e) {}
+    }
+    vidCache = Array.isArray(list) ? list : [];
+    setTimeout(() => { vidCache = null; }, 15000);   // 15 秒後失效，另一頁改過也不會一直拿舊的
+    return vidCache;
+  }
+  function canvasNodeFor(id) {
+    try {
+      const st = JSON.parse(localStorage.getItem("promptvault.canvas"));
+      if (!st || !Array.isArray(st.projects)) return null;
+      for (const p of st.projects) {
+        const n = (p.nodes || []).find(x => x.ref === id || x.vref === id);
+        if (n) return { node: n, proj: p };
+      }
+    } catch (e) {}
+    return null;
+  }
+  async function renderUsedIn(p) {
+    const box = $("#usedIn");
+    if (!box) return;
+    if (!p || !p.id) { box.hidden = true; box.innerHTML = ""; return; }
+    const vids = await vidsForLink();
+    const used = vids.filter(v => Array.isArray(v.links) && v.links.includes(p.id));
+    const onCanvas = canvasNodeFor(p.id);
+    if (!used.length && !onCanvas) { box.hidden = true; box.innerHTML = ""; return; }
+    box.innerHTML =
+      (used.length ? `<span class="ul">🎬 用在</span>` + used.map(v =>
+        `<button type="button" data-vgo="${esc(v.id)}" title="到影片製作台開這一支">${esc(v.title || "未命名影片")}</button>`).join("") : "") +
+      (onCanvas ? `<span class="ul">${used.length ? "·" : ""} 🧩</span>
+        <button type="button" data-cgo="${esc(onCanvas.node.id)}" title="在畫布上顯示這一顆">在畫布上（${esc(onCanvas.proj.name || "專案")}）</button>` : "");
+    box.hidden = false;
+  }
+  $("#usedIn") && $("#usedIn").addEventListener("click", e => {
+    const v = e.target.closest("[data-vgo]");
+    if (v) { location.href = "video.html#v=" + encodeURIComponent(v.dataset.vgo); return; }
+    const c = e.target.closest("[data-cgo]");
+    if (c) {
+      if (!window.PVCanvas) { toast("畫布模組未載入"); return; }
+      closeEditor(); window.PVCanvas.open(c.dataset.cgo);
+    }
+  });
+  // 包一層 openEditor：開哪一則就查哪一則的關聯（最後載入，安全）
+  const _openEditorLink = openEditor;
+  openEditor = function (p) {
+    const r = _openEditorLink.apply(this, arguments);
+    renderUsedIn(p);
+    return r;
+  };

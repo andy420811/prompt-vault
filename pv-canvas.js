@@ -1257,7 +1257,9 @@ window.PVCanvas = (function () {
   let pendingFocus = "";
   function focusNode(key) {
     if (!key || !cur || !ui) return;
-    const n = cur.nodes.find(x => x.id === key) || cur.nodes.find(x => x.vref === key);
+    const n = cur.nodes.find(x => x.id === key)
+      || cur.nodes.find(x => x.vref === key)   // 影片 id
+      || cur.nodes.find(x => x.ref === key);   // prompt 記錄 id
     if (!n) return;
     const vis = visibleId(n.id, foldMap());
     centerOn(vis);

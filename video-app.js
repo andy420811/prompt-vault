@@ -426,7 +426,20 @@
         <button type="button" class="del" data-unlink="${id}" title="移除">✕</button>
       </div>`;
     }).join("") || `<p class="hint">尚未掛任何 prompt。</p>`;
+    $("#vLinkBoard").hidden = !linkedStack();
   }
+  // 掛上的 prompt 若同屬一個堆疊，就能一鍵開 Prompt 庫的故事板
+  function linkedStack() {
+    const stacks = curLinks.map(id => { const p = promptById(id); return p && p.stack ? p.stack : ""; }).filter(Boolean);
+    if (!stacks.length) return "";
+    const first = stacks[0];
+    return stacks.every(s => s === first) ? first : "";
+  }
+  $("#vLinkBoard").addEventListener("click", () => {
+    const s = linkedStack();
+    if (!s) { toast("這些 prompt 不在同一組分鏡裡"); return; }
+    location.href = "prompt-vault.html#sb=" + encodeURIComponent(s);
+  });
   // 重新從 Prompt 庫讀一次（在另一個分頁改過庫裡的資料時用）
   async function reloadPrompts() {
     const d = await idbGet("data");
@@ -1191,7 +1204,8 @@
         <button type="button" class="link-btn" data-pvact="prompt">複製提示詞</button>
         <button type="button" class="link-btn" data-pvact="all">複製整份</button>
         ${imgs.length ? `<button type="button" class="link-btn" data-pvact="thumb">🖼 加進縮圖候選</button>` : ""}
-        <a class="link-btn" style="color:var(--ink-3)" href="prompt-vault.html#p=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">在 Prompt 庫編輯 ↗</a>
+        ${p.stack ? `<a class="link-btn" href="prompt-vault.html#sb=${encodeURIComponent(p.stack)}">🎬 開這組的故事板 ↗</a>` : ""}
+        <a class="link-btn" style="color:var(--ink-3)" href="prompt-vault.html#p=${encodeURIComponent(p.id)}">在 Prompt 庫編輯 ↗</a>
       </div>`;
   }
   function pvStep(d) {
