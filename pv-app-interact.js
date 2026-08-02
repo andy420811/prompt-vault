@@ -34,22 +34,9 @@
       return;
     }
     const card = e.target.closest(".card"); if (!card) return;
-    // 電腦版：按住 Ctrl／⌘ 點卡片＝直接進入勾選並選取（免先按「選取」）
-    if ((e.ctrlKey || e.metaKey) && !card.classList.contains("pile")) {
-      if (!selectMode) { selectMode = true; $("#selectBtn").setAttribute("aria-pressed", "true"); }
-      const sid = card.dataset.id;
-      if (selected.has(sid)) selected.delete(sid); else selected.add(sid);
-      render(); return;
-    }
-    // 勾選模式：點卡片＝選取（堆疊本身不可選）
-    if (selectMode && !card.classList.contains("pile")) {
-      const sid = card.dataset.id;
-      if (selected.has(sid)) selected.delete(sid); else selected.add(sid);
-      card.classList.toggle("sel", selected.has(sid));
-      updateSelectBar(); return;
-    }
-    // 整疊：先攔封面輪播（‹ › / 設為封面），其餘點擊 → 展開，並把畫面捲到該堆疊節點
-    if (card.classList.contains("pile")) {
+    const isPile = card.classList.contains("pile");
+    // 整疊上的封面輪播（‹ ›）／設封面／故事板：勾選模式下也要照常運作，所以先攔
+    if (isPile) {
       const pa = e.target.closest("[data-act]")?.dataset.act;
       if (pa === "pileprev" || pa === "pilenext") { clearTimeout(stackClickT); navPile(card, pa === "pilenext" ? 1 : -1); return; }
       if (pa === "storyboard") { clearTimeout(stackClickT); openStoryboard(card.dataset.stack); return; }
@@ -61,6 +48,24 @@
         if (i >= 0 && covers[i]) { stackCovers[sg] = { id: covers[i].id, idx: covers[i].idx }; saveStackCovers(); save(); render(); toast("已設為堆疊封面"); }
         return;
       }
+    }
+    /* ---------- 多選 ----------
+       Ctrl／⌘ 點＝加減選（不在勾選模式會自動進入）、Shift 點＝從上一個點過的選到這裡。
+       整疊（pile）代表它底下所有可見成員，一次全選／全取消——所以不必為了選取把堆疊攤開，
+       版面才能維持跟勾選前一模一樣。整疊上「雙擊」＝展開（兩次單擊剛好互相抵銷，選取不會殘留）。 */
+    if (selectMode || e.ctrlKey || e.metaKey) {
+      if (!selectMode) { selectMode = true; $("#selectBtn").setAttribute("aria-pressed", "true"); }
+      if (e.shiftKey && selAnchor && selectRange(selAnchor, card)) { /* 範圍選取（只加不減）*/ }
+      else {
+        const ids = unitIds(card);
+        const on = !ids.every(id => selected.has(id));   // 有沒選到的＝這次補齊，全都選了＝取消
+        ids.forEach(id => on ? selected.add(id) : selected.delete(id));
+        selAnchor = unitKey(card);
+      }
+      paintSelection(); updateSelectBar(); return;
+    }
+    // 整疊：點擊 → 展開，並把畫面捲到該堆疊節點
+    if (isPile) {
       const seg = card.dataset.seg, pfx = card.dataset.stack; clearTimeout(stackClickT); stackClickT = setTimeout(() => { expandedStacks.add(seg); curStack = pfx; pendingScrollSeg = seg; render(); }, 250); return;   // curStack：點開＝成為新增時的落點
     }
     const id = card.dataset.id;
@@ -215,8 +220,15 @@
       e.preventDefault(); e.shiftKey ? redo() : undo(); return;
     }
     if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) { if (editing) return; e.preventDefault(); redo(); return; }
+    // Ctrl／⌘+A＝把目前篩選出來的全部選起來（沒在勾選模式會自動進入）
+    if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A")) {
+      if (editing || document.querySelector(".overlay.show") || !lastList.length) return;
+      e.preventDefault(); selectAllVisible(); return;
+    }
     if (e.ctrlKey || e.metaKey || e.altKey) return;   // 以下為單鍵快捷，需排除組合鍵
     if (editing) return;
+    // Esc＝離開勾選模式（有彈窗開著時交給彈窗自己處理）
+    if (e.key === "Escape" && selectMode && !document.querySelector(".overlay.show")) { e.preventDefault(); exitSelect(); return; }
     if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
     else if (e.key === "n" || e.key === "N") { if (!document.querySelector(".overlay.show")) { e.preventDefault(); openEditor(); } }
   });
@@ -228,6 +240,37 @@
   $("#densityBtn").addEventListener("click", () => {
     cardMode = cardMode === "list" ? "card" : "list";
     try { localStorage.setItem("promptvault.cardmode", cardMode); } catch (e) {}
+    render();
+  });
+  /* ---------- 多選的輔助 ----------
+     「單位」＝畫面上看得到的一格：單張卡片，或一整疊（代表它底下所有可見成員）。
+     Shift 範圍選取以 #grid 裡的實際排列順序為準，看到什麼順序就選什麼順序。 */
+  let selAnchor = "";   // 上一個點過的單位（"c:<id>" 或 "p:<stack>"）
+  const unitKey = el => el.classList.contains("pile") ? "p:" + (el.dataset.stack || "") : "c:" + (el.dataset.id || "");
+  const unitIds = el => el.classList.contains("pile")
+    ? itemsUnder(el.dataset.stack || "", lastList).map(p => p.id)
+    : [el.dataset.id];
+  function selectRange(fromKey, toEl) {
+    const units = $$("#grid .card");
+    const a = units.findIndex(el => unitKey(el) === fromKey), b = units.indexOf(toEl);
+    if (a < 0 || b < 0) return false;
+    const [s, t] = a <= b ? [a, b] : [b, a];
+    units.slice(s, t + 1).forEach(el => unitIds(el).forEach(id => selected.add(id)));
+    return true;
+  }
+  function selectAllVisible() {
+    if (!selectMode) { selectMode = true; $("#selectBtn").setAttribute("aria-pressed", "true"); }
+    lastList.forEach(p => selected.add(p.id));
+    selAnchor = "";
+    render();
+    toast(`已選取 ${selected.size} 件（目前篩選出來的全部）`);
+  }
+  // 勾選模式下雙擊整疊＝展開它（兩次單擊的選取剛好一加一減，不會留下選取殘留）
+  $("#grid").addEventListener("dblclick", e => {
+    if (!selectMode) return;
+    const pile = e.target.closest(".card.pile"); if (!pile) return;
+    e.preventDefault(); clearTimeout(stackClickT);
+    expandedStacks.add(pile.dataset.seg); curStack = pile.dataset.stack; pendingScrollSeg = pile.dataset.seg;
     render();
   });
   // ---------- 勾選 → 堆疊同系列 ----------
@@ -243,11 +286,11 @@
     ["sbTag", "sbFav", "sbExport", "sbDelete"].forEach(id => { $("#" + id).disabled = n < 1; });
   }
   const selectedRecords = () => [...selected].map(id => data.find(x => x.id === id)).filter(Boolean);
-  function exitSelect() { selectMode = false; selected.clear(); $("#selectBtn").setAttribute("aria-pressed", "false"); render(); }
+  function exitSelect() { selectMode = false; selected.clear(); selAnchor = ""; $("#selectBtn").setAttribute("aria-pressed", "false"); render(); }
   $("#selectBtn").addEventListener("click", () => {
-    selectMode = !selectMode; selected.clear();
+    selectMode = !selectMode; selected.clear(); selAnchor = "";
     $("#selectBtn").setAttribute("aria-pressed", selectMode);
-    if (selectMode) toast("勾選要堆疊的同系列作品，再按下方「堆疊」");
+    if (selectMode) toast("點卡片選取・Shift 點＝選一整段・Ctrl+A 全選・點整疊＝整組一起選（雙擊展開）");
     render();
   });
   // 取選取項目的共同堆疊路徑前綴（都在同一疊內→回傳該疊，讓新堆疊巢狀在其中；否則回空＝頂層）

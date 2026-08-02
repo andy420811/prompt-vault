@@ -64,8 +64,8 @@
     grid.classList.toggle("list", listMode && !sectioned);
     grid.classList.toggle("masonry", !listMode && !sectioned);   // 縮圖模式（非分區）用瀑布流
     grid.classList.toggle("selecting", selectMode);
-    // 勾選模式下平鋪全部（附勾選框）；一般模式下同系列堆疊收合
-    const units = seq => selectMode ? seq.map(itemHTML).join("") : renderUnits(seq, itemHTML, listMode);
+    // 勾選模式的排列跟平常完全一樣（堆疊維持收合／展開狀態）——以前會整個攤平，害使用者一按選取畫面就大跳
+    const units = seq => renderUnits(seq, itemHTML, listMode);
     if (sectioned) {
       grid.classList.add("sectioned");
       grid.innerHTML = sectionsHTML(list, itemHTML, listMode);
@@ -73,9 +73,9 @@
       grid.classList.remove("sectioned");
       grid.innerHTML = units(list);
     }
-    if (selectMode) $$("#grid .card").forEach(c => c.classList.toggle("sel", selected.has(c.dataset.id)));
+    if (selectMode) paintSelection();
     // 開啟堆疊時：不在展開堆疊子樹內的卡片／其他未開啟的堆疊都淡化，聚焦目前這疊
-    if (!selectMode && expandedStacks.size) {
+    if (expandedStacks.size) {
       $$("#grid .card").forEach(c => {
         let inFocus;
         if (c.classList.contains("pile")) {
@@ -101,6 +101,30 @@
       $$("#grid img").forEach(img => { if (!img.complete) { img.addEventListener("load", scheduleMasonry, { once: true }); img.addEventListener("error", scheduleMasonry, { once: true }); } });
     }
     updateSelectBar();
+  }
+  /* ---------- 勾選狀態上色 ----------
+     整疊（.pile）沒有 data-id，代表的是它底下所有可見成員：全選＝.sel、只選到一部分＝.partial。
+     勾選模式的排列與平常一致，所以這裡要處理「疊起來的」情況，不能只看單張卡。 */
+  const pileMemberIds = prefix => itemsUnder(prefix, lastList).map(p => p.id);
+  function paintSelection() {
+    $$("#grid .card").forEach(c => {
+      if (c.classList.contains("pile")) {
+        const ids = pileMemberIds(c.dataset.stack || "");
+        const on = ids.length && ids.every(id => selected.has(id));
+        const some = !on && ids.some(id => selected.has(id));
+        c.classList.toggle("sel", !!on);
+        c.classList.toggle("partial", !!some);
+      } else {
+        c.classList.toggle("sel", selected.has(c.dataset.id));
+      }
+    });
+    // 展開中的堆疊標頭也標一下：底下全選才亮
+    $$("#grid .stack-head").forEach(h => {
+      const ids = pileMemberIds(h.dataset.stack || "");
+      const on = ids.length && ids.every(id => selected.has(id));
+      h.classList.toggle("sel", !!on);
+      h.classList.toggle("partial", !on && ids.some(id => selected.has(id)));
+    });
   }
   // ---------- 瀑布流版面（grid-row span） ----------
   const MASONRY_GAP = 18;
@@ -330,7 +354,7 @@
           <span class="grp-count">${items.length}</span>
           <svg class="grp-chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
         </div>
-        <div class="grid${listMode ? " list" : " masonry"}">${selectMode ? items.map(itemHTML).join("") : renderUnits(items, itemHTML, listMode)}</div>
+        <div class="grid${listMode ? " list" : " masonry"}">${renderUnits(items, itemHTML, listMode)}</div>
       </section>`;
     }).join("");
   }
