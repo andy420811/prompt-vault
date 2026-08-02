@@ -353,7 +353,15 @@
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
         </div>
         <div class="block-body">
-          <p class="hint">影片資料存在這台裝置（IndexedDB），跟 Prompt 庫分開。換裝置請用匯出／匯入。</p>
+          <p class="hint">影片資料存在這台裝置（IndexedDB）。設定好上面的「後端代理」並在 Worker 綁定 KV，就能跟 Prompt 庫共用同一個雲端空間同步。</p>
+          <div class="pk-actions">
+            <button type="button" class="btn ghost" id="vCloudPush" style="padding:7px 14px">⬆ 備份到雲端</button>
+            <button type="button" class="btn ghost" id="vCloudPull" style="padding:7px 14px">⬇ 從雲端還原</button>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);cursor:pointer">
+            <input type="checkbox" id="vAutoSync" style="width:16px;height:16px"> 自動同步（開啟時拉取、存檔後自動上傳）
+          </label>
+          <p class="vd-note" id="vCloudInfo"></p>
           <div class="pk-actions">
             <button type="button" class="link-btn" id="vExport">⬇ 匯出 JSON</button>
             <button type="button" class="link-btn" id="vImport">⬆ 匯入 JSON</button>

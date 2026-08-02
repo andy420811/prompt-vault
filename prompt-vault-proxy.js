@@ -211,9 +211,27 @@ export default {
       if (request.method === "POST") {
         let b;
         try { b = await request.json(); } catch (e) { return json({ error: "請求格式錯誤" }, 400); }
-        if (!Array.isArray(b.data)) return json({ error: "data 必須是陣列" }, 400);
-        await env.VAULT.put("vault", JSON.stringify({ data: b.data, updated: b.updated || Date.now() }));
-        return json({ ok: true, count: b.data.length });
+        if (b.data !== undefined && !Array.isArray(b.data)) return json({ error: "data 必須是陣列" }, 400);
+        if (b.videos !== undefined && !Array.isArray(b.videos)) return json({ error: "videos 必須是陣列" }, 400);
+        if (b.data === undefined && b.videos === undefined) return json({ error: "至少要送 data 或 videos" }, 400);
+        /* 可同步的區塊：有送才覆蓋，沒送就保留雲端原本的
+           —— Prompt 庫送 data 那一組、影片製作台只送 videos，兩邊不會互相清掉。 */
+        const SECTIONS = ["data", "stackNames", "stackCovers", "railFolders", "smart", "shares", "canvas", "assets", "videos"];
+        let old = {};
+        try { const s = await env.VAULT.get("vault"); if (s) old = JSON.parse(s); } catch (e) {}
+        const out = {};
+        SECTIONS.forEach(k => {
+          if (b[k] !== undefined) out[k] = b[k];
+          else if (old[k] !== undefined) out[k] = old[k];
+        });
+        out.updated = b.data !== undefined ? (b.updated || Date.now()) : (old.updated || 0);
+        out.vupdated = b.videos !== undefined ? (b.vupdated || Date.now()) : (old.vupdated || 0);
+        await env.VAULT.put("vault", JSON.stringify(out));
+        return json({
+          ok: true,
+          count: Array.isArray(out.data) ? out.data.length : 0,
+          videos: Array.isArray(out.videos) ? out.videos.length : 0
+        });
       }
       return json({ error: "只接受 GET/POST" }, 405);
     }

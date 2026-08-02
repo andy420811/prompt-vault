@@ -36,21 +36,42 @@
     const auto = localStorage.getItem("promptvault.autosync") === "1";
     el.textContent = (auto ? "自動同步：開。" : "自動同步：關。") + (at ? " 上次同步 " + new Date(at).toLocaleString() : " 尚未同步過。");
   }
+  /* 上雲端的內容：作品本體 ＋ 堆疊名稱／封面／左側資料夾／智慧集合／分享連結／畫布／資產庫。
+     不上雲端的：API 金鑰、回收站、語意向量（可重建）、各裝置自己的顯示偏好。
+     影片製作台的資料由 video.html 自己推（同一包的 videos 區塊），這裡只負責拉下來。 */
+  const lsJSON = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? d : v; } catch (e) { return d; } };
+  const tryGet = fn => { try { return fn(); } catch (e) { return undefined; } };
+  async function cloudBundle() {
+    let ass = tryGet(() => assets);
+    if (!Array.isArray(ass) || !ass.length) ass = (await idbGet("assets")) || ass || [];
+    return {
+      data,
+      updated: +localStorage.getItem("promptvault.updated") || Date.now(),
+      stackNames, stackCovers,
+      railFolders: [...railFolders],
+      smart: tryGet(() => smarts) || [],
+      shares: lsJSON("promptvault.shares", []),
+      canvas: lsJSON("promptvault.canvas", null),
+      assets: Array.isArray(ass) ? ass : []
+    };
+  }
   async function cloudPush(silent) {
     const base = cloudBase(); if (!base) { if (!silent) toast("尚未設定後端代理"); return; }
     const { pw } = proxyCfg();
-    const updated = +localStorage.getItem("promptvault.updated") || Date.now();
     try {
+      const bundle = await cloudBundle();
+      const body = JSON.stringify(bundle);
+      if (body.length > 20e6 && !silent) toast("提醒：這包超過 20MB，雲端可能會拒絕（結果圖佔最多空間）");
       const r = await fetch(base, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-Proxy-Password": pw },
-        body: JSON.stringify({ data, updated })
+        body
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
       localStorage.setItem("promptvault.cloudat", String(Date.now()));
       updateCloudStatus();
-      if (!silent) toast(`已備份到雲端（${data.length} 則）`);
+      if (!silent) toast(`已備份到雲端（${data.length} 則作品，含堆疊、畫布、資產庫）`);
     } catch (e) { if (!silent) toast("備份失敗：" + e.message); }
   }
   async function cloudPull(manual) {
@@ -60,18 +81,54 @@
       const r = await fetch(base, { headers: { "X-Proxy-Password": pw } });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
-      if (!j || !Array.isArray(j.data)) { if (manual) toast("雲端還沒有資料，先按「備份到雲端」一次"); return; }
+      if (!j) { if (manual) toast("雲端沒有回應內容"); return; }
+      // 影片製作台的資料是獨立時間戳，跟作品分開判斷（這一頁只寫回本機，不改雲端）
+      const vGot = await pullVideos(j);
+      if (!Array.isArray(j.data)) {
+        if (manual) toast(vGot ? `已同步 ${vGot} 支影片企劃（雲端還沒有作品資料）` : "雲端還沒有資料，先按「備份到雲端」一次");
+        return;
+      }
       const localU = +localStorage.getItem("promptvault.updated") || 0;
       if (!manual && (j.updated || 0) <= localU) { updateCloudStatus(); return; }  // 自動模式：本機較新就不覆蓋
       data = j.data.map(normalize);
       imagesHydrated = true;   // 雲端資料為完整含圖
       persistData();
       localStorage.setItem("promptvault.updated", String(j.updated || Date.now()));
+      applyExtras(j);          // 堆疊名稱／封面／資料夾／智慧集合／分享／畫布／資產庫
       undoStack.length = 0; redoStack.length = 0; resetUndoBaseline();   // 雲端整包覆蓋後清掉復原/重做歷史
+      ensureNames(); syncGroups();
       render(); refreshUndoRedo();
       updateCloudStatus();
-      toast(`已從雲端載入 ${data.length} 則`);
+      toast(`已從雲端載入 ${data.length} 則${vGot ? "，另含 " + vGot + " 支影片企劃" : ""}`);
     } catch (e) { if (manual) toast("載入失敗：" + e.message); }
+  }
+  // 把雲端那包的附加區塊寫回本機（只在「確定要吃雲端的作品資料」時才呼叫，避免蓋掉本機較新的整理）
+  function applyExtras(j) {
+    if (j.stackNames && typeof j.stackNames === "object") { stackNames = j.stackNames; saveStackNames(); }
+    if (j.stackCovers && typeof j.stackCovers === "object") { stackCovers = j.stackCovers; saveStackCovers(); }
+    if (Array.isArray(j.railFolders)) {
+      railFolders.clear(); j.railFolders.forEach(s => { if (s) railFolders.add(s); }); saveRailFolders();
+    }
+    if (Array.isArray(j.smart)) {
+      try { localStorage.setItem("promptvault.smart", JSON.stringify(j.smart)); } catch (e) {}
+      tryGet(() => { smarts = j.smart; });
+      tryGet(() => renderSmarts());
+    }
+    if (Array.isArray(j.shares)) { try { localStorage.setItem("promptvault.shares", JSON.stringify(j.shares)); } catch (e) {} }
+    if (j.canvas && Array.isArray(j.canvas.projects)) { try { localStorage.setItem("promptvault.canvas", JSON.stringify(j.canvas)); } catch (e) {} }
+    if (Array.isArray(j.assets)) { idbSet("assets", j.assets); tryGet(() => { assets = j.assets; }); }
+  }
+  // 影片製作台的資料：這一頁只負責「拉下來寫進本機」，推送由 video.html 自己做
+  async function pullVideos(j) {
+    if (!Array.isArray(j.videos)) return 0;
+    const localV = +localStorage.getItem("videodesk.updated") || 0;
+    if ((j.vupdated || 0) <= localV) return 0;
+    await idbSet("videos", j.videos);
+    try {
+      localStorage.setItem("videodesk.v1", JSON.stringify(j.videos.map(v => Object.assign({}, v, { thumbs: [] }))));
+      localStorage.setItem("videodesk.updated", String(j.vupdated || Date.now()));
+    } catch (e) {}
+    return j.videos.length;
   }
   $("#cloudPushBtn").addEventListener("click", () => cloudPush(false));
   $("#cloudPullBtn").addEventListener("click", () => {

@@ -57,7 +57,11 @@
   }
   function save() {
     // localStorage 只放去圖輕量版當備援；完整（含縮圖 dataURI）進 IndexedDB
-    try { localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [] })))); } catch (e) {}
+    try {
+      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [] }))));
+      localStorage.setItem("videodesk.updated", String(Date.now()));   // 雲端同步比新舊用
+    } catch (e) {}
+    scheduleCloudPush();
     return idbSet(IDB_KEY, videos);   // 回傳 promise：要跳頁前可以先等寫入完成
   }
   function cfg() {
@@ -98,10 +102,80 @@
     render();
     trashLoad().then(renderTrash);
     backupNag();
+    if (localStorage.getItem(AUTOSYNC) === "1" && cloudBase()) cloudPull(false);
     // Prompt 庫：讀來掛連結與顯示內容（只有「腳本→分鏡」會寫回去）
     await reloadPrompts();
     if (editingId !== null || $("#vEditor").classList.contains("show")) renderLinked();
   }
+
+  /* ---------- 雲端同步（跟 Prompt 庫共用同一個 Worker + KV）----------
+     只推送／拉取整包裡的 videos 區塊，不會動到 Prompt 庫的作品資料。
+     代理網址與密碼沿用同一組 localStorage（promptvault.proxyurl / .proxypw）。 */
+  const AUTOSYNC = "videodesk.autosync";
+  function cloudBase() { const u = proxyCfg().url; return u ? u.replace(/\/+$/, "") + "/data" : ""; }
+  let cloudTimer = null;
+  function scheduleCloudPush() {
+    if (localStorage.getItem(AUTOSYNC) !== "1" || !cloudBase()) return;
+    clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(() => cloudPush(true), 1800);
+  }
+  function cloudInfo() {
+    const el = $("#vCloudInfo"); if (!el) return;
+    if (!cloudBase()) { el.textContent = "需先在上面的「AI 金鑰」填後端代理網址，並在 Worker 綁定 KV，才能雲端同步。"; return; }
+    const at = +localStorage.getItem("videodesk.cloudat") || 0;
+    el.textContent = (localStorage.getItem(AUTOSYNC) === "1" ? "自動同步：開。" : "自動同步：關。")
+      + (at ? " 上次同步 " + new Date(at).toLocaleString() : " 尚未同步過。");
+  }
+  async function cloudPush(silent) {
+    const base = cloudBase(); if (!base) { if (!silent) toast("尚未設定後端代理"); return; }
+    try {
+      const r = await fetch(base, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Proxy-Password": proxyCfg().pw },
+        body: JSON.stringify({ videos, vupdated: +localStorage.getItem("videodesk.updated") || Date.now() })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      localStorage.setItem("videodesk.cloudat", String(Date.now()));
+      cloudInfo();
+      if (!silent) toast(`已備份 ${videos.length} 支到雲端`);
+    } catch (e) { if (!silent) toast("備份失敗：" + e.message); }
+  }
+  async function cloudPull(manual) {
+    const base = cloudBase(); if (!base) { if (manual) toast("尚未設定後端代理"); return; }
+    try {
+      const r = await fetch(base, { headers: { "X-Proxy-Password": proxyCfg().pw } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+      if (!j || !Array.isArray(j.videos)) { if (manual) toast("雲端還沒有影片資料，先按「備份到雲端」一次"); return; }
+      const localV = +localStorage.getItem("videodesk.updated") || 0;
+      if (!manual && (j.vupdated || 0) <= localV) { cloudInfo(); return; }   // 自動模式：本機較新就不覆蓋
+      videos = j.videos.map(normalize);
+      try { localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [] })))); } catch (e) {}
+      await idbSet(IDB_KEY, videos);
+      localStorage.setItem("videodesk.updated", String(j.vupdated || Date.now()));
+      localStorage.setItem("videodesk.cloudat", String(Date.now()));
+      lastDeleted = null; sel.clear();
+      render(); cloudInfo();
+      toast(`已從雲端載入 ${videos.length} 支`);
+    } catch (e) { if (manual) toast("載入失敗：" + e.message); }
+  }
+  $("#vCloudPush").addEventListener("click", () => cloudPush(false));
+  $("#vCloudPull").addEventListener("click", () => {
+    const b = $("#vCloudPull");
+    if (b.dataset.arm) {
+      delete b.dataset.arm; b.textContent = "⬇ 從雲端還原"; b.style.color = "";
+      cloudPull(true);
+    } else {
+      b.dataset.arm = "1"; b.textContent = "⚠ 確定？會覆蓋本機"; b.style.color = "var(--danger)";
+      setTimeout(() => { if (b.dataset.arm) { delete b.dataset.arm; b.textContent = "⬇ 從雲端還原"; b.style.color = ""; } }, 3500);
+    }
+  });
+  $("#vAutoSync").addEventListener("change", e => {
+    try { localStorage.setItem(AUTOSYNC, e.target.checked ? "1" : "0"); } catch (err) {}
+    cloudInfo();
+    if (e.target.checked) cloudPush(false);   // 開啟時先上傳一次當基準
+  });
 
   /* ---------- 回收站（IDB key "videotrash"，保留 30 天）----------
      只存在這台裝置：不進匯出檔、不進畫布、不佔 Ctrl+Z。 */
@@ -2123,6 +2197,8 @@
     $("#vAutoFill").checked = c.autoFill !== false;   // 沒設定過＝預設開著
     $("#vSyncInfo").textContent = "";
     backupInfo(); renderTrash();
+    $("#vAutoSync").checked = localStorage.getItem(AUTOSYNC) === "1";
+    cloudInfo();
     loadAiFields();
     // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開
     $$("#vSetOv .block").forEach(b => b.classList.toggle("closed", focusAi ? b.id !== "vSetAiBlock" : false));
