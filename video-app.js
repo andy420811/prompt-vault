@@ -96,10 +96,66 @@
     const c = cfg();
     if (!c.channel) setCfg({ channel: "UCCxQbx0erwfctMmCiKenrEQ" });   // 預設帶入使用者的頻道
     render();
+    trashLoad().then(renderTrash);
+    backupNag();
     // Prompt 庫：讀來掛連結與顯示內容（只有「腳本→分鏡」會寫回去）
     await reloadPrompts();
     if (editingId !== null || $("#vEditor").classList.contains("show")) renderLinked();
   }
+
+  /* ---------- 回收站（IDB key "videotrash"，保留 30 天）----------
+     只存在這台裝置：不進匯出檔、不進畫布、不佔 Ctrl+Z。 */
+  const TRASH_KEY = "videotrash", TRASH_DAYS = 30;
+  let trash = [];
+  async function trashLoad() {
+    const t = await idbGet(TRASH_KEY);
+    const keep = Date.now() - TRASH_DAYS * 86400000;
+    trash = (Array.isArray(t) ? t : []).filter(x => x && x.at > keep);
+    if (Array.isArray(t) && trash.length !== t.length) persistTrash();   // 順手清掉過期的
+  }
+  function persistTrash() { idbSet(TRASH_KEY, trash); }
+  function trashAdd(v) {
+    trash.unshift({ at: Date.now(), v: JSON.parse(JSON.stringify(v)) });
+    if (trash.length > 200) trash.length = 200;
+    persistTrash();
+  }
+  function renderTrash() {
+    $("#vTrashList").innerHTML = trash.map((t, i) => {
+      const left = TRASH_DAYS - Math.floor((Date.now() - t.at) / 86400000);
+      return `<div class="vd-trash-row">
+        <span class="tt">${esc(t.v.title || "未命名影片")}</span>
+        <span class="vd-chip">剩 ${Math.max(0, left)} 天</span>
+        <button type="button" data-restore="${i}">還原</button>
+        <button type="button" class="del" data-purge="${i}">永久刪除</button>
+      </div>`;
+    }).join("") || `<p class="vd-note">回收站是空的。</p>`;
+    $("#vTrashBtn").textContent = trash.length ? `🗑 回收站（${trash.length}）` : "🗑 回收站";
+  }
+  $("#vTrashBtn").addEventListener("click", () => { renderTrash(); $("#vTrashOv").classList.add("show"); });
+  $("#vTrashClose").addEventListener("click", () => $("#vTrashOv").classList.remove("show"));
+  $("#vTrashDone").addEventListener("click", () => $("#vTrashOv").classList.remove("show"));
+  $("#vTrashList").addEventListener("click", e => {
+    const r = e.target.closest("[data-restore]"), p = e.target.closest("[data-purge]");
+    if (r) {
+      const t = trash.splice(+r.dataset.restore, 1)[0]; if (!t) return;
+      const v = normalize(t.v);
+      if (videos.some(x => x.id === v.id)) v.id = uid();   // 同 id 已經存在（匯入過）就給新 id
+      videos.unshift(v); persistTrash(); save(); render(); renderTrash();
+      toast(`已還原「${v.title || "未命名影片"}」`);
+      return;
+    }
+    if (p) {
+      const t = trash[+p.dataset.purge]; if (!t) return;
+      if (!confirm(`永久刪除「${t.v.title || "未命名影片"}」？這次真的救不回來了。`)) return;
+      trash.splice(+p.dataset.purge, 1); persistTrash(); renderTrash();
+      toast("已永久刪除");
+    }
+  });
+  $("#vTrashEmpty").addEventListener("click", () => {
+    if (!trash.length) { toast("回收站已經是空的"); return; }
+    if (!confirm(`清空回收站？裡面的 ${trash.length} 支會永久消失。`)) return;
+    trash = []; persistTrash(); renderTrash(); toast("回收站已清空");
+  });
 
   // ---------- 小工具 ----------
   let toastT = null;
@@ -125,10 +181,25 @@
   const doneRatio = v => v.todos.length ? v.todos.filter(t => t.done).length / v.todos.length : 0;
 
   // ---------- 篩選與渲染 ----------
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const today = () => iso(new Date());
+  function daysFromNow(n) { const d = new Date(); d.setDate(d.getDate() + n); return iso(d); }
+  // 工具列的快速篩選丸
+  const QUICK = {
+    wip: v => v.status !== "pub",
+    week: v => v.status !== "pub" && v.due && v.due >= today() && v.due <= daysFromNow(7),
+    late: v => v.status !== "pub" && v.due && v.due < today(),
+    nothumb: v => !thumbOf(v),
+    noprompt: v => !v.links.length
+  };
+  let quick = localStorage.getItem("videodesk.quick") || "";
+  if (!QUICK[quick]) quick = "";
   function visible() {
     const q = $("#vq").value.trim().toLowerCase();
     const ser = $("#vSeries").value, kind = $("#vKind").value, sort = $("#vSort").value;
+    const qf = QUICK[quick];
     let list = videos.filter(v => {
+      if (qf && !qf(v)) return false;
       if (ser && v.series !== ser) return false;
       if (kind && v.kind !== kind) return false;
       if (!q) return true;
@@ -146,7 +217,10 @@
   }
   function render() {
     renderStats(); renderSeriesOptions();
+    $$("#vQuick button").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.qf || "") === quick)));
     const list = visible();
+    sel.forEach(id => { if (!videos.some(v => v.id === id)) sel.delete(id); });   // 已刪掉的不留在選取裡
+    updateSelBar();
     $("#vBoard").hidden = view !== "board";
     $("#vList").hidden = view !== "list";
     $("#vCal").hidden = view !== "cal";
@@ -179,7 +253,8 @@
   function cardHTML(v) {
     const th = thumbOf(v), done = v.todos.filter(t => t.done).length, r = doneRatio(v), dc = dueClass(v);
     const next = STAGES[STAGES.findIndex(s => s.k === v.status) + 1];
-    return `<article class="vd-card" data-id="${v.id}" draggable="true">
+    return `<article class="vd-card${sel.has(v.id) ? " sel" : ""}" data-id="${v.id}" draggable="true">
+      <input type="checkbox" class="vd-check" data-sel="${v.id}"${sel.has(v.id) ? " checked" : ""} title="選取（可批次處理）">
       <div class="vd-quick">
         ${v.ytId ? `<button type="button" data-q="play" title="在這裡播放">▶</button>` : ""}
         <button type="button" data-q="canvas" title="加到專案畫布並跳過去">🧩</button>
@@ -225,7 +300,8 @@
   function renderList(list) {
     $("#vList").innerHTML = list.length ? list.map(v => {
       const th = thumbOf(v), s = STAGE[v.status], done = v.todos.filter(t => t.done).length;
-      return `<article class="vd-row" data-id="${v.id}" data-stage="${v.status}">
+      return `<article class="vd-row${sel.has(v.id) ? " sel" : ""}" data-id="${v.id}" data-stage="${v.status}">
+        <input type="checkbox" class="vd-check" data-sel="${v.id}"${sel.has(v.id) ? " checked" : ""} title="選取（可批次處理）">
         <div class="rt">${th ? `<img src="${esc(th)}" alt="" loading="lazy">` : (v.kind === "short" ? "▯" : "🎬")}</div>
         <div class="rmain">
           <h3>${v.series ? `<span style="color:var(--accent)">${esc(v.series)}${v.ep !== "" ? " EP" + esc(String(v.ep)) : ""}</span> · ` : ""}${esc(v.title || "未命名影片")}</h3>
@@ -462,6 +538,37 @@
     try { const s = JSON.parse(localStorage.getItem(PVC_KEY)); if (s && Array.isArray(s.projects)) return s; } catch (e) {}
     return { projects: [], currentId: "" };
   }
+  // 一次把多支丟上畫布（批次列用）：全部加完再跳一次
+  async function canvasAddMany(list) {
+    if (!list.length) return;
+    if (list.length === 1) return canvasAdd(list[0]);
+    const st = canvasStore();
+    let proj = st.projects.find(p => p.id === st.currentId) || st.projects[0];
+    if (!proj) {
+      proj = { id: uid(), name: "我的專案", nodes: [], edges: [], panX: 0, panY: 0, zoom: 1, created: Date.now(), edited: Date.now() };
+      st.projects.push(proj);
+    }
+    st.currentId = proj.id;
+    proj.nodes = Array.isArray(proj.nodes) ? proj.nodes : [];
+    proj.edges = Array.isArray(proj.edges) ? proj.edges : [];
+    const xs = proj.nodes.map(n => +n.x || 0), ys = proj.nodes.map(n => +n.y || 0);
+    const baseX = proj.nodes.length ? Math.min.apply(null, xs) : 80;
+    let y = proj.nodes.length ? Math.max.apply(null, ys) + 300 : 80;
+    let first = "", added = 0;
+    list.forEach((v, i) => {
+      const has = proj.nodes.find(n => n.kind === "vid" && n.vref === v.id);
+      if (has) { first = first || has.id; return; }
+      const node = { id: uid(), kind: "vid", vref: v.id, title: v.title || "", text: "", x: baseX + (i % 3) * 260, y: y + Math.floor(i / 3) * 300 };
+      proj.nodes.push(node); added++;
+      first = first || node.id;
+    });
+    proj.edited = Date.now();
+    try { localStorage.setItem(PVC_KEY, JSON.stringify(st)); }
+    catch (e) { toast("寫不進畫布（瀏覽器儲存空間已滿）"); return; }
+    await save();
+    toast(added ? `已把 ${added} 支加到畫布，正在開啟…` : "這幾支都已經在畫布上了");
+    location.href = "prompt-vault.html#canvas=" + encodeURIComponent(first);
+  }
   async function canvasAdd(v) {
     if (!v || !v.id) { toast("請先儲存這支影片"); return; }
     const st = canvasStore();
@@ -619,6 +726,14 @@
   }
 
   // ---------- 事件 ----------
+  $("#vSelStage").innerHTML = `<option value="">改階段…</option>`
+    + STAGES.map(s => `<option value="${s.k}">${s.ico} ${s.zh}</option>`).join("");
+  $("#vQuick").addEventListener("click", e => {
+    const b = e.target.closest("[data-qf]"); if (!b) return;
+    quick = QUICK[b.dataset.qf] ? b.dataset.qf : "";
+    try { localStorage.setItem("videodesk.quick", quick); } catch (err) {}
+    render();
+  });
   $("#vAddBtn").addEventListener("click", () => openEditor(null));
   $("#vq").addEventListener("input", render);
   $("#vSeries").addEventListener("change", render);
@@ -640,6 +755,7 @@
     return copy;
   }
   document.addEventListener("click", e => {
+    if (e.target.closest("[data-sel]")) return;   // 勾選框由批次那段處理，不要順便開編輯器
     const q = e.target.closest("[data-q]");
     if (q) {
       e.stopPropagation();
@@ -664,6 +780,64 @@
     if (card && (e.target.closest("#vBoard") || e.target.closest("#vList"))) {
       const v = videos.find(x => x.id === card.dataset.id); if (v) openEditor(v);
     }
+  });
+
+  /* ---------- 勾選 ＋ 批次處理 ---------- */
+  const sel = new Set();
+  function updateSelBar() {
+    $("#vSelBar").hidden = !sel.size;
+    $("#vSelCount").textContent = `已選 ${sel.size} 支`;
+  }
+  const selVideos = () => videos.filter(v => sel.has(v.id));
+  function clearSel() { sel.clear(); render(); }
+  document.addEventListener("click", e => {
+    const c = e.target.closest("[data-sel]"); if (!c) return;
+    e.stopPropagation();   // 不要順便把編輯器打開
+    const id = c.dataset.sel;
+    if (c.checked) sel.add(id); else sel.delete(id);
+    const box = c.closest(".vd-card, .vd-row");
+    if (box) box.classList.toggle("sel", c.checked);
+    updateSelBar();
+  });
+  $("#vSelNone").addEventListener("click", clearSel);
+  $("#vSelStage").addEventListener("change", e => {
+    const k = e.target.value; e.target.value = "";
+    if (!k || !STAGE[k]) return;
+    const list = selVideos();
+    list.forEach(v => {
+      v.status = k;
+      if (k === "pub" && !v.published) v.published = today();
+      v.edited = Date.now();
+    });
+    save(); clearSel(); toast(`已把 ${list.length} 支移到「${STAGE[k].zh}」`);
+  });
+  $("#vSelTag").addEventListener("click", () => {
+    const t = prompt("要加上哪些標籤？（逗號分隔）", "");
+    if (t === null) return;
+    const add = t.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+    if (!add.length) return;
+    const list = selVideos();
+    list.forEach(v => { const s = new Set(v.tags); add.forEach(x => s.add(x)); v.tags = [...s]; v.edited = Date.now(); });
+    save(); clearSel(); toast(`已為 ${list.length} 支加上 ${add.length} 個標籤`);
+  });
+  $("#vSelDue").addEventListener("click", () => {
+    const d = prompt("預定發布日（YYYY-MM-DD，留空＝清掉）", today());
+    if (d === null) return;
+    const val = d.trim();
+    if (val && !/^\d{4}-\d{2}-\d{2}$/.test(val)) { toast("日期格式要像 2026-08-15"); return; }
+    const list = selVideos();
+    list.forEach(v => { v.due = val; v.edited = Date.now(); });
+    save(); clearSel(); toast(val ? `已把 ${list.length} 支的預定發布日設成 ${val}` : "已清掉預定發布日");
+  });
+  $("#vSelCanvas").addEventListener("click", () => canvasAddMany(selVideos()));
+  $("#vSelDel").addEventListener("click", () => {
+    const list = selVideos();
+    if (!list.length) return;
+    if (!confirm(`確定把這 ${list.length} 支丟進回收站？（30 天內可以還原）`)) return;
+    list.forEach(v => trashAdd(v));
+    const ids = new Set(list.map(v => v.id));
+    videos = videos.filter(v => !ids.has(v.id));
+    save(); clearSel(); toast(`已丟進回收站 ${list.length} 支`);
   });
 
   // 看板拖曳換階段
@@ -740,10 +914,11 @@
   $("#vDelBtn").addEventListener("click", () => {
     if (!editingId) return;
     const v = videos.find(x => x.id === editingId);
-    if (!confirm(`確定刪除「${(v && v.title) || "這支影片"}」？此頁面的資料無法復原。`)) return;
-    lastDeleted = videos.find(x => x.id === editingId) || null;
+    if (!confirm(`把「${(v && v.title) || "這支影片"}」丟進回收站？30 天內都可以還原。`)) return;
+    if (v) trashAdd(v);
+    lastDeleted = v || null;
     videos = videos.filter(x => x.id !== editingId);
-    save(); render(); closeEditor(); toast("已刪除（Ctrl+Z 可復原）");
+    save(); render(); closeEditor(); toast("已丟進回收站（Ctrl+Z 或設定裡的回收站可以救回來）");
   });
   $("#vDupBtn").addEventListener("click", () => {
     const v = collect();
@@ -1772,6 +1947,73 @@
   [["#vPromptOv", closePreview], ["#vScrOv", closeScriptSplit], ["#vAiOv", closeAi], ["#vPlayOv", closePlayer]]
     .forEach(([sel, fn]) => $(sel).addEventListener("click", e => { if (e.target === $(sel)) fn(); }));
 
+  /* ---------- 待辦總覽：所有影片的未完成待辦，加上逾期與本週要發 ---------- */
+  function todoData() {
+    const wip = videos.filter(v => v.status !== "pub");
+    const late = wip.filter(v => v.due && v.due < today());
+    const week = wip.filter(v => v.due && v.due >= today() && v.due <= daysFromNow(7));
+    const groups = wip
+      .filter(v => v.todos.some(t => !t.done))
+      .sort((a, b) => (a.due || "9999").localeCompare(b.due || "9999"));
+    return { late, week, groups };
+  }
+  function renderTodoAll() {
+    const { late, week, groups } = todoData();
+    const chip = v => [
+      v.series ? `<span class="vd-chip">${esc(v.series)}${v.ep !== "" ? " EP" + esc(String(v.ep)) : ""}</span>` : "",
+      `<span class="vd-chip k">${STAGE[v.status].ico} ${STAGE[v.status].zh}</span>`,
+      v.due ? `<span class="vd-chip ${dueClass(v)}">📅 ${dstr(v.due)}</span>` : ""
+    ].join("");
+    const alerts = (title, list, cls) => list.length ? `<p class="vd-td-h">${title}</p>` + list.map(v => `
+      <div class="vd-td-group"><div class="vd-td-head">
+        <span class="t" data-open="${v.id}">${esc(v.title || "未命名影片")}</span>${chip(v)}
+        ${cls === "late" ? `<span class="vd-chip due">逾期 ${Math.ceil((Date.now() - Date.parse(v.due + "T23:59:59")) / 86400000)} 天</span>` : ""}
+      </div></div>`).join("") : "";
+    const body = alerts("⚠ 逾期未發布", late, "late") + alerts("📅 一週內要發布", week, "week")
+      + (groups.length ? `<p class="vd-td-h">未完成的待辦</p>` + groups.map(v => `
+        <div class="vd-td-group">
+          <div class="vd-td-head"><span class="t" data-open="${v.id}">${esc(v.title || "未命名影片")}</span>${chip(v)}
+            <span class="vd-chip">${v.todos.filter(t => t.done).length}/${v.todos.length}</span></div>
+          ${v.todos.map((t, i) => t.done ? "" : `<label class="vd-td-item">
+            <input type="checkbox" data-tv="${v.id}" data-ti="${i}">${esc(t.t)}</label>`).join("")}
+        </div>`).join("") : "");
+    $("#vTodoBody").innerHTML = body || `<p class="vd-td-empty">目前沒有未完成的待辦，也沒有逾期的影片 🎉<br>在影片編輯器的「製作待辦」加項目，這裡就會集合起來。</p>`;
+  }
+  function todoText() {
+    const { late, week, groups } = todoData();
+    const lines = [];
+    if (late.length) lines.push("【逾期】", ...late.map(v => `- ${v.title || "未命名"}（${v.due}）`), "");
+    if (week.length) lines.push("【一週內要發】", ...week.map(v => `- ${v.title || "未命名"}（${v.due}）`), "");
+    groups.forEach(v => {
+      lines.push(`【${v.title || "未命名"}】`, ...v.todos.filter(t => !t.done).map(t => "- [ ] " + t.t), "");
+    });
+    return lines.join("\n").trim();
+  }
+  $("#vTodoBtn").addEventListener("click", () => { renderTodoAll(); $("#vTodoOv").classList.add("show"); });
+  $("#vTodoClose").addEventListener("click", () => $("#vTodoOv").classList.remove("show"));
+  $("#vTodoDone").addEventListener("click", () => $("#vTodoOv").classList.remove("show"));
+  $("#vTodoCopy").addEventListener("click", () => {
+    const t = todoText();
+    if (!t) { toast("沒有待辦可以複製"); return; }
+    copyText(t, "待辦清單已複製");
+  });
+  $("#vTodoBody").addEventListener("click", e => {
+    const o = e.target.closest("[data-open]");
+    if (o) {
+      const v = videos.find(x => x.id === o.dataset.open);
+      if (v) { $("#vTodoOv").classList.remove("show"); openEditor(v); }
+      return;
+    }
+    const c = e.target.closest("[data-tv]");
+    if (c) {
+      const v = videos.find(x => x.id === c.dataset.tv); if (!v) return;
+      const t = v.todos[+c.dataset.ti]; if (!t) return;
+      t.done = true; v.edited = Date.now();
+      save(); render(); renderTodoAll();
+      toast(`已完成：${t.t}`);
+    }
+  });
+
   // ---------- 頻道統計 ----------
   function renderStatsPanel() {
     const pub = videos.filter(v => v.status === "pub");
@@ -1866,6 +2108,7 @@
     $("#vfApiKey").value = c.apiKey || "";
     $("#vAutoFill").checked = c.autoFill !== false;   // 沒設定過＝預設開著
     $("#vSyncInfo").textContent = "";
+    backupInfo(); renderTrash();
     loadAiFields();
     // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開
     $$("#vSetOv .block").forEach(b => b.classList.toggle("closed", focusAi ? b.id !== "vSetAiBlock" : false));
@@ -1883,8 +2126,26 @@
     a.href = URL.createObjectURL(blob);
     a.download = `video-desk-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
+    setCfg({ lastExport: Date.now() });
+    backupInfo();
     toast(`已匯出 ${videos.length} 支`);
   });
+  // 備份提醒：影片資料只在這台裝置，太久沒匯出就提醒一次
+  const BACKUP_DAYS = 14;
+  function backupDays() {
+    const last = +cfg().lastExport || 0;
+    return last ? Math.floor((Date.now() - last) / 86400000) : -1;
+  }
+  function backupInfo() {
+    const d = backupDays();
+    $("#vBackupInfo").textContent = d < 0 ? "還沒匯出過備份。" : (d === 0 ? "今天剛備份過。" : `上次備份是 ${d} 天前。`);
+  }
+  function backupNag() {
+    const d = backupDays();
+    if (videos.length >= 5 && (d < 0 || d >= BACKUP_DAYS)) {
+      setTimeout(() => toast(d < 0 ? "提醒：影片資料只存在這台裝置，記得到 ⚙ 設定匯出一份備份" : `提醒：上次備份是 ${d} 天前，建議到 ⚙ 設定再匯出一份`), 2500);
+    }
+  }
   $("#vImport").addEventListener("click", () => $("#vImportFile").click());
   $("#vImportFile").addEventListener("change", e => {
     const f = e.target.files[0]; if (!f) return;
@@ -1913,8 +2174,11 @@
       if ($("#vAiOv").classList.contains("show")) { closeAi(); return; }
       if ($("#vScrOv").classList.contains("show")) { closeScriptSplit(); return; }
       if ($("#vPickOv").classList.contains("show")) { $("#vPickOv").classList.remove("show"); return; }
+      if ($("#vTrashOv").classList.contains("show")) { $("#vTrashOv").classList.remove("show"); return; }
+      if ($("#vTodoOv").classList.contains("show")) { $("#vTodoOv").classList.remove("show"); return; }
       if ($("#vStatsOv").classList.contains("show")) { $("#vStatsOv").classList.remove("show"); return; }
       if ($("#vEditor").classList.contains("show")) closeEditor();
+      if (sel.size) clearSel();
       return;
     }
     const inField = e.target.closest("input, textarea, select, [contenteditable='true']");

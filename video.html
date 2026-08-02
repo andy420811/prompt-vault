@@ -36,6 +36,15 @@
       <button id="vViewList" aria-pressed="false">清單</button>
       <button id="vViewCal" aria-pressed="false">月曆</button>
     </div>
+    <div class="vd-pills" id="vQuick">
+      <button data-qf="" aria-pressed="true">全部</button>
+      <button data-qf="wip">製作中</button>
+      <button data-qf="week">本週要發</button>
+      <button data-qf="late">逾期</button>
+      <button data-qf="nothumb">缺縮圖</button>
+      <button data-qf="noprompt">缺 prompt</button>
+    </div>
+    <button class="vd-link" id="vTodoBtn" title="所有影片的未完成待辦">📋 待辦</button>
     <button class="vd-link" id="vStatsBtn" title="頻道統計">📊 統計</button>
     <select id="vSeries" title="依系列篩選"><option value="">全部系列</option></select>
     <select id="vKind" title="依類型篩選">
@@ -66,6 +75,54 @@
     <span class="vd-sub">📅＝預定發布　🚀＝已發布　點格子可在該日新增</span>
   </div>
   <div class="vd-cal-grid" id="vCalGrid"></div>
+</div>
+
+<!-- ---------- 勾選後的批次列 ---------- -->
+<div class="vd-selbar" id="vSelBar" hidden>
+  <b id="vSelCount">已選 0 支</b>
+  <select id="vSelStage" title="批次改階段"><option value="">改階段…</option></select>
+  <button type="button" id="vSelTag">🏷 加標籤</button>
+  <button type="button" id="vSelDue">📅 設預定發布日</button>
+  <button type="button" id="vSelCanvas">🧩 加到畫布</button>
+  <button type="button" id="vSelDel" class="danger">🗑 刪除</button>
+  <button type="button" id="vSelNone" class="ghost">取消選取</button>
+</div>
+
+<!-- ---------- 待辦總覽 ---------- -->
+<div class="overlay" id="vTodoOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:660px">
+    <div class="modal-head">
+      <h2>待辦總覽</h2>
+      <button class="icon-btn" id="vTodoClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="vTodoBody"></div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="vTodoCopy">📋 複製成清單</button>
+      <button class="btn primary" id="vTodoDone">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- ---------- 回收站 ---------- -->
+<div class="overlay" id="vTrashOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:620px">
+    <div class="modal-head">
+      <h2>回收站</h2>
+      <button class="icon-btn" id="vTrashClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">刪掉的影片會在這裡保留 30 天，過期自動清掉。回收站只存在這台裝置，也不會進匯出檔。</p>
+      <div class="vd-trash" id="vTrashList"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost del-side" id="vTrashEmpty" style="color:var(--danger)">清空回收站</button>
+      <button class="btn primary" id="vTrashDone">完成</button>
+    </div>
+  </div>
 </div>
 
 <!-- ---------- 影片編輯器 ---------- -->
@@ -298,7 +355,9 @@
           <div class="pk-actions">
             <button type="button" class="link-btn" id="vExport">⬇ 匯出 JSON</button>
             <button type="button" class="link-btn" id="vImport">⬆ 匯入 JSON</button>
+            <button type="button" class="link-btn" id="vTrashBtn" style="color:var(--ink-3)">🗑 回收站</button>
           </div>
+          <p class="vd-note" id="vBackupInfo"></p>
           <input type="file" id="vImportFile" accept="application/json" hidden>
         </div>
       </div>

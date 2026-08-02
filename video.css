@@ -261,6 +261,57 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 .vd-linked-row .lk { border: none; background: none; font: inherit; cursor: pointer; padding: 0; }
 .vd-linked-row .lk:hover { text-decoration: underline; }
 
+/* ---- 快速篩選丸 ---- */
+.vd-pills { display: flex; gap: 4px; flex-wrap: wrap; }
+.vd-pills button { font: inherit; font-size: 12px; border: 1px solid var(--line); background: var(--paper);
+  color: var(--ink-2); border-radius: 999px; padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+.vd-pills button:hover { border-color: var(--accent); color: var(--accent); }
+.vd-pills button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); font-weight: 600; }
+
+/* ---- 勾選與批次列 ---- */
+.vd-check { position: absolute; left: 6px; top: 6px; z-index: 3; width: 19px; height: 19px; margin: 0;
+  opacity: 0; cursor: pointer; accent-color: var(--accent); }
+.vd-card:hover .vd-check, .vd-card.sel .vd-check { opacity: 1; }
+.vd-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-tint); }
+.vd-row .vd-check { position: static; opacity: 1; flex: 0 0 auto; }
+.vd-row.sel { border-color: var(--accent); background: var(--accent-tint); }
+.vd-selbar { position: fixed; left: 50%; transform: translateX(-50%); bottom: 74px; z-index: 260;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center;
+  max-width: min(760px, 94vw); padding: 9px 14px; border-radius: 14px;
+  background: var(--surface); border: 1px solid var(--accent); box-shadow: var(--shadow-lg); }
+.vd-selbar b { font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+.vd-selbar button, .vd-selbar select { font: inherit; font-size: 12.5px; border: 1px solid var(--line);
+  background: var(--paper); color: var(--ink-2); border-radius: 9px; padding: 6px 11px; cursor: pointer; white-space: nowrap; }
+.vd-selbar button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-tint); }
+.vd-selbar button.danger:hover { border-color: var(--danger); color: var(--danger); background: transparent; }
+.vd-selbar button.ghost { border-color: transparent; color: var(--ink-3); }
+
+/* ---- 待辦總覽 ---- */
+.vd-td-group { border: 1px solid var(--line); border-radius: 11px; background: var(--paper); padding: 10px 12px; margin-bottom: 9px; }
+.vd-td-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 7px; }
+.vd-td-head .t { font-size: 13px; font-weight: 600; color: var(--ink); cursor: pointer; }
+.vd-td-head .t:hover { color: var(--accent); text-decoration: underline; }
+.vd-td-item { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 3px 0; }
+.vd-td-item input { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--accent); cursor: pointer; }
+.vd-td-empty { text-align: center; color: var(--ink-3); font-size: 13px; padding: 40px 12px; line-height: 1.9; }
+.vd-td-h { font-size: 12px; font-weight: 700; color: var(--ink-3); margin: 2px 0 8px; }
+
+/* ---- 回收站 ---- */
+.vd-trash { display: flex; flex-direction: column; gap: 6px; max-height: 52vh; overflow: auto; }
+.vd-trash-row { display: flex; align-items: center; gap: 9px; padding: 8px 11px; font-size: 12.5px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 9px; }
+.vd-trash-row .tt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.vd-trash-row button { font: inherit; font-size: 11.5px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink-2); border-radius: 7px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
+.vd-trash-row button:hover { border-color: var(--accent); color: var(--accent); }
+.vd-trash-row button.del:hover { border-color: var(--danger); color: var(--danger); }
+#vTrashOv { z-index: 140; }
+
+@media (max-width: 640px) {
+  .vd-selbar { bottom: 66px; gap: 6px; padding: 8px 10px; }
+  .vd-selbar button, .vd-selbar select { padding: 5px 9px; font-size: 12px; }
+}
+
 /* ---- 內嵌播放器 ---- */
 .vd-player { aspect-ratio: 16/9; width: 100%; background: #000; border-radius: 0 0 2px 2px; overflow: hidden; }
 .vd-player iframe { width: 100%; height: 100%; border: 0; display: block; }
