@@ -34,7 +34,7 @@
     if (!cloudBase()) { el.textContent = "需先在上方設定「後端代理」並在 Worker 綁定 KV，才能雲端同步。"; return; }
     const at = +localStorage.getItem("promptvault.cloudat") || 0;
     const auto = localStorage.getItem("promptvault.autosync") === "1";
-    el.textContent = (auto ? "自動同步：開。" : "自動同步：關。") + (at ? " 上次同步 " + new Date(at).toLocaleString() : " 尚未同步過。");
+    el.textContent = (auto ? "自動同步：開（畫布與影片製作台共用同一個開關）。" : "自動同步：關。") + (at ? " 上次同步 " + new Date(at).toLocaleString() : " 尚未同步過。");
   }
   /* 上雲端的內容：作品本體 ＋ 堆疊名稱／封面／左側資料夾／智慧集合／分享連結／畫布／資產庫。
      不上雲端的：API 金鑰、回收站、語意向量（可重建）、各裝置自己的顯示偏好。
@@ -115,7 +115,10 @@
       tryGet(() => renderSmarts());
     }
     if (Array.isArray(j.shares)) { try { localStorage.setItem("promptvault.shares", JSON.stringify(j.shares)); } catch (e) {} }
-    if (j.canvas && Array.isArray(j.canvas.projects)) { try { localStorage.setItem("promptvault.canvas", JSON.stringify(j.canvas)); } catch (e) {} }
+    if (j.canvas && Array.isArray(j.canvas.projects)) {
+      try { localStorage.setItem("promptvault.canvas", JSON.stringify(j.canvas)); } catch (e) {}
+      tryGet(() => PVCanvas.reload());   // 畫布模組要換掉記憶體裡的 store，不然它下次存檔會蓋回去
+    }
     if (Array.isArray(j.assets)) { idbSet("assets", j.assets); tryGet(() => { assets = j.assets; }); }
   }
   // 影片製作台的資料：這一頁只負責「拉下來寫進本機」，推送由 video.html 自己做

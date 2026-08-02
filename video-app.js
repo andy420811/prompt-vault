@@ -111,7 +111,16 @@
   /* ---------- 雲端同步（跟 Prompt 庫共用同一個 Worker + KV）----------
      只推送／拉取整包裡的 videos 區塊，不會動到 Prompt 庫的作品資料。
      代理網址與密碼沿用同一組 localStorage（promptvault.proxyurl / .proxypw）。 */
-  const AUTOSYNC = "videodesk.autosync";
+  /* 自動同步開關跟 Prompt 庫共用同一個 key：在任何一邊開一次，Prompt 庫、畫布、影片製作台全部都套用。 */
+  const AUTOSYNC = "promptvault.autosync";
+  (function migrateAutoSync() {   // 舊版影片頁自己存一份，第一次載入時併過來
+    try {
+      const old = localStorage.getItem("videodesk.autosync");
+      if (old === null) return;
+      if (old === "1" && localStorage.getItem(AUTOSYNC) !== "1") localStorage.setItem(AUTOSYNC, "1");
+      localStorage.removeItem("videodesk.autosync");
+    } catch (e) {}
+  })();
   function cloudBase() { const u = proxyCfg().url; return u ? u.replace(/\/+$/, "") + "/data" : ""; }
   let cloudTimer = null;
   function scheduleCloudPush() {
@@ -123,7 +132,7 @@
     const el = $("#vCloudInfo"); if (!el) return;
     if (!cloudBase()) { el.textContent = "需先在上面的「AI 金鑰」填後端代理網址，並在 Worker 綁定 KV，才能雲端同步。"; return; }
     const at = +localStorage.getItem("videodesk.cloudat") || 0;
-    el.textContent = (localStorage.getItem(AUTOSYNC) === "1" ? "自動同步：開。" : "自動同步：關。")
+    el.textContent = (localStorage.getItem(AUTOSYNC) === "1" ? "自動同步：開（Prompt 庫與畫布共用同一個開關）。" : "自動同步：關。")
       + (at ? " 上次同步 " + new Date(at).toLocaleString() : " 尚未同步過。");
   }
   async function cloudPush(silent) {

@@ -20,7 +20,33 @@ window.PVCanvas = (function () {
     try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && Array.isArray(s.projects)) return s; } catch (e) {}
     return { projects: [], currentId: "" };
   }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(store)); } catch (e) { say("畫布儲存失敗（瀏覽器儲存空間已滿）"); } }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(store)); }
+    catch (e) { say("畫布儲存失敗（瀏覽器儲存空間已滿）"); return; }
+    touchCloud();
+  }
+  /* ---------- 畫布也上雲端 ----------
+     主程式的 cloudBundle() 本來就會帶上 promptvault.canvas，但只有「庫裡的作品存檔」才會排上傳；
+     只動畫布（搬節點、連線、收疊）時得自己排一次，順手把 promptvault.updated 往前推，
+     別台裝置拉下來時才會認定雲端比較新。自動同步關著時 scheduleCloudPush() 自己會 return。 */
+  let cloudT = null;
+  function touchCloud() {
+    clearTimeout(cloudT);
+    cloudT = setTimeout(() => {
+      try { localStorage.setItem("promptvault.updated", String(Date.now())); } catch (e) {}
+      const f = fn("scheduleCloudPush"); if (f) f();
+    }, 700);
+  }
+  /* 雲端整包拉回來時，畫布這一區由主程式寫回 localStorage —— 記憶體裡的 store 要跟著換掉，
+     否則畫布下一次 save() 會把剛拉下來的內容整包蓋回去。 */
+  function reload() {
+    store = loadStore();
+    if (!ui) return;
+    cur = curProject();
+    if (!ui.overlay.classList.contains("show")) return;
+    lastSig = ""; renderAll();
+    say("畫布已同步為雲端的版本");
+  }
   function vaultPrompts() { try { const a = JSON.parse(localStorage.getItem(VAULT_KEY)); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
   function curProject() { return store.projects.find(p => p.id === store.currentId) || store.projects[0] || null; }
 
@@ -161,6 +187,26 @@ window.PVCanvas = (function () {
   .pvc-m:hover { background:var(--accent-tint,#e7e5f7); color:var(--accent,#4b45c6); }
   .pvc-m.danger { color:var(--danger,#b23b45); }
   .pvc-m.on { color:var(--accent,#4b45c6); font-weight:700; }
+  /* 框選：拖曳背景畫出選取框，選到的節點加外框，底部跳出批次列 */
+  .pvc-vp.marquee { cursor:crosshair; }
+  .pvc-marquee { position:absolute; z-index:6; pointer-events:none; border-radius:4px;
+      border:1.5px dashed var(--accent,#4b45c6); background:rgba(75,69,198,.10); }
+  .pvc-node.selected { outline:2.5px solid var(--accent,#4b45c6); outline-offset:2px; }
+  .pvc-node.selected .pvc-node-head { background:var(--accent-tint,#e7e5f7); }
+  .pvc-bar .pvc-b.on { background:var(--accent-tint,#e7e5f7); color:var(--accent,#4b45c6); border-color:var(--accent,#4b45c6); }
+  /* left/right 都給值＋margin:auto 才置中：只用 left:50% 的話可用寬度只剩一半，按鈕會提早換行 */
+  .pvc-selbar { position:absolute; left:14px; right:14px; bottom:18px; margin:0 auto; width:fit-content; z-index:8; display:none;
+      align-items:center; justify-content:center; gap:6px; flex-wrap:wrap; max-width:calc(100% - 28px);
+      padding:8px 12px; border-radius:14px; background:var(--surface,#fff); border:1px solid var(--line,#e0ddd1);
+      box-shadow:0 18px 40px -18px rgba(24,22,30,.55); }
+  .pvc-selbar.show { display:flex; }
+  .pvc-selbar.lifted { bottom:96px; }
+  .pvc-selbar .n { font-size:12.5px; font-weight:700; color:var(--accent,#4b45c6); white-space:nowrap; flex:0 0 auto; }
+  .pvc-selbar .pvc-b, .pvc-selbar select { font:inherit; font-size:12.5px; border:1px solid var(--line,#e0ddd1); background:var(--paper,#fff);
+      color:var(--ink,#1d1c22); border-radius:8px; padding:5px 10px; cursor:pointer; white-space:nowrap; flex:0 0 auto; }
+  .pvc-selbar .pvc-b:hover { border-color:var(--accent,#4b45c6); color:var(--accent,#4b45c6); }
+  .pvc-selbar .pvc-b.danger { color:var(--danger,#b23b45); }
+  .pvc-selbar .pvc-b.armed { background:var(--danger,#b23b45); color:#fff; border-color:var(--danger,#b23b45); }
   .pvc-node.hit { outline:3px solid var(--gold,#b0870f); outline-offset:2px; }
   .pvc-nodes.finding .pvc-node:not(.hit) { opacity:.32; }
   .pvc-node-del.armed { color:var(--danger,#b23b45); font-size:11px; font-weight:700; }
@@ -191,6 +237,7 @@ window.PVCanvas = (function () {
         <input id="pvcFind" placeholder="在畫布中找…（Enter 跳下一個）" title="搜尋節點：標題、prompt、標籤">
         <span class="pvc-hint" id="pvcFindInfo"></span>
         <span class="pvc-spacer"></span>
+        <button class="pvc-b" id="pvcMarquee" title="框選模式：拖曳背景＝框住多顆節點（關著時按住 Shift 拖曳也可以框選）">▣</button>
         <button class="pvc-b" id="pvcUndo" title="復原畫布上的變更（Ctrl+Z）">↶</button>
         <button class="pvc-b" id="pvcRedo" title="重做（Ctrl+Shift+Z）">↷</button>
         <button class="pvc-b" id="pvcMore" title="其他功能">⋯ 更多</button>
@@ -231,6 +278,18 @@ window.PVCanvas = (function () {
         </div>
         <div class="pvc-empty" id="pvcEmptyMsg" hidden></div>
         <div class="pvc-unstack" id="pvcUnstack" hidden>⤵ 拖到這裡＝移出堆疊（解除連線）</div>
+        <div class="pvc-selbar" id="pvcSelBar">
+          <span class="n" id="pvcSelN">已選 0 顆</span>
+          <button class="pvc-b" data-s="copy" title="把選取的提示詞全部複製起來">📋 複製提示詞</button>
+          <button class="pvc-b" data-s="tag" title="一次加標籤到庫裡這幾則">🏷 加標籤</button>
+          <select id="pvcSelStatus" title="批次設定製作狀態"></select>
+          <button class="pvc-b" data-s="fav" title="一次收藏／取消收藏">★ 收藏</button>
+          <button class="pvc-b" data-s="pile" title="依左右順序連起來並收成一疊">⧉ 收成一疊</button>
+          <button class="pvc-b" data-s="chain" title="依左右順序連成一條（不收合）">🔗 連成一條</button>
+          <button class="pvc-b" data-s="align" title="把選取的節點排成網格">⬚ 排列</button>
+          <button class="pvc-b danger" data-s="del" title="只從畫布移除，不會刪掉庫裡的作品">🗑 移除節點</button>
+          <button class="pvc-b" data-s="none" title="取消選取（Esc）">✖</button>
+        </div>
         <div class="pvc-picker" id="pvcPicker">
           <div class="pvc-picker-head"><input id="pvcPickQ" placeholder="搜尋要匯入的 prompt…"><button class="pvc-b" id="pvcPickClose">×</button></div>
           <div class="pvc-picker-mode"><button class="pvc-b primary" id="pvcPickP">Prompt</button><button class="pvc-b" id="pvcPickV">🎬 影片企劃</button></div>
@@ -243,7 +302,8 @@ window.PVCanvas = (function () {
       edges: ov.querySelector("#pvcEdges"), labels: ov.querySelector("#pvcLabels"), nodes: ov.querySelector("#pvcNodes"),
       proj: ov.querySelector("#pvcProj"), picker: ov.querySelector("#pvcPicker"), pickList: ov.querySelector("#pvcPickList"),
       pickQ: ov.querySelector("#pvcPickQ"), emptyMsg: ov.querySelector("#pvcEmptyMsg"),
-      find: ov.querySelector("#pvcFind"), findInfo: ov.querySelector("#pvcFindInfo")
+      find: ov.querySelector("#pvcFind"), findInfo: ov.querySelector("#pvcFindInfo"),
+      selBar: ov.querySelector("#pvcSelBar"), selN: ov.querySelector("#pvcSelN"), selStatus: ov.querySelector("#pvcSelStatus")
     };
     wire();
   }
@@ -322,9 +382,21 @@ window.PVCanvas = (function () {
         (e.shiftKey || e.key === "y" || e.key === "Y") ? canvasRedo() : canvasUndo();
         return;
       }
+      // Ctrl+A 全選看得見的節點、Delete 移除選取的節點（都能 Ctrl+Z 復原）
+      if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A") && !inField) {
+        e.preventDefault(); e.stopPropagation();
+        const f = foldMap();
+        setSel(cur.nodes.filter(x => !f.hidden.has(x.id)).map(x => x.id));
+        say(selIds.size ? `已選取 ${selIds.size} 顆節點` : "這個畫布還沒有節點");
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && !inField && selIds.size) {
+        e.preventDefault(); e.stopPropagation(); deleteSel(); return;
+      }
       if (e.key !== "Escape") return;
       if (!menu.hidden) { menu.hidden = true; return; }
       if (ui.picker.classList.contains("show")) { ui.picker.classList.remove("show"); return; }
+      if (selIds.size) { clearSel(); return; }   // 先取消選取，再按一次才關畫布
       ui.overlay.classList.remove("show");
     }, true);
     ui.pickQ.addEventListener("input", renderPicker);
@@ -357,14 +429,28 @@ window.PVCanvas = (function () {
       const handle = e.target.closest(".pvc-node-head, .pvc-node-img");
       const nodeEl = e.target.closest(".pvc-node"); if (!nodeEl) return;
       const n = cur.nodes.find(x => x.id === nodeEl.dataset.id); if (!n) return;
+      const onHandle = handle && !e.target.closest(".pvc-node-del, [data-a]");
+      if (onHandle && (e.ctrlKey || e.metaKey)) { e.preventDefault(); toggleSel(n.id); return; }   // Ctrl/⌘＋點標頭＝加減選
       if (resize) { e.preventDefault(); startResize(n, nodeEl, e); }
       else if (port) { e.preventDefault(); startEdge(n, e); }
-      else if (handle && !e.target.closest(".pvc-node-del, [data-a]")) { e.preventDefault(); startNodeDrag(n, nodeEl, e); }
+      else if (onHandle) { e.preventDefault(); startNodeDrag(n, nodeEl, e); }
     });
-    // 背景平移
+    // 背景：平移或框選（框選模式開著＝拖曳就框選，按住 Shift 則反過來變平移）
     ui.vp.addEventListener("pointerdown", e => {
-      if (e.target.closest(".pvc-node") || e.target.closest(".pvc-picker") || e.target.closest(".pvc-elabel")) return;
-      startPan(e);
+      if (e.target.closest(".pvc-node") || e.target.closest(".pvc-picker") || e.target.closest(".pvc-elabel")
+        || e.target.closest(".pvc-selbar") || e.target.closest("#pvcUnstack")) return;
+      if (e.button === 0 && (marqueeOn ? !e.shiftKey : e.shiftKey)) { e.preventDefault(); startMarquee(e); }
+      else startPan(e);
+    });
+    ui.overlay.querySelector("#pvcMarquee").addEventListener("click", () => {
+      setMarquee(!marqueeOn);
+      say(marqueeOn ? "框選模式：拖曳背景＝框選節點（按住 Shift 拖曳仍可平移）" : "框選模式已關（按住 Shift 拖曳背景一樣能框選）");
+    });
+    // 批次列
+    ui.selBar.addEventListener("click", e => { const b = e.target.closest("[data-s]"); if (b) selAct(b.dataset.s, b); });
+    ui.selStatus.addEventListener("change", e => {
+      const v = e.target.value; e.target.value = "";
+      if (v !== "") selStatusSet(v === "__none" ? "" : v);
     });
     // 滾輪縮放（桌機）；在匯入面板／節點內文上滾動則交給它們自己捲動、不縮放
     ui.vp.addEventListener("wheel", e => {
@@ -399,6 +485,182 @@ window.PVCanvas = (function () {
     });
   }
 
+  /* ---------- 框選與批次動作 ----------
+     選取只活在這次開啟（不寫進 store）；選到的節點加 .selected，底部跳出批次列。
+     進入框選：框選模式開著時拖曳背景，或（模式關著時）按住 Shift 拖曳背景；Ctrl/⌘ 拖曳＝加選。 */
+  let selIds = new Set();
+  let marqueeOn = false;
+  const selNodes = () => (cur ? cur.nodes.filter(n => selIds.has(n.id)) : []);
+  function selRecs() {   // 選取節點對應到庫裡的記錄（筆記／影片節點沒有）
+    return selNodes().map(n => (n.kind === "note" || n.kind === "vid") ? null : liveRec(n.ref)).filter(Boolean);
+  }
+  function paintSel() {   // 拖曳框選中：只改 class，不重建 DOM（重建會拖垮效能也會弄丟拖曳中的元素）
+    if (!ui) return;
+    ui.nodes.querySelectorAll(".pvc-node").forEach(el => el.classList.toggle("selected", selIds.has(el.dataset.id)));
+    updateSelBar();
+  }
+  function updateSelBar() {
+    if (!ui) return;
+    const n = selIds.size;
+    ui.selBar.classList.toggle("show", n > 0);
+    if (n) {
+      const recs = selRecs().length;
+      ui.selN.textContent = `已選 ${n} 顆` + (recs ? `（${recs} 則提示詞）` : "");
+    }
+    const d = ui.selBar.querySelector('[data-s="del"]');
+    if (d && d.dataset.arm) { delete d.dataset.arm; d.classList.remove("armed"); d.textContent = "🗑 移除節點"; }
+  }
+  function setSel(ids) { selIds = new Set(ids); updateSelBar(); renderNodes(); }
+  function clearSel() { if (!selIds.size) return; selIds.clear(); updateSelBar(); renderNodes(); }
+  function toggleSel(id) { selIds.has(id) ? selIds.delete(id) : selIds.add(id); updateSelBar(); renderNodes(); }
+  function setMarquee(on) {
+    marqueeOn = !!on; store.marquee = marqueeOn; save();
+    if (!ui) return;
+    const b = ui.overlay.querySelector("#pvcMarquee");
+    if (b) { b.classList.toggle("on", marqueeOn); b.textContent = marqueeOn ? "▣ 框選中" : "▣"; }
+    ui.vp.classList.toggle("marquee", marqueeOn);
+  }
+  function fillStatusSel() {
+    if (!ui) return;
+    const list = statAll();
+    ui.selStatus.innerHTML = `<option value="">製作狀態…</option>`
+      + list.map(x => `<option value="${x.k === "" ? "__none" : esc(x.k)}">${esc(((x.ico || "") + " " + x.zh).trim())}</option>`).join("");
+  }
+  // 選取框（viewport 座標）跟哪些看得見的節點重疊
+  function nodesInRect(x1, y1, x2, y2) {
+    const f = foldMap(), z = cur.zoom || 1;
+    const a = (x1 - cur.panX) / z, b = (y1 - cur.panY) / z, c = (x2 - cur.panX) / z, d = (y2 - cur.panY) / z;
+    return cur.nodes.filter(n => {
+      if (f.hidden.has(n.id)) return false;
+      const el = nodeEl(n.id);
+      const w = n.w || (el ? el.offsetWidth : NODE_W), h = n.h || (el ? el.offsetHeight : 240);
+      return n.x < c && n.x + w > a && n.y < d && n.y + h > b;
+    }).map(n => n.id);
+  }
+  function startMarquee(e) {
+    const add = e.ctrlKey || e.metaKey;
+    const base = add ? new Set(selIds) : new Set();
+    const r = ui.vp.getBoundingClientRect();
+    const sx = e.clientX - r.left, sy = e.clientY - r.top;
+    const box = document.createElement("div"); box.className = "pvc-marquee"; ui.vp.appendChild(box);
+    let hit = [];
+    docListen(ev => {
+      if (pinching) return;
+      const x = ev.clientX - r.left, y = ev.clientY - r.top;
+      const L = Math.min(sx, x), T = Math.min(sy, y), W = Math.abs(x - sx), H = Math.abs(y - sy);
+      box.style.left = L + "px"; box.style.top = T + "px"; box.style.width = W + "px"; box.style.height = H + "px";
+      hit = nodesInRect(L, T, L + W, T + H);
+      selIds = new Set([...base, ...hit]);
+      paintSel();
+    }, () => {
+      box.remove();
+      if (!hit.length && !add) selIds = new Set();   // 空框＝取消選取
+      updateSelBar(); renderNodes();
+      if (hit.length) say(`已選取 ${selIds.size} 顆 — 用下面那排做批次動作`);
+    });
+  }
+  function deleteSel() {
+    if (!selIds.size) return;
+    csnap();
+    const ids = new Set(selIds);
+    cur.nodes = cur.nodes.filter(n => !ids.has(n.id));
+    cur.edges = cur.edges.filter(e => !ids.has(e.from) && !ids.has(e.to));
+    cur.edited = Date.now(); save();
+    selIds.clear(); updateSelBar(); renderNodes(true); drawEdges();
+    ui.emptyMsg.hidden = cur.nodes.length > 0;
+    say(`已從畫布移除 ${ids.size} 顆（Ctrl+Z 可復原；庫裡的作品不受影響）`);
+  }
+  function alignSel(nodes) {
+    csnap();
+    const list = nodes.slice().sort((a, b) => (a.y - b.y) || (a.x - b.x));
+    const x0 = Math.min(...list.map(n => n.x)), y0 = Math.min(...list.map(n => n.y));
+    const per = Math.max(1, Math.round(Math.sqrt(list.length))), gap = 40;
+    let x = x0, y = y0, rowH = 0;
+    list.forEach((n, i) => {
+      n.x = Math.round(x); n.y = Math.round(y);
+      x += (n.w || NODE_W) + gap; rowH = Math.max(rowH, n.h || 240);
+      if ((i + 1) % per === 0) { x = x0; y += rowH + gap; rowH = 0; }
+    });
+    cur.edited = Date.now(); save(); renderNodes(true); drawEdges();
+    say(`已排列 ${list.length} 顆`);
+  }
+  function chainSel(nodes, pile) {
+    if (nodes.length < 2) { say("至少要選 2 顆才能連起來"); return; }
+    csnap();
+    const list = nodes.slice().sort((a, b) => (a.x - b.x) || (a.y - b.y));   // 依畫面上的左右順序串
+    let add = 0;
+    for (let i = 0; i < list.length - 1; i++) {
+      const a = list[i], b = list[i + 1];
+      if (!cur.edges.some(e => (e.from === a.id && e.to === b.id) || (e.from === b.id && e.to === a.id))) {
+        cur.edges.push({ id: uid(), from: a.id, to: b.id, label: pile ? "同疊" : "" }); add++;
+      }
+    }
+    if (pile) {
+      const head = list[0];
+      list.forEach(n => { if (n !== head) delete n.fold; });   // 成員本來是疊頭就先攤開，避免疊中疊
+      head.fold = "down";
+      list.slice(1).forEach((n, i) => { n.x = Math.round(head.x + 24 * (i + 1)); n.y = Math.round(head.y + 24 * (i + 1)); });
+      selIds = new Set([head.id]);
+    }
+    cur.edited = Date.now(); save(); updateSelBar(); renderNodes(true); drawEdges();
+    say(pile ? `已把 ${list.length} 顆收成一疊（點疊頭的 ⧉ 展開）`
+             : (add ? `已連成一條（新增 ${add} 條連線）` : "這些節點本來就已經連起來了"));
+  }
+  function selStatusSet(k) {
+    const recs = selRecs(); if (!recs.length) { say("選取的節點裡沒有庫裡的提示詞"); return; }
+    const st = statAll().find(s => s.k === k);
+    recs.forEach(p => { p.status = k; p.edited = Date.now(); });
+    appSave(); appRender(); refresh();
+    say(`已把 ${recs.length} 則設為「${st ? st.zh : "未分類"}」`);
+  }
+  function selAct(a, btn) {
+    if (a === "none") { clearSel(); return; }
+    const nodes = selNodes(); if (!nodes.length) return;
+    const recs = selRecs();
+    const needRec = () => { if (!recs.length) say("選取的節點裡沒有庫裡的提示詞"); return recs.length; };
+    switch (a) {
+      case "copy": {
+        if (!navigator.clipboard) { say("此瀏覽器不支援複製"); return; }
+        const txt = recs.map(p => p.prompt || "").filter(Boolean).join("\n\n");
+        if (!txt) { say("選取的節點裡沒有提示詞"); return; }
+        navigator.clipboard.writeText(txt).then(() => say(`已複製 ${recs.length} 則提示詞`)).catch(() => say("複製失敗"));
+        return;
+      }
+      case "tag": {
+        if (!needRec()) return;
+        const t = prompt(`要加在這 ${recs.length} 則上的標籤（多個用逗號分隔）：`, "");
+        if (t === null) return;
+        const tags = t.split(/[,，]/).map(s => s.trim()).filter(Boolean);
+        if (!tags.length) return;
+        recs.forEach(p => { p.tags = p.tags || []; tags.forEach(x => { if (!p.tags.includes(x)) p.tags.push(x); }); p.edited = Date.now(); });
+        appSave(); appRender(); refresh();
+        say(`已加上 ${tags.join("、")}（${recs.length} 則）`);
+        return;
+      }
+      case "fav": {
+        if (!needRec()) return;
+        const on = !recs.every(p => p.fav);   // 全部都收藏了＝這次取消，否則全部收藏
+        recs.forEach(p => { p.fav = on; p.edited = Date.now(); });
+        appSave(); appRender(); refresh();
+        say(on ? `已收藏 ${recs.length} 則` : `已取消收藏 ${recs.length} 則`);
+        return;
+      }
+      case "align": return alignSel(nodes);
+      case "chain": return chainSel(nodes, false);
+      case "pile": return chainSel(nodes, true);
+      case "del": {
+        if (!btn.dataset.arm) {   // 兩段式確認，誤觸不會整批消失
+          btn.dataset.arm = "1"; btn.classList.add("armed"); btn.textContent = `確定移除 ${nodes.length} 顆？`;
+          setTimeout(() => {
+            if (btn.isConnected && btn.dataset.arm) { delete btn.dataset.arm; btn.classList.remove("armed"); btn.textContent = "🗑 移除節點"; }
+          }, 3500);
+          return;
+        }
+        deleteSel(); return;
+      }
+    }
+  }
+
   // ---------- 拖曳 / 連線 / 平移 ----------
   function docListen(move, up) {
     const mv = e => move(e);
@@ -416,16 +678,26 @@ window.PVCanvas = (function () {
       const f = foldMap();
       pack = cur.nodes.filter(x => f.hidden.has(x.id) && visibleId(x.id, f) === n.id).map(x => ({ n: x, dx: x.x - n.x, dy: x.y - n.y }));
     }
+    // 框選中的節點一起搬；拖到選取以外的節點則先取消選取（只改 class，重建 DOM 會弄丟拖曳中的元素）
+    if (selIds.has(n.id)) {
+      const has = new Set(pack.map(m => m.n.id).concat([n.id]));
+      cur.nodes.forEach(x => { if (selIds.has(x.id) && !has.has(x.id)) pack.push({ n: x, dx: x.x - n.x, dy: x.y - n.y }); });
+    } else if (selIds.size) { selIds.clear(); paintSel(); }
     const packIds = new Set(pack.map(m => m.n.id));
-    const linked = cur.edges.some(x => x.from === n.id || x.to === n.id);
+    const multi = selIds.has(n.id) && selIds.size > 1;   // 整批搬移時不做「收進那一疊／移出堆疊」的判定
+    const linked = !multi && cur.edges.some(x => x.from === n.id || x.to === n.id);
     const zone = ui.overlay.querySelector("#pvcUnstack");
-    if (linked) zone.hidden = false;   // 有關係才需要「移出堆疊」
+    if (linked) { zone.hidden = false; ui.selBar.classList.add("lifted"); }   // 有關係才需要「移出堆疊」
     nodeEl.style.pointerEvents = "none";   // 讓 elementFromPoint 看得到底下的節點
     let target = null, overZone = false;
     docListen(ev => {
       if (pinching) return;
       const p = toWorld(ev); n.x = Math.round(p.x - offX); n.y = Math.round(p.y - offY);
-      pack.forEach(m => { m.n.x = n.x + m.dx; m.n.y = n.y + m.dy; });
+      pack.forEach(m => {
+        m.n.x = n.x + m.dx; m.n.y = n.y + m.dy;
+        if (m.el === undefined) m.el = nodeEl(m.n.id);   // 收合藏起來的成員沒有 DOM，查一次記著
+        if (m.el) { m.el.style.left = m.n.x + "px"; m.el.style.top = m.n.y + "px"; }
+      });
       nodeEl.style.left = n.x + "px"; nodeEl.style.top = n.y + "px"; drawEdges();
       // 放置目標：另一顆節點＝加入那一疊；底部區域＝移出堆疊
       const el = document.elementFromPoint(ev.clientX, ev.clientY);
@@ -433,14 +705,14 @@ window.PVCanvas = (function () {
       overZone = !!(linked && el && el.closest("#pvcUnstack"));
       zone.classList.toggle("hot", overZone);
       target = null;
-      const tn = !overZone && el && el.closest(".pvc-node");
+      const tn = !multi && !overZone && el && el.closest(".pvc-node");
       if (tn && tn.dataset.id !== n.id && !packIds.has(tn.dataset.id)) {
         target = cur.nodes.find(x => x.id === tn.dataset.id) || null;
         if (target) tn.classList.add("drop-target");
       }
     }, () => {
       nodeEl.style.pointerEvents = "";
-      zone.hidden = true; zone.classList.remove("hot");
+      zone.hidden = true; zone.classList.remove("hot"); ui.selBar.classList.remove("lifted");
       ui.nodes.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
       cur.edited = Date.now(); save();
       if (overZone) unstackNode(n);
@@ -515,8 +787,15 @@ window.PVCanvas = (function () {
   function startPan(e) {
     ui.vp.classList.add("panning");
     const sx = e.clientX, sy = e.clientY, px = cur.panX, py = cur.panY;
-    docListen(ev => { if (pinching) return; cur.panX = px + (ev.clientX - sx); cur.panY = py + (ev.clientY - sy); applyPan(); },
-      () => { ui.vp.classList.remove("panning"); cur.edited = Date.now(); save(); });
+    let moved = false;
+    docListen(ev => {
+      if (pinching) return;
+      if (Math.abs(ev.clientX - sx) > 4 || Math.abs(ev.clientY - sy) > 4) moved = true;
+      cur.panX = px + (ev.clientX - sx); cur.panY = py + (ev.clientY - sy); applyPan();
+    }, () => {
+      ui.vp.classList.remove("panning"); cur.edited = Date.now(); save();
+      if (!moved) clearSel();   // 點一下空白處＝取消選取
+    });
   }
   function applyPan() { ui.world.style.transform = `translate(${cur.panX}px, ${cur.panY}px) scale(${cur.zoom || 1})`; }
   let saveT = null;
@@ -880,7 +1159,7 @@ window.PVCanvas = (function () {
       <button class="pvc-a" data-a="vlink" title="把畫布上連到這裡的 prompt 掛到這支影片">🔗</button>
       <button class="pvc-a" data-a="vpull" title="把這支影片已掛的 prompt 拉進畫布並連線">⬇</button>
     </div>` : "";
-    return `<div class="pvc-node vid${src ? " has-img" : ""}${nFold ? " folded" : ""}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
+    return `<div class="pvc-node vid${src ? " has-img" : ""}${nFold ? " folded" : ""}${selIds.has(n.id) ? " selected" : ""}" data-id="${n.id}" style="left:${n.x}px;top:${n.y}px;width:${w}px;height:${h}px">
       <div class="pvc-node-head">
         <span class="pvc-node-type">🎬 影片企劃</span>
         ${v ? `<span class="pvc-badge" data-a="vstage" title="點一下切換階段">${st.ico} ${st.zh}</span>` : ""}
@@ -912,7 +1191,7 @@ window.PVCanvas = (function () {
     const title = (p && !n.custom) ? (p.title || "") : (n.title || "");
     const text = p ? (p.prompt || "") : (n.text || "");
     const src = p ? ((p.imgs && p.imgs[0]) || n.img || "") : n.img;
-    const cls = (isNote ? "note" : "t-" + (n.ttype || "image")) + (src ? " has-img" : "") + (nFold ? " folded" : "");
+    const cls = (isNote ? "note" : "t-" + (n.ttype || "image")) + (src ? " has-img" : "") + (nFold ? " folded" : "") + (selIds.has(n.id) ? " selected" : "");
     const img = (!isNote && src) ? `<div class="pvc-node-img"><img src="${src}" alt="" draggable="false"></div>` : "";
     const st = p ? statOf(p.status) : null;
     const w = n.w || NODE_W;
@@ -947,6 +1226,12 @@ window.PVCanvas = (function () {
   function renderNodes(force) {
     const f = foldMap();
     const vis = cur.nodes.filter(n => !f.hidden.has(n.id));
+    if (selIds.size) {   // 選取的節點被刪掉／收進疊裡就從選取拿掉
+      const alive = new Set(vis.map(n => n.id));
+      let drop = false;
+      selIds.forEach(id => { if (!alive.has(id)) { selIds.delete(id); drop = true; } });
+      if (drop) updateSelBar();
+    }
     const html = vis.map(n => nodeHTML(n, f)).join("");
     if (!force && html === lastSig) return;   // 內容沒變就不動 DOM（主程式每次重繪都會叫到這裡）
     lastSig = html;
@@ -1238,10 +1523,11 @@ window.PVCanvas = (function () {
   function renderAll() {
     if (!cur) cur = curProject() || newProject("我的專案");
     if (!cur.zoom) cur.zoom = 1;
+    selIds.clear(); updateSelBar();   // 換專案／重開就重來
     syncNodes();
     renderProjSel(); applyPan(); updateZoomLabel(); renderNodes(); drawEdges();
     ui.emptyMsg.hidden = cur.nodes.length > 0;
-    ui.emptyMsg.textContent = cur.nodes.length ? "" : "空白畫布 — 按上方「＋ 匯入 Prompt」把庫裡的提示詞拉進來；拖右側藍點可連線，把一顆拖到另一顆上面就會收成一疊。";
+    ui.emptyMsg.textContent = cur.nodes.length ? "" : "空白畫布 — 按上方「＋ 匯入 Prompt」把庫裡的提示詞拉進來；拖右側藍點可連線，把一顆拖到另一顆上面就會收成一疊；按 ▣ 或按住 Shift 拖曳背景可以框選多顆一起處理。";
     ui.picker.classList.remove("show");
   }
 
@@ -1273,6 +1559,7 @@ window.PVCanvas = (function () {
     if (!store.projects.length) newProject("我的專案");
     cur = curProject(); store.currentId = cur.id; save();
     resetKnown(); setAutoWire(autoWire()); setFoldEvo(autoFoldEvo());
+    fillStatusSel(); setMarquee(store.marquee === true);
     vidLoad().then(() => {
       if (!ui.overlay.classList.contains("show")) return;
       renderNodes(true);
@@ -1281,5 +1568,5 @@ window.PVCanvas = (function () {
     ui.overlay.classList.add("show"); renderAll();
     if (pendingFocus) setTimeout(() => focusNode(pendingFocus), 60);
   }
-  return { open };
+  return { open, reload };
 })();
