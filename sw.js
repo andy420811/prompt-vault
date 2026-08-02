@@ -7,7 +7,7 @@
    由前端跳出「有新版本 — 重新整理」提示，按了才換過去。
    ⚠ 新增前端檔案時記得同步加進下面 ASSETS 清單（與 push.ps1 的 git add 清單）。 */
 "use strict";
-const CACHE = "pv-shell-v2";
+const CACHE = "pv-shell-v3";   // 換名字＝強制重新安裝並重建整包快取（改動 sw.js 內容時記得也換）
 const ASSETS = [
   "./",
   "./index.html",
@@ -41,12 +41,20 @@ const ASSETS = [
   "./icon-512-maskable.png"
 ];
 
+/* 預快取用 fetch(cache:"reload") ＋ put，不要用 c.add()：
+   c.add() 會走瀏覽器的 HTTP 快取，force push 上線後很可能把「剛好還在瀏覽器快取裡的舊檔」
+   當成新版存進來，之後怎麼重整都是舊的（實測踩過）。cache:"reload" 強制回源。
+   個別 put：單檔失敗不讓整包預快取泡湯。 */
+async function precache() {
+  const c = await caches.open(CACHE);
+  await Promise.allSettled(ASSETS.map(async u => {
+    const res = await fetch(new Request(u, { cache: "reload" }));
+    if (!res || !res.ok) throw new Error("HTTP " + (res && res.status));
+    await c.put(u, res);
+  }));
+}
 self.addEventListener("install", e => {
-  e.waitUntil(
-    caches.open(CACHE)
-      .then(c => Promise.allSettled(ASSETS.map(u => c.add(u))))   // 個別加入：單檔失敗不讓整包預快取泡湯
-      .then(() => self.skipWaiting())
-  );
+  e.waitUntil(precache().catch(() => {}).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", e => {
