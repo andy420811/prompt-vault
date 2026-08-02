@@ -220,6 +220,23 @@
   /* 展開中的堆疊標頭：底下全選／部分選取時給個底色，才知道整組的狀態 */
   .grid.selecting .stack-head.sel { box-shadow:inset 3px 0 0 var(--accent); background:var(--accent-tint); }
   .grid.selecting .stack-head.partial { box-shadow:inset 3px 0 0 var(--accent); }
+  /* 整疊裡選了幾則：徽章直接寫出來（疊起來看不到裡面的卡） */
+  .grid.selecting .card.pile.sel .pile-count, .grid.selecting .card.pile.partial .pile-count { background:var(--accent); color:#fff; padding:1px 7px; border-radius:999px; }
+  /* 跳到某一則時閃一下，才知道是哪張 */
+  .card.flash { outline:3px solid var(--gold); outline-offset:2px; }
+  /* 選取列的「已選 N 件」展開清單 */
+  #sbCount { font:inherit; border:1px solid transparent; background:none; cursor:pointer; border-radius:8px; padding:3px 8px; }
+  #sbCount:hover { border-color:var(--line); }
+  #sbList { position:absolute; left:10px; bottom:calc(100% + 8px); z-index:61; width:min(340px, 82vw); max-height:46vh; overflow:auto;
+    background:var(--surface); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow-lg); padding:6px; }
+  .sbl-head { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:11.5px; font-weight:700;
+    color:var(--ink-3); padding:6px 8px 8px; }
+  .sbl-close, .sbl-x { border:none; background:none; color:var(--ink-3); cursor:pointer; font-size:13px; line-height:1; padding:2px 4px; flex:0 0 auto; }
+  .sbl-close:hover, .sbl-x:hover { color:var(--danger); }
+  .sbl-row { display:flex; align-items:center; gap:6px; padding:6px 8px; border-radius:8px; cursor:pointer; }
+  .sbl-row:hover { background:var(--accent-tint); }
+  .sbl-t { flex:1 1 auto; min-width:0; font-size:12.5px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sbl-s { flex:0 0 auto; font-size:10.5px; color:var(--ink-3); border:1px solid var(--line); border-radius:999px; padding:1px 7px; white-space:nowrap; }
   /* 底部堆疊操作列 */
   #selectBar { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:60;
     display:flex; align-items:center; gap:8px; padding:10px 14px; background:var(--surface);
