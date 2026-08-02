@@ -123,6 +123,15 @@
             <button type="button" class="link-btn" id="vThumbYt" style="color:var(--ink-3)">用 YouTube 縮圖</button>
           </div>
           <input type="file" id="vThumbFile" accept="image/*" multiple hidden>
+          <div class="vd-canva">
+            <div class="field"><label for="vfCanva">Canva 設計連結 <span class="opt">選填，貼一次之後按 🎨 就直接開這份設計</span></label>
+              <input id="vfCanva" type="url" placeholder="https://www.canva.com/design/DA…/edit"></div>
+            <div class="pk-actions">
+              <button type="button" class="btn ghost" id="vCanvaGo" style="padding:7px 14px">🎨 到 Canva 做縮圖</button>
+              <button type="button" class="link-btn" id="vCanvaPaste" style="color:var(--ink-3)">⧉ 貼上剛複製的 Canva 網址</button>
+            </div>
+            <p class="vd-note" id="vCanvaInfo"></p>
+          </div>
         </div>
       </div>
 
@@ -268,6 +277,18 @@
         </div>
       </div>
       <div class="block">
+        <div class="block-head" data-toggle><span class="bt">Canva</span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">按 🎨 時要開哪一頁。想固定用自己的模板，就在 Canva 開那個模板、複製網址貼進來（每支影片也可以在編輯器裡各自綁一份設計）。</p>
+          <div class="field"><label for="vCanvaLongUrl">長片（橫式縮圖）</label>
+            <input id="vCanvaLongUrl" type="url" placeholder="https://www.canva.com/create/youtube-thumbnails/"></div>
+          <div class="field"><label for="vCanvaShortUrl">Shorts（直式）</label>
+            <input id="vCanvaShortUrl" type="url" placeholder="https://www.canva.com/create/instagram-stories/"></div>
+        </div>
+      </div>
+      <div class="block" id="vSetAiBlock">
         <div class="block-head" data-toggle><span class="bt">AI 金鑰（與 Prompt 庫共用）</span><span class="bn" id="vAiState"></span>
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
         </div>

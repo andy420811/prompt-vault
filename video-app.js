@@ -79,6 +79,7 @@
     v.thumbs = Array.isArray(v.thumbs) ? v.thumbs.filter(x => typeof x === "string") : [];
     v.thumbPick = Math.min(Math.max(0, +v.thumbPick || 0), Math.max(0, v.thumbs.length - 1));
     v.desc = String(v.desc || ""); v.hashtags = String(v.hashtags || ""); v.playlist = String(v.playlist || "");
+    v.canva = String(v.canva || "");   // 這支影片綁定的 Canva 設計連結
     v.chapters = Array.isArray(v.chapters) ? v.chapters.map(c => ({ t: String(c.t || ""), n: String(c.n || "") })) : [];
     v.order = +v.order || 0;
     v.links = Array.isArray(v.links) ? v.links.filter(x => typeof x === "string") : [];
@@ -182,6 +183,7 @@
     return `<article class="vd-card" data-id="${v.id}" draggable="true">
       <div class="vd-quick">
         ${v.ytId ? `<button type="button" data-q="play" title="在這裡播放">▶</button>` : ""}
+        <button type="button" data-q="canva" title="${v.canva ? "開這支影片的 Canva 設計" : "到 Canva 做縮圖"}">🎨</button>
         ${next ? `<button type="button" data-q="next" title="推進到「${next.zh}」">⏭</button>` : ""}
         <button type="button" data-q="dup" title="複製為新企劃">⧉</button>
       </div>
@@ -314,6 +316,8 @@
     $("#vfDesc").value = v ? v.desc : "";
     $("#vfHash").value = v ? v.hashtags : "";
     $("#vfPlaylist").value = v ? v.playlist : "";
+    $("#vfCanva").value = v ? v.canva : "";
+    canvaInfo();
     $("#vDelBtn").style.display = v ? "" : "none";
     $("#vDupBtn").style.display = v ? "" : "none";
     $("#vNextEp").style.display = v && v.series ? "" : "none";
@@ -378,6 +382,7 @@
       links: curLinks.slice(),
       thumbs: curThumbs.slice(), thumbPick: curPick,
       desc: $("#vfDesc").value, hashtags: $("#vfHash").value.trim(), playlist: $("#vfPlaylist").value.trim(),
+      canva: $("#vfCanva").value.trim(),
       chapters: curChaps.filter(c => c.t.trim() || c.n.trim()).sort((a, b) => secOf(a.t) - secOf(b.t))
     };
     const old = videos.find(x => x.id === v.id);
@@ -451,6 +456,69 @@
     if (!items.length) return;
     e.preventDefault();
     addThumbFiles(items.map(x => x.getAsFile()).filter(Boolean));
+  });
+
+  /* ---------- Canva：把素材備好，然後開 Canva ----------
+     Canva 擋 iframe（也沒有公開的「用網址帶入素材」介面），所以這裡是開新分頁；
+     按下去會先把文案複製到剪貼簿、把目前主縮圖存成檔案，到 Canva 直接貼上／拖進去就好。 */
+  const CANVA_LONG = "https://www.canva.com/create/youtube-thumbnails/";
+  const CANVA_SHORT = "https://www.canva.com/create/instagram-stories/";
+  const canvaCfg = () => {
+    const c = cfg();
+    return { long: (c.canvaLong || "").trim() || CANVA_LONG, short: (c.canvaShort || "").trim() || CANVA_SHORT };
+  };
+  function canvaInfo() {
+    const link = $("#vfCanva").value.trim();
+    $("#vCanvaInfo").textContent = link
+      ? "已綁定設計 — 按 🎨 會直接開這一份，做完在 Canva 下載，回來 Ctrl+V 就進候選。"
+      : `還沒綁定：按 🎨 會開${$("#vfKind").value === "short" ? "直式" : "YouTube 縮圖"}的建立頁。在 Canva 建好後把網址貼回上面這一格，之後就直接開那份設計。`;
+  }
+  function canvaFileName(v) {
+    return (String(v.title || "縮圖").replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 40) || "縮圖") + ".jpg";
+  }
+  // 主縮圖存成檔案（只有本機圖片存得下來；YouTube 那種跨網域網址存不了，改用複製網址）
+  function canvaSaveThumb(v) {
+    const img = (v.thumbs && v.thumbs[v.thumbPick]) || v.thumb || "";
+    if (!img) return "";
+    if (!/^data:/.test(img)) return "url";
+    const a = document.createElement("a");
+    a.href = img; a.download = canvaFileName(v);
+    document.body.appendChild(a); a.click(); a.remove();
+    return "file";
+  }
+  // v 可以是庫裡的記錄，也可以是編輯器裡還沒存的暫時物件
+  function canvaOpen(v) {
+    const url = (v.canva || "").trim() || (v.kind === "short" ? canvaCfg().short : canvaCfg().long);
+    const txt = [
+      v.title || "",
+      v.series ? v.series + (v.ep !== "" && v.ep != null ? " EP" + v.ep : "") : "",
+      v.hashtags || ""
+    ].filter(Boolean).join("\n");
+    const done = [];
+    // 先複製再開分頁：開了新分頁之後原分頁失焦，剪貼簿就寫不進去了
+    if (txt) { navigator.clipboard.writeText(txt).catch(() => {}); done.push("文案已複製"); }
+    const th = canvaSaveThumb(v);
+    if (th === "file") done.push("主縮圖已下載（拖進 Canva 就能用）");
+    else if (th === "url") done.push("主縮圖是 YouTube 網址，請在 Canva 用網址匯入");
+    window.open(url, "_blank", "noopener");
+    toast((v.canva ? "已開啟這支影片的 Canva 設計" : "已開啟 Canva") + (done.length ? "：" + done.join("、") : ""));
+  }
+  function canvaFromEditor() {
+    return {
+      title: $("#vfTitle").value.trim(), series: $("#vfSeries").value.trim(), ep: $("#vfEp").value.trim(),
+      kind: $("#vfKind").value, hashtags: $("#vfHash").value.trim(), canva: $("#vfCanva").value.trim(),
+      thumbs: curThumbs, thumbPick: curPick, thumb: ""
+    };
+  }
+  $("#vCanvaGo").addEventListener("click", () => canvaOpen(canvaFromEditor()));
+  $("#vfCanva").addEventListener("input", canvaInfo);
+  $("#vfKind").addEventListener("change", canvaInfo);
+  $("#vCanvaPaste").addEventListener("click", async () => {
+    try {
+      const t = (await navigator.clipboard.readText() || "").trim();
+      if (!/^https?:\/\/(www\.)?canva\.com\//i.test(t)) { toast("剪貼簿裡不是 canva.com 的網址"); return; }
+      $("#vfCanva").value = t; canvaInfo(); toast("已貼上 Canva 設計連結（記得按儲存）");
+    } catch (e) { toast("讀不到剪貼簿，請直接貼進上面那一格"); }
   });
 
   // ---------- 章節 ----------
@@ -608,6 +676,7 @@
       const card = q.closest(".vd-card"); const v = videos.find(x => x.id === (card && card.dataset.id));
       if (!v) return;
       if (q.dataset.q === "play") { openPlayer(v.ytId, v.title); return; }
+      if (q.dataset.q === "canva") { canvaOpen(v); return; }
       if (q.dataset.q === "dup") { dupVideo(v); toast("已複製為新企劃（進度歸零）"); return; }
       const i = STAGES.findIndex(s => s.k === v.status), nx = STAGES[i + 1];
       if (!nx) { toast("已經在最後一個階段了"); return; }
@@ -1740,17 +1809,22 @@
     aiState();
   }
   function saveSettings() {
-    setCfg({ channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim() });
+    setCfg({
+      channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
+      canvaLong: $("#vCanvaLongUrl").value.trim(), canvaShort: $("#vCanvaShortUrl").value.trim()
+    });
     saveAiFields();
   }
   function openSettings(focusAi) {
     const c = cfg();
     $("#vfChannel").value = c.channel || "";
     $("#vfApiKey").value = c.apiKey || "";
+    $("#vCanvaLongUrl").value = c.canvaLong || "";
+    $("#vCanvaShortUrl").value = c.canvaShort || "";
     $("#vSyncInfo").textContent = "";
     loadAiFields();
     // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開
-    $$("#vSetOv .block").forEach((b, i) => b.classList.toggle("closed", focusAi ? i !== 1 : false));
+    $$("#vSetOv .block").forEach(b => b.classList.toggle("closed", focusAi ? b.id !== "vSetAiBlock" : false));
     $("#vSetOv").classList.add("show");
     if (focusAi) setTimeout(() => $("#vaiGem").focus(), 80);
   }
