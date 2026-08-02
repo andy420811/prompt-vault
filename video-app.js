@@ -29,7 +29,25 @@
   const VIEWS = ["board", "list", "cal"];
   let view = VIEWS.includes(localStorage.getItem("videodesk.view")) ? localStorage.getItem("videodesk.view") : "board";
   let calMonth = new Date().toISOString().slice(0, 7);   // 月曆顯示的月份 YYYY-MM
-  let lastDeleted = null;                                 // 單步復原用
+  let lastDeleted = null, lastDeletedAt = 0;              // 單步復原用（刪除）
+  let lastMove = null;                                    // 單步復原用（看板拖放：階段／順序）
+  /* 看板拖放前先拍一張快照：只記受影響那幾張的 status/order/published，Ctrl+Z 原封放回去。
+     以前拖錯了完全救不回來（Ctrl+Z 只認刪除），所以卡片一跑掉就只能自己找回原位。 */
+  function snapMove(list) {
+    lastMove = { at: Date.now(), snap: list.map(v => ({ id: v.id, status: v.status, order: v.order || 0, published: v.published || "" })) };
+  }
+  function undoMove() {
+    if (!lastMove) return false;
+    let n = 0;
+    lastMove.snap.forEach(s => {
+      const v = videos.find(x => x.id === s.id);
+      if (!v) return;
+      v.status = s.status; v.order = s.order; v.published = s.published; v.edited = Date.now(); n++;
+    });
+    lastMove = null; save(); render();
+    toast(`已復原看板上的移動（${n} 張卡片回到原位）`);
+    return true;
+  }
 
   // ---------- 持久化 ----------
   let _idbP = null;
@@ -164,7 +182,7 @@
       await idbSet(IDB_KEY, videos);
       localStorage.setItem("videodesk.updated", String(j.vupdated || Date.now()));
       localStorage.setItem("videodesk.cloudat", String(Date.now()));
-      lastDeleted = null; sel.clear();
+      lastDeleted = null; lastMove = null; sel.clear();   // 整包被雲端覆蓋後，舊的單步復原已經沒有意義
       render(); cloudInfo();
       toast(`已從雲端載入 ${videos.length} 支`);
     } catch (e) { if (manual) toast("載入失敗：" + e.message); }
@@ -288,16 +306,26 @@
       if (!q) return true;
       return (v.title + " " + v.series + " " + v.tags.join(" ") + " " + v.outline + " " + v.script + " " + v.notes).toLowerCase().includes(q);
     });
-    const by = {
-      edited: (a, b) => b.edited - a.edited,
-      due: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"),
-      published: (a, b) => (b.published || "").localeCompare(a.published || ""),
-      views: (a, b) => b.views - a.views,
-      title: (a, b) => a.title.localeCompare(b.title, "zh-Hant")
-    };
-    const cmp = by[sort] || by.edited;
+    const cmp = SORTS[sort] || SORTS.edited;
     return list.sort((a, b) => (view === "board" ? ((a.order || 0) - (b.order || 0)) || cmp(a, b) : cmp(a, b)));
   }
+  const SORTS = {
+    edited: (a, b) => b.edited - a.edited,
+    due: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"),
+    published: (a, b) => (b.published || "").localeCompare(a.published || ""),
+    views: (a, b) => b.views - a.views,
+    title: (a, b) => a.title.localeCompare(b.title, "zh-Hant")
+  };
+  const sortCmp = () => SORTS[$("#vSort").value] || SORTS.edited;
+  /* 看板某一欄「畫面上」的排序：先看 order，同分再照該欄顯示用的次序
+     （已發布欄用發布日新到舊，其餘用工具列的排序）。
+     ⚠ 拖放重排一定要用這個比較器，不能只用 order —— 剛匯入時 order 全是 0，
+       只比 order 等於沿用 videos 陣列的順序，跟畫面上看到的完全不同，
+       一拖就會把整欄重新編號成另一種排列（卡片看起來就「消失」到別的位置去了）。 */
+  const colCmp = stage => {
+    const tie = stage === "pub" ? SORTS.published : sortCmp();
+    return (a, b) => ((a.order || 0) - (b.order || 0)) || tie(a, b);
+  };
   function render() {
     renderStats(); renderSeriesOptions();
     $$("#vQuick button").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.qf || "") === quick)));
@@ -369,7 +397,7 @@
   function renderBoard(list) {
     $("#vBoard").innerHTML = STAGES.map(s => {
       let items = list.filter(v => v.status === s.k);
-      if (s.k === "pub") items = items.slice().sort((a, b) => (a.order || 0) - (b.order || 0) || (b.published || "").localeCompare(a.published || ""));
+      if (s.k === "pub") items = items.slice().sort(colCmp("pub"));
       const cap = capOf(s.k), shown = items.slice(0, cap), rest = items.length - shown.length;
       return `<section class="vd-col" data-stage="${s.k}">
         <div class="vd-col-head"><span class="dot"></span><span class="t">${s.zh}</span><span class="n">${items.length}</span>
@@ -967,18 +995,27 @@
     $$(".vd-card.drop-before").forEach(el => el.classList.remove("drop-before"));
     if (v) {
       const stage = col.dataset.stage, moved = v.status !== stage;
+      // 只拖了一點點、指標還停在自己身上＝根本沒移動，維持原位（以前這裡會當成「沒有落點」
+      // 而把卡片丟到整欄最後面，在有上限的欄位裡就直接看不見了）
+      if (!moved && before && before.dataset.id === v.id) { dragId = null; return; }
+      const mates = videos.filter(x => x.status === stage && x.id !== v.id).sort(colCmp(stage));
+      snapMove([v, ...mates]);   // 這一步可以 Ctrl+Z 復原
       if (moved) {
         v.status = stage;
         if (stage === "pub" && !v.published) v.published = new Date().toISOString().slice(0, 10);
       }
-      // 依落點重排同一欄的順序
-      const mates = videos.filter(x => x.status === stage && x.id !== v.id).sort((a, b) => (a.order || 0) - (b.order || 0));
+      // 依落點重排同一欄的順序（放在 before 那張前面；沒有 before＝放到最後）
       const at = before && before.dataset.id !== v.id ? mates.findIndex(x => x.id === before.dataset.id) : mates.length;
       mates.splice(at < 0 ? mates.length : at, 0, v);
       mates.forEach((x, i) => { x.order = i; });
       v.edited = Date.now();
+      // 落點超過這一欄的顯示上限就把上限撐開，別讓卡片掉到「顯示更多」後面像是不見了
+      const idx = mates.indexOf(v);
+      if (idx >= capOf(stage)) colShow[stage] = idx + 6;
       save(); render();
-      toast(moved ? `已移到「${STAGE[stage].zh}」` : "已調整順序");
+      const el = $(`.vd-card[data-id="${v.id}"]`);
+      if (el) el.scrollIntoView({ block: "nearest" });
+      toast((moved ? `已移到「${STAGE[stage].zh}」` : "已調整順序") + "（Ctrl+Z 可復原）");
     }
     dragId = null;
   });
@@ -1012,7 +1049,7 @@
     const v = videos.find(x => x.id === editingId);
     if (!confirm(`把「${(v && v.title) || "這支影片"}」丟進回收站？30 天內都可以還原。`)) return;
     if (v) trashAdd(v);
-    lastDeleted = v || null;
+    lastDeleted = v || null; lastDeletedAt = Date.now();
     videos = videos.filter(x => x.id !== editingId);
     save(); render(); closeEditor(); toast("已丟進回收站（Ctrl+Z 或設定裡的回收站可以救回來）");
   });
@@ -2282,8 +2319,10 @@
     }
     const inField = e.target.closest("input, textarea, select, [contenteditable='true']");
     if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z") && !inField) {
-      if (!lastDeleted) { toast("沒有可以復原的刪除"); return; }
       e.preventDefault();
+      // 刪除與看板拖放各留一步，復原比較晚發生的那一個
+      if (lastMove && (!lastDeleted || lastMove.at >= lastDeletedAt)) { undoMove(); return; }
+      if (!lastDeleted) { toast("沒有可以復原的動作"); return; }
       videos.unshift(normalize(lastDeleted)); lastDeleted = null; save(); render(); toast("已復原刪除的影片");
       return;
     }
