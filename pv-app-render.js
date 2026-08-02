@@ -110,10 +110,13 @@
     $$("#grid .card").forEach(c => {
       if (c.classList.contains("pile")) {
         const ids = pileMemberIds(c.dataset.stack || "");
-        const on = ids.length && ids.every(id => selected.has(id));
-        const some = !on && ids.some(id => selected.has(id));
+        const n = ids.filter(id => selected.has(id)).length;
+        const on = ids.length && n === ids.length;
         c.classList.toggle("sel", !!on);
-        c.classList.toggle("partial", !!some);
+        c.classList.toggle("partial", !on && n > 0);
+        // 疊起來就看不到裡面選了哪幾則，所以把「已選 n/m」寫在徽章上
+        const badge = c.querySelector(".pile-count");
+        if (badge) badge.textContent = n ? `已選 ${n}/${ids.length}` : `${ids.length} 件`;
       } else {
         c.classList.toggle("sel", selected.has(c.dataset.id));
       }

@@ -932,12 +932,44 @@
     $("#vSelCount").textContent = `已選 ${sel.size} 支`;
   }
   const selVideos = () => videos.filter(v => sel.has(v.id));
-  function clearSel() { sel.clear(); render(); }
+  function clearSel() { sel.clear(); vSelAnchor = ""; render(); }
+  /* ---------- 快捷鍵批量選取 ----------
+     Ctrl／⌘ 點＝加減選、Shift 點＝從上一張選到這裡、Ctrl+A＝全選目前篩選出來的、Esc＝取消選取。
+     選取狀態一律用 paintSel() 就地上色，不重繪整個看板（重繪會把欄位的捲動位置歸零）。 */
+  let vSelAnchor = "";
+  const selUnits = () => $$("#vBoard .vd-card, #vList .vd-row");
+  function paintSel() {
+    selUnits().forEach(el => {
+      const on = sel.has(el.dataset.id);
+      el.classList.toggle("sel", on);
+      const cb = el.querySelector("[data-sel]"); if (cb) cb.checked = on;
+    });
+    updateSelBar();
+  }
+  function selRange(fromId, toEl) {
+    const units = selUnits();
+    const a = units.findIndex(el => el.dataset.id === fromId), b = units.indexOf(toEl);
+    if (a < 0 || b < 0) return false;
+    // 看板：只在同一欄內做範圍選取（跨欄會把中間整欄掃進來，不會是使用者要的）
+    const colOf = el => el.closest(".vd-col");
+    if (view === "board" && colOf(units[a]) !== colOf(units[b])) return false;
+    const [s, t] = a <= b ? [a, b] : [b, a];
+    units.slice(s, t + 1).forEach(el => sel.add(el.dataset.id));
+    return true;
+  }
+  function selectAllVisible() {
+    visible().forEach(v => sel.add(v.id));
+    vSelAnchor = "";
+    paintSel();
+    toast(`已選取 ${sel.size} 支（目前篩選出來的全部）`);
+  }
   document.addEventListener("click", e => {
     const c = e.target.closest("[data-sel]"); if (!c) return;
     e.stopPropagation();   // 不要順便把編輯器打開
     const id = c.dataset.sel;
+    if (e.shiftKey && vSelAnchor && selRange(vSelAnchor, c.closest(".vd-card, .vd-row"))) { paintSel(); return; }
     if (c.checked) sel.add(id); else sel.delete(id);
+    vSelAnchor = id;
     const box = c.closest(".vd-card, .vd-row");
     if (box) box.classList.toggle("sel", c.checked);
     updateSelBar();
@@ -2349,6 +2381,10 @@
     }
     if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S") && $("#vEditor").classList.contains("show")) {
       e.preventDefault(); $("#vSaveBtn").click(); return;
+    }
+    // Ctrl／⌘+A＝把目前篩選出來的全部選起來（有彈窗開著時不搶）
+    if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A") && !inField && !$$(".overlay.show").length) {
+      e.preventDefault(); selectAllVisible(); return;
     }
     if (inField || $$(".overlay.show").length) return;
     if (e.key === "n" || e.key === "N") { e.preventDefault(); openEditor(null); }

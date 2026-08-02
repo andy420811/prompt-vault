@@ -274,12 +274,50 @@
     render();
   });
   // ---------- 勾選 → 堆疊同系列 ----------
+  /* ---------- 「已選 N 件」＝可展開的清單 ----------
+     堆疊維持收合後，選到的東西可能藏在疊裡看不見，所以點數字可以列出到底選了哪幾則，
+     每一列都能單獨取消，也能點標題跳到那張卡。 */
+  function renderSelList() {
+    const box = $("#sbList");
+    if (box.hidden) return;
+    const recs = selectedRecords();
+    box.innerHTML = recs.length
+      ? `<div class="sbl-head">目前選了 ${recs.length} 則<button type="button" class="sbl-close" data-sl="close">✕</button></div>`
+        + recs.map(p => `<div class="sbl-row" data-sl="go" data-id="${esc(p.id)}">
+            <span class="sbl-t">${esc(p.title || "未命名")}</span>
+            ${p.stack ? `<span class="sbl-s">${esc(stackName(stackPath(p).slice(-1)[0]))}</span>` : ""}
+            <button type="button" class="sbl-x" data-sl="off" data-id="${esc(p.id)}" title="取消選取這則">✕</button>
+          </div>`).join("")
+      : `<div class="sbl-head">還沒選任何東西<button type="button" class="sbl-close" data-sl="close">✕</button></div>`;
+  }
+  $("#sbCount").addEventListener("click", () => {
+    const box = $("#sbList");
+    box.hidden = !box.hidden;
+    renderSelList();
+  });
+  $("#sbList").addEventListener("click", e => {
+    const el = e.target.closest("[data-sl]"); if (!el) return;
+    const act = el.dataset.sl;
+    if (act === "close") { $("#sbList").hidden = true; return; }
+    if (act === "off") {
+      selected.delete(el.dataset.id);
+      paintSelection(); updateSelectBar(); return;
+    }
+    if (act === "go") {   // 跳到那張卡；被收在疊裡就先把整條路徑展開
+      const p = data.find(x => x.id === el.dataset.id); if (!p) return;
+      stackPath(p).forEach(s => expandedStacks.add(s));
+      render();
+      const card = $(`#grid .card[data-id="${el.dataset.id}"]`);
+      if (card) { card.scrollIntoView({ behavior: "smooth", block: "center" }); card.classList.add("flash"); setTimeout(() => card.classList.remove("flash"), 1600); }
+    }
+  });
   function updateSelectBar() {
     const bar = $("#selectBar");
     bar.hidden = !selectMode;
-    if (!selectMode) return;
+    if (!selectMode) { $("#sbList").hidden = true; return; }
     const n = selected.size;
-    $("#sbCount").textContent = `已選 ${n} 件`;
+    $("#sbCount").textContent = `已選 ${n} 件 ▾`;
+    renderSelList();
     $("#sbStack").disabled = n < 2;
     const anyStacked = [...selected].some(id => { const p = data.find(x => x.id === id); return p && p.stack; });
     $("#sbUnstack").disabled = !anyStacked;
