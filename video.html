@@ -363,6 +363,7 @@
       </div>
       <div class="pk-actions">
         <button type="button" class="btn primary" id="vScrGo" style="padding:9px 18px">🎬 開始拆鏡</button>
+        <button type="button" class="link-btn" id="vScrMin" style="color:var(--ink-3)">⤓ 縮到右下角背景跑</button>
         <span class="vd-note" id="vScrStatus"></span>
       </div>
       <div class="vd-shots" id="vScrResult"></div>
@@ -390,6 +391,7 @@
         <input id="vAiBrief" placeholder="例：標題要留懸念、不要爆雷結局"></div>
       <div class="pk-actions">
         <button type="button" class="btn primary" id="vAiGo" style="padding:9px 18px">✨ 產生</button>
+        <button type="button" class="link-btn" id="vAiMin" style="color:var(--ink-3)">⤓ 縮到右下角背景跑</button>
         <span class="vd-note" id="vAiStatus"></span>
       </div>
       <div id="vAiResult"></div>
@@ -416,6 +418,9 @@
     </div>
   </div>
 </div>
+
+<!-- 背景工作駐列（AI 拆鏡／文案縮到右下角時的膠囊） -->
+<div class="idea-dock" id="vJobDock" hidden></div>
 
 <div class="toast" id="vToast"></div>
 
