@@ -117,6 +117,8 @@
     videos = (Array.isArray(list) ? list : []).map(normalize);
     const c = cfg();
     if (!c.channel) setCfg({ channel: "UCCxQbx0erwfctMmCiKenrEQ" });   // 預設帶入使用者的頻道
+    const sv = localStorage.getItem("videodesk.sort");   // 排序方式記住上次選的
+    if (sv && [...$("#vSort").options].some(o => o.value === sv)) $("#vSort").value = sv;
     render();
     trashLoad().then(renderTrash);
     backupNag();
@@ -306,24 +308,28 @@
       if (!q) return true;
       return (v.title + " " + v.series + " " + v.tags.join(" ") + " " + v.outline + " " + v.script + " " + v.notes).toLowerCase().includes(q);
     });
-    const cmp = SORTS[sort] || SORTS.edited;
-    return list.sort((a, b) => (view === "board" ? ((a.order || 0) - (b.order || 0)) || cmp(a, b) : cmp(a, b)));
+    const cmp = sortCmp();
+    return list.sort((a, b) => (view === "board" && isManual() ? ((a.order || 0) - (b.order || 0)) || cmp(a, b) : cmp(a, b)));
   }
   const SORTS = {
     edited: (a, b) => b.edited - a.edited,
     due: (a, b) => (a.due || "9999").localeCompare(b.due || "9999"),
     published: (a, b) => (b.published || "").localeCompare(a.published || ""),
+    pubasc: (a, b) => (a.published || "9999").localeCompare(b.published || "9999"),
     views: (a, b) => b.views - a.views,
     title: (a, b) => a.title.localeCompare(b.title, "zh-Hant")
   };
+  const isManual = () => $("#vSort").value === "manual";   // 手動排序＝拖曳排出來的 order 說了算
   const sortCmp = () => SORTS[$("#vSort").value] || SORTS.edited;
-  /* 看板某一欄「畫面上」的排序：先看 order，同分再照該欄顯示用的次序
-     （已發布欄用發布日新到舊，其餘用工具列的排序）。
+  /* 看板每一欄（含已發布）「畫面上」的排序：
+       選了明確的排序方式 → 完全照它排，不看手動順序；
+       手動排序 → 先看 order，同分再用該欄的預設次序（已發布欄＝發布日新到舊，其餘＝最近編輯）。
      ⚠ 拖放重排一定要用這個比較器，不能只用 order —— 剛匯入時 order 全是 0，
        只比 order 等於沿用 videos 陣列的順序，跟畫面上看到的完全不同，
        一拖就會把整欄重新編號成另一種排列（卡片看起來就「消失」到別的位置去了）。 */
   const colCmp = stage => {
-    const tie = stage === "pub" ? SORTS.published : sortCmp();
+    if (!isManual()) return sortCmp();
+    const tie = stage === "pub" ? SORTS.published : SORTS.edited;
     return (a, b) => ((a.order || 0) - (b.order || 0)) || tie(a, b);
   };
   function render() {
@@ -396,8 +402,8 @@
   const capOf = k => colShow[k] || COL_CAP[k] || 40;
   function renderBoard(list) {
     $("#vBoard").innerHTML = STAGES.map(s => {
-      let items = list.filter(v => v.status === s.k);
-      if (s.k === "pub") items = items.slice().sort(colCmp("pub"));
+      // 每一欄都用 colCmp 再排一次，這樣「已發布」也吃工具列的排序（以前它被寫死成發布日）
+      const items = list.filter(v => v.status === s.k).sort(colCmp(s.k));
       const cap = capOf(s.k), shown = items.slice(0, cap), rest = items.length - shown.length;
       return `<section class="vd-col" data-stage="${s.k}">
         <div class="vd-col-head"><span class="dot"></span><span class="t">${s.zh}</span><span class="n">${items.length}</span>
@@ -862,7 +868,10 @@
   $("#vq").addEventListener("input", render);
   $("#vSeries").addEventListener("change", render);
   $("#vKind").addEventListener("change", render);
-  $("#vSort").addEventListener("change", render);
+  $("#vSort").addEventListener("change", () => {
+    try { localStorage.setItem("videodesk.sort", $("#vSort").value); } catch (e) {}
+    render();
+  });
   $("#vViewBoard").addEventListener("click", () => { view = "board"; localStorage.setItem("videodesk.view", view); render(); });
   $("#vViewList").addEventListener("click", () => { view = "list"; localStorage.setItem("videodesk.view", view); render(); });
   $("#vViewCal").addEventListener("click", () => { view = "cal"; localStorage.setItem("videodesk.view", view); render(); });
@@ -902,6 +911,16 @@
     if (add) { openEditor(null); $("#vfStatus").value = add.dataset.add; return; }
     const card = e.target.closest(".vd-card, .vd-row");
     if (card && (e.target.closest("#vBoard") || e.target.closest("#vList"))) {
+      // Ctrl／⌘ 點＝加減選、Shift 點＝從上一張選到這裡；沒按修飾鍵才是開編輯器
+      if (e.ctrlKey || e.metaKey || (e.shiftKey && vSelAnchor)) {
+        e.preventDefault();
+        if (!(e.shiftKey && vSelAnchor && selRange(vSelAnchor, card))) {
+          const id = card.dataset.id;
+          if (sel.has(id)) sel.delete(id); else sel.add(id);
+          vSelAnchor = id;
+        }
+        paintSel(); return;
+      }
       const v = videos.find(x => x.id === card.dataset.id); if (v) openEditor(v);
     }
   });
@@ -1015,7 +1034,9 @@
       save(); render();
       const el = $(`.vd-card[data-id="${v.id}"]`);
       if (el) el.scrollIntoView({ block: "nearest" });
-      toast((moved ? `已移到「${STAGE[stage].zh}」` : "已調整順序") + "（Ctrl+Z 可復原）");
+      // 目前不是「手動排序」的話，手動順序存下來了但畫面照排序規則走，講清楚免得以為拖失敗
+      if (!moved && !isManual()) toast("順序已記下，但目前依「" + ($("#vSort").selectedOptions[0] || {}).text + "」顯示 — 切到「手動排序」才看得到");
+      else toast((moved ? `已移到「${STAGE[stage].zh}」` : "已調整順序") + "（Ctrl+Z 可復原）");
     }
     dragId = null;
   });
