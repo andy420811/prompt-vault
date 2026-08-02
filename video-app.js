@@ -58,7 +58,7 @@
   function save() {
     // localStorage 只放去圖輕量版當備援；完整（含縮圖 dataURI）進 IndexedDB
     try { localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [] })))); } catch (e) {}
-    idbSet(IDB_KEY, videos);
+    return idbSet(IDB_KEY, videos);   // 回傳 promise：要跳頁前可以先等寫入完成
   }
   function cfg() {
     try { return JSON.parse(localStorage.getItem(KEY_CFG)) || {}; } catch (e) { return {}; }
@@ -79,7 +79,6 @@
     v.thumbs = Array.isArray(v.thumbs) ? v.thumbs.filter(x => typeof x === "string") : [];
     v.thumbPick = Math.min(Math.max(0, +v.thumbPick || 0), Math.max(0, v.thumbs.length - 1));
     v.desc = String(v.desc || ""); v.hashtags = String(v.hashtags || ""); v.playlist = String(v.playlist || "");
-    v.canva = String(v.canva || "");   // 這支影片綁定的 Canva 設計連結
     v.chapters = Array.isArray(v.chapters) ? v.chapters.map(c => ({ t: String(c.t || ""), n: String(c.n || "") })) : [];
     v.order = +v.order || 0;
     v.links = Array.isArray(v.links) ? v.links.filter(x => typeof x === "string") : [];
@@ -183,7 +182,7 @@
     return `<article class="vd-card" data-id="${v.id}" draggable="true">
       <div class="vd-quick">
         ${v.ytId ? `<button type="button" data-q="play" title="在這裡播放">▶</button>` : ""}
-        <button type="button" data-q="canva" title="${v.canva ? "開這支影片的 Canva 設計" : "到 Canva 做縮圖"}">🎨</button>
+        <button type="button" data-q="canvas" title="加到專案畫布並跳過去">🧩</button>
         ${next ? `<button type="button" data-q="next" title="推進到「${next.zh}」">⏭</button>` : ""}
         <button type="button" data-q="dup" title="複製為新企劃">⧉</button>
       </div>
@@ -316,8 +315,6 @@
     $("#vfDesc").value = v ? v.desc : "";
     $("#vfHash").value = v ? v.hashtags : "";
     $("#vfPlaylist").value = v ? v.playlist : "";
-    $("#vfCanva").value = v ? v.canva : "";
-    canvaInfo();
     $("#vDelBtn").style.display = v ? "" : "none";
     $("#vDupBtn").style.display = v ? "" : "none";
     $("#vNextEp").style.display = v && v.series ? "" : "none";
@@ -382,7 +379,6 @@
       links: curLinks.slice(),
       thumbs: curThumbs.slice(), thumbPick: curPick,
       desc: $("#vfDesc").value, hashtags: $("#vfHash").value.trim(), playlist: $("#vfPlaylist").value.trim(),
-      canva: $("#vfCanva").value.trim(),
       chapters: curChaps.filter(c => c.t.trim() || c.n.trim()).sort((a, b) => secOf(a.t) - secOf(b.t))
     };
     const old = videos.find(x => x.id === v.id);
@@ -458,68 +454,42 @@
     addThumbFiles(items.map(x => x.getAsFile()).filter(Boolean));
   });
 
-  /* ---------- Canva：把素材備好，然後開 Canva ----------
-     Canva 擋 iframe（也沒有公開的「用網址帶入素材」介面），所以這裡是開新分頁；
-     按下去會先把文案複製到剪貼簿、把目前主縮圖存成檔案，到 Canva 直接貼上／拖進去就好。 */
-  const CANVA_LONG = "https://www.canva.com/create/youtube-thumbnails/";
-  const CANVA_SHORT = "https://www.canva.com/create/instagram-stories/";
-  const canvaCfg = () => {
-    const c = cfg();
-    return { long: (c.canvaLong || "").trim() || CANVA_LONG, short: (c.canvaShort || "").trim() || CANVA_SHORT };
-  };
-  function canvaInfo() {
-    const link = $("#vfCanva").value.trim();
-    $("#vCanvaInfo").textContent = link
-      ? "已綁定設計 — 按 🎨 會直接開這一份，做完在 Canva 下載，回來 Ctrl+V 就進候選。"
-      : `還沒綁定：按 🎨 會開${$("#vfKind").value === "short" ? "直式" : "YouTube 縮圖"}的建立頁。在 Canva 建好後把網址貼回上面這一格，之後就直接開那份設計。`;
+  /* ---------- 加到專案畫布 ----------
+     畫布（pv-canvas.js）住在 Prompt 庫那一頁，資料在 localStorage `promptvault.canvas`。
+     這裡直接把節點寫進畫布的目前專案，再跳過去並定位到那顆節點。 */
+  const PVC_KEY = "promptvault.canvas";
+  function canvasStore() {
+    try { const s = JSON.parse(localStorage.getItem(PVC_KEY)); if (s && Array.isArray(s.projects)) return s; } catch (e) {}
+    return { projects: [], currentId: "" };
   }
-  function canvaFileName(v) {
-    return (String(v.title || "縮圖").replace(/[\\/:*?"<>|]/g, "").trim().slice(0, 40) || "縮圖") + ".jpg";
+  async function canvasAdd(v) {
+    if (!v || !v.id) { toast("請先儲存這支影片"); return; }
+    const st = canvasStore();
+    let proj = st.projects.find(p => p.id === st.currentId) || st.projects[0];
+    if (!proj) {
+      proj = { id: uid(), name: "我的專案", nodes: [], edges: [], panX: 0, panY: 0, zoom: 1, created: Date.now(), edited: Date.now() };
+      st.projects.push(proj);
+    }
+    st.currentId = proj.id;
+    proj.nodes = Array.isArray(proj.nodes) ? proj.nodes : [];
+    proj.edges = Array.isArray(proj.edges) ? proj.edges : [];
+    let node = proj.nodes.find(n => n.kind === "vid" && n.vref === v.id);
+    if (node) toast("這支已經在畫布上了 — 幫你跳過去");
+    else {
+      // 放在現有節點下方，避免疊在一起（畫布還有「⬚ 自動排列」可以整理）
+      const xs = proj.nodes.map(n => +n.x || 0), ys = proj.nodes.map(n => +n.y || 0);
+      const x = proj.nodes.length ? Math.min.apply(null, xs) : 80;
+      const y = proj.nodes.length ? Math.max.apply(null, ys) + 300 : 80;
+      node = { id: uid(), kind: "vid", vref: v.id, title: v.title || "", text: "", x, y };
+      proj.nodes.push(node);
+      proj.edited = Date.now();
+      toast("已加到畫布，正在開啟…");
+    }
+    try { localStorage.setItem(PVC_KEY, JSON.stringify(st)); }
+    catch (e) { toast("寫不進畫布（瀏覽器儲存空間已滿）"); return; }
+    await save();   // 影片資料先確實寫進 IndexedDB，畫布那邊才讀得到（尤其是剛建立的影片）
+    location.href = "prompt-vault.html#canvas=" + encodeURIComponent(node.id);
   }
-  // 主縮圖存成檔案（只有本機圖片存得下來；YouTube 那種跨網域網址存不了，改用複製網址）
-  function canvaSaveThumb(v) {
-    const img = (v.thumbs && v.thumbs[v.thumbPick]) || v.thumb || "";
-    if (!img) return "";
-    if (!/^data:/.test(img)) return "url";
-    const a = document.createElement("a");
-    a.href = img; a.download = canvaFileName(v);
-    document.body.appendChild(a); a.click(); a.remove();
-    return "file";
-  }
-  // v 可以是庫裡的記錄，也可以是編輯器裡還沒存的暫時物件
-  function canvaOpen(v) {
-    const url = (v.canva || "").trim() || (v.kind === "short" ? canvaCfg().short : canvaCfg().long);
-    const txt = [
-      v.title || "",
-      v.series ? v.series + (v.ep !== "" && v.ep != null ? " EP" + v.ep : "") : "",
-      v.hashtags || ""
-    ].filter(Boolean).join("\n");
-    const done = [];
-    // 先複製再開分頁：開了新分頁之後原分頁失焦，剪貼簿就寫不進去了
-    if (txt) { navigator.clipboard.writeText(txt).catch(() => {}); done.push("文案已複製"); }
-    const th = canvaSaveThumb(v);
-    if (th === "file") done.push("主縮圖已下載（拖進 Canva 就能用）");
-    else if (th === "url") done.push("主縮圖是 YouTube 網址，請在 Canva 用網址匯入");
-    window.open(url, "_blank", "noopener");
-    toast((v.canva ? "已開啟這支影片的 Canva 設計" : "已開啟 Canva") + (done.length ? "：" + done.join("、") : ""));
-  }
-  function canvaFromEditor() {
-    return {
-      title: $("#vfTitle").value.trim(), series: $("#vfSeries").value.trim(), ep: $("#vfEp").value.trim(),
-      kind: $("#vfKind").value, hashtags: $("#vfHash").value.trim(), canva: $("#vfCanva").value.trim(),
-      thumbs: curThumbs, thumbPick: curPick, thumb: ""
-    };
-  }
-  $("#vCanvaGo").addEventListener("click", () => canvaOpen(canvaFromEditor()));
-  $("#vfCanva").addEventListener("input", canvaInfo);
-  $("#vfKind").addEventListener("change", canvaInfo);
-  $("#vCanvaPaste").addEventListener("click", async () => {
-    try {
-      const t = (await navigator.clipboard.readText() || "").trim();
-      if (!/^https?:\/\/(www\.)?canva\.com\//i.test(t)) { toast("剪貼簿裡不是 canva.com 的網址"); return; }
-      $("#vfCanva").value = t; canvaInfo(); toast("已貼上 Canva 設計連結（記得按儲存）");
-    } catch (e) { toast("讀不到剪貼簿，請直接貼進上面那一格"); }
-  });
 
   // ---------- 章節 ----------
   function secOf(t) {
@@ -676,7 +646,7 @@
       const card = q.closest(".vd-card"); const v = videos.find(x => x.id === (card && card.dataset.id));
       if (!v) return;
       if (q.dataset.q === "play") { openPlayer(v.ytId, v.title); return; }
-      if (q.dataset.q === "canva") { canvaOpen(v); return; }
+      if (q.dataset.q === "canvas") { canvasAdd(v); return; }
       if (q.dataset.q === "dup") { dupVideo(v); toast("已複製為新企劃（進度歸零）"); return; }
       const i = STAGES.findIndex(s => s.k === v.status), nx = STAGES[i + 1];
       if (!nx) { toast("已經在最後一個階段了"); return; }
@@ -746,14 +716,26 @@
   // 編輯器
   $("#vEdClose").addEventListener("click", closeEditor);
   $("#vEdCancel").addEventListener("click", closeEditor);
-  $("#vSaveBtn").addEventListener("click", () => {
+  function saveEditor() {
     const wasNew = !editingId;
     const v = collect();
-    if (!v.title && !v.url) { toast("至少要有標題或 YouTube 連結"); return; }
+    if (!v.title && !v.url) { toast("至少要有標題或 YouTube 連結"); return null; }
     const i = videos.findIndex(x => x.id === v.id);
     if (i >= 0) videos[i] = v; else videos.unshift(v);
     if (wasNew) bindJobsTo(v.id);   // 背景還在跑的 AI 工作接到剛存的這一支
-    save(); render(); closeEditor(); toast("已儲存");
+    save(); render();
+    return v;
+  }
+  $("#vSaveBtn").addEventListener("click", () => {
+    const v = saveEditor();
+    if (!v) return;
+    closeEditor(); toast("已儲存");
+    maybeEnrich(v);   // 空的標題／大綱／說明欄／標籤在背景自動補完
+  });
+  // 加到畫布：先存起來（不然跳頁就沒了），再把節點寫進畫布並跳過去
+  $("#vCanvasBtn").addEventListener("click", () => {
+    const v = saveEditor();
+    if (v) canvasAdd(v);
   });
   $("#vDelBtn").addEventListener("click", () => {
     if (!editingId) return;
@@ -1711,6 +1693,69 @@
   $("#vAiClose").addEventListener("click", () => closeAi());
   $("#vAiDone").addEventListener("click", () => closeAi());
 
+  /* =========================================================================
+     儲存時自動補完 — 空的標題／大綱／說明欄／hashtag／標籤直接由 AI 填好
+     只碰空欄位（自己寫過的一律不動）；沒金鑰、素材太少、或欄位都填滿了就不跑。
+     ========================================================================= */
+  const FILL_SYS = "你是華語 YouTube 頻道的內容企劃。使用者會給一支影片目前有的資料，以及還缺哪些欄位。請只補那些缺的欄位，全部用繁體中文：title＝30 字內、具體有鉤子的影片標題；outline＝一句話大綱（40 字內）；desc＝說明欄草稿（3～6 行，第一行要能留住觀眾）；hashtags＝3～6 個以空白分隔的 # 標籤；tags＝5～10 個關鍵字（不含 #）。資料太少就依現有線索合理推測，不要編造影片裡沒有的事實，也不要瞎誇大。只回 JSON。";
+  const FILL_SCHEMA = { type: "OBJECT", properties: {
+    title: { type: "STRING" }, outline: { type: "STRING" }, desc: { type: "STRING" },
+    hashtags: { type: "STRING" }, tags: { type: "ARRAY", items: { type: "STRING" } }
+  } };
+  const FILL_LABEL = { title: "標題", outline: "大綱", desc: "說明欄", hashtags: "hashtag", tags: "標籤" };
+  const enriching = new Set();
+  function missingOf(v) {
+    const miss = ["title", "outline", "desc", "hashtags"].filter(k => !String(v[k] || "").trim());
+    if (!v.tags.length) miss.push("tags");
+    return miss;
+  }
+  function maybeEnrich(v) {
+    if (!v || cfg().autoFill === false || !hasAiKey() || enriching.has(v.id)) return;
+    const miss = missingOf(v);
+    if (!miss.length) return;
+    const material = [v.title, v.outline, v.script, v.notes, v.series].join(" ").trim();
+    if (material.length < 12) return;   // 幾乎沒東西可以參考就不要亂猜
+    enriching.add(v.id);
+    const ask = [
+      "【要補的欄位】" + miss.map(k => FILL_LABEL[k]).join("、"),
+      "【類型】" + (v.kind === "short" ? "YouTube Shorts 直式短片" : "長片"),
+      v.series ? "【系列】" + v.series + (v.ep !== "" ? " EP" + v.ep : "") : "",
+      v.title ? "【目前標題】" + v.title : "",
+      v.outline ? "【大綱】" + v.outline : "",
+      v.tags.length ? "【既有標籤】" + v.tags.join("、") : "",
+      v.script ? "【腳本】\n" + v.script.slice(0, 4000) : "",
+      v.notes ? "【備註】" + v.notes : ""
+    ].filter(Boolean).join("\n\n");
+    jobRun({
+      title: "自動補完：" + (v.title || v.series || "未命名").slice(0, 10), icon: "🪄", vid: v.id,
+      work: () => aiCall(FILL_SYS, ask, FILL_SCHEMA),
+      after: () => enriching.delete(v.id),
+      autoApply: () => true,          // 補完就直接填回去，不用使用者再點一次
+      open: (res, j) => applyEnrich(j.vid, res)
+    });
+  }
+  function applyEnrich(id, r) {
+    const v = videos.find(x => x.id === id);
+    if (!v) return;   // 補完期間被刪掉了
+    const filled = [];
+    ["title", "outline", "desc", "hashtags"].forEach(k => {
+      const val = String(r[k] || "").trim();
+      if (val && !String(v[k] || "").trim()) { v[k] = val; filled.push(FILL_LABEL[k]); }
+    });
+    const tags = (Array.isArray(r.tags) ? r.tags : []).map(t => String(t).trim()).filter(Boolean);
+    if (tags.length && !v.tags.length) { v.tags = tags.slice(0, 10); filled.push("標籤"); }
+    if (!filled.length) return;
+    v.edited = Date.now();
+    save(); render();
+    // 編輯器正好開著同一支：只把「畫面上還空著」的欄位補上，不動使用者打到一半的字
+    if (editingId === id) {
+      const put = (sel, val) => { if (val && !$(sel).value.trim()) $(sel).value = val; };
+      put("#vfTitle", v.title); put("#vfOutline", v.outline); put("#vfDesc", v.desc); put("#vfHash", v.hashtags);
+      if (!$("#vfTags").value.trim()) $("#vfTags").value = v.tags.join(", ");
+    }
+    toast("已自動補完：" + filled.join("、"));
+  }
+
   /* ---------- YouTube 內嵌播放（不跳站） ---------- */
   function openPlayer(id, title) {
     if (!id) { toast("還沒有 YouTube 連結"); return; }
@@ -1811,7 +1856,7 @@
   function saveSettings() {
     setCfg({
       channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
-      canvaLong: $("#vCanvaLongUrl").value.trim(), canvaShort: $("#vCanvaShortUrl").value.trim()
+      autoFill: $("#vAutoFill").checked
     });
     saveAiFields();
   }
@@ -1819,8 +1864,7 @@
     const c = cfg();
     $("#vfChannel").value = c.channel || "";
     $("#vfApiKey").value = c.apiKey || "";
-    $("#vCanvaLongUrl").value = c.canvaLong || "";
-    $("#vCanvaShortUrl").value = c.canvaShort || "";
+    $("#vAutoFill").checked = c.autoFill !== false;   // 沒設定過＝預設開著
     $("#vSyncInfo").textContent = "";
     loadAiFields();
     // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開

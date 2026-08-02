@@ -129,9 +129,21 @@
   });
 
   /* ---------- 從影片製作台（video.html）跳過來的深層連結 ----------
-     #p=<記錄 id> → 開那一筆的編輯器；#script → 開「腳本 → 分鏡」並帶入 sessionStorage 的腳本。 */
+     #p=<記錄 id> → 開那一筆的編輯器；#canvas=<節點 id> → 開畫布並定位到那顆節點；
+     #script → 開「腳本 → 分鏡」並帶入 sessionStorage 的腳本。 */
   function handleHashLink() {
     const h = location.hash || "";
+    if (h.startsWith("#canvas")) {
+      const eq = h.indexOf("=");
+      const node = eq > 0 ? decodeURIComponent(h.slice(eq + 1)) : "";
+      const go = () => {
+        if (window.PVCanvas) { window.PVCanvas.open(node); if (node) toast("已在畫布上標出這支影片"); }
+        else toast("畫布模組未載入（請確認 pv-canvas.js 與本檔同資料夾）");
+        history.replaceState(null, "", location.pathname + location.search);
+      };
+      if (imagesHydrated) go(); else setTimeout(go, 400);
+      return;
+    }
     if (h.startsWith("#p=")) {
       const id = decodeURIComponent(h.slice(3));
       const open = () => {

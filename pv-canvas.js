@@ -1252,14 +1252,32 @@ window.PVCanvas = (function () {
     if (pick.dataset.vid) pickerAddVid(pick.dataset.vid); else pickerAdd(pick.dataset.id);
   });
 
-  function open() {
+  /* 開啟時定位到某一顆節點（影片製作台的「加到畫布」跳過來時用）。
+     focus 可以是節點 id，也可以是影片 id（vref）；被收在疊裡就標出代表它的那一顆。 */
+  let pendingFocus = "";
+  function focusNode(key) {
+    if (!key || !cur || !ui) return;
+    const n = cur.nodes.find(x => x.id === key) || cur.nodes.find(x => x.vref === key);
+    if (!n) return;
+    const vis = visibleId(n.id, foldMap());
+    centerOn(vis);
+    const el = ui.nodes.querySelector('.pvc-node[data-id="' + vis + '"]');
+    if (el) { el.classList.add("hit"); setTimeout(() => el.classList.remove("hit"), 3000); }
+  }
+  function open(focus) {
+    pendingFocus = focus || "";
     ensureUI();
     hookRender();
     if (!store.projects.length) newProject("我的專案");
     cur = curProject(); store.currentId = cur.id; save();
     resetKnown(); setAutoWire(autoWire()); setFoldEvo(autoFoldEvo());
-    vidLoad().then(() => { if (ui.overlay.classList.contains("show")) renderNodes(true); });
+    vidLoad().then(() => {
+      if (!ui.overlay.classList.contains("show")) return;
+      renderNodes(true);
+      if (pendingFocus) { focusNode(pendingFocus); pendingFocus = ""; }   // 影片節點要等影片快取載好才畫得出來
+    });
     ui.overlay.classList.add("show"); renderAll();
+    if (pendingFocus) setTimeout(() => focusNode(pendingFocus), 60);
   }
   return { open };
 })();

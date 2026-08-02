@@ -186,10 +186,6 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
   background: rgba(10,9,16,.6); color: #fff; font-size: 13px; line-height: 20px; cursor: pointer; padding: 0; }
 .vd-thumb-item .x:hover { background: var(--danger); }
 
-/* ---- Canva ---- */
-.vd-canva { border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 2px;
-  display: flex; flex-direction: column; gap: 9px; }
-
 /* ---- 章節 ---- */
 .vd-chaps { display: flex; flex-direction: column; gap: 6px; }
 .vd-chap-row { display: flex; gap: 8px; align-items: center; }

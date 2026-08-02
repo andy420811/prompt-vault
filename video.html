@@ -123,15 +123,6 @@
             <button type="button" class="link-btn" id="vThumbYt" style="color:var(--ink-3)">用 YouTube 縮圖</button>
           </div>
           <input type="file" id="vThumbFile" accept="image/*" multiple hidden>
-          <div class="vd-canva">
-            <div class="field"><label for="vfCanva">Canva 設計連結 <span class="opt">選填，貼一次之後按 🎨 就直接開這份設計</span></label>
-              <input id="vfCanva" type="url" placeholder="https://www.canva.com/design/DA…/edit"></div>
-            <div class="pk-actions">
-              <button type="button" class="btn ghost" id="vCanvaGo" style="padding:7px 14px">🎨 到 Canva 做縮圖</button>
-              <button type="button" class="link-btn" id="vCanvaPaste" style="color:var(--ink-3)">⧉ 貼上剛複製的 Canva 網址</button>
-            </div>
-            <p class="vd-note" id="vCanvaInfo"></p>
-          </div>
         </div>
       </div>
 
@@ -218,6 +209,7 @@
     </div>
     <div class="modal-foot">
       <button class="btn ghost del-side" id="vDelBtn" style="color:var(--danger)">刪除</button>
+      <button class="btn ghost" id="vCanvasBtn" title="把這支影片放到 Prompt 庫的專案畫布上">🧩 加到畫布</button>
       <button class="btn ghost" id="vDupBtn">複製為新企劃</button>
       <button class="btn ghost" id="vNextEp">＋ 建立下一集</button>
       <button class="btn ghost" id="vEdCancel">取消</button>
@@ -276,18 +268,6 @@
           <p class="vd-note" id="vSyncInfo"></p>
         </div>
       </div>
-      <div class="block">
-        <div class="block-head" data-toggle><span class="bt">Canva</span>
-          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
-        </div>
-        <div class="block-body">
-          <p class="hint">按 🎨 時要開哪一頁。想固定用自己的模板，就在 Canva 開那個模板、複製網址貼進來（每支影片也可以在編輯器裡各自綁一份設計）。</p>
-          <div class="field"><label for="vCanvaLongUrl">長片（橫式縮圖）</label>
-            <input id="vCanvaLongUrl" type="url" placeholder="https://www.canva.com/create/youtube-thumbnails/"></div>
-          <div class="field"><label for="vCanvaShortUrl">Shorts（直式）</label>
-            <input id="vCanvaShortUrl" type="url" placeholder="https://www.canva.com/create/instagram-stories/"></div>
-        </div>
-      </div>
       <div class="block" id="vSetAiBlock">
         <div class="block-head" data-toggle><span class="bt">AI 金鑰（與 Prompt 庫共用）</span><span class="bn" id="vAiState"></span>
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
@@ -302,6 +282,10 @@
             <div class="field"><label for="vaiProxy">後端代理網址 <span class="opt">選填，填了優先走它</span></label><input id="vaiProxy" placeholder="https://…workers.dev/ai"></div>
             <div class="field"><label for="vaiProxyPw">代理密碼 <span class="opt">選填</span></label><input id="vaiProxyPw" type="password"></div>
           </div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);cursor:pointer">
+            <input type="checkbox" id="vAutoFill" style="width:16px;height:16px"> 儲存影片時自動補完空的標題／大綱／說明欄／hashtag／標籤
+          </label>
+          <p class="hint" style="margin:0">只補「空著」的欄位，你自己寫過的一律不動。有腳本或大綱時效果最好；沒有金鑰就不會跑。</p>
           <p class="vd-note" id="vaiInfo"></p>
         </div>
       </div>
