@@ -2309,5 +2309,21 @@
   }
   window.addEventListener("hashchange", openFromHash);
 
+  /* PWA：這一頁本來只靠 Prompt 庫註冊的 SW（scope 涵蓋整站）來快取，直接開這頁時就沒有。
+     SW 已改成「快取優先＋背景更新」，所以切頁不必等網路；背景抓到新版會 postMessage 通知。 */
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    let noticed = false;
+    navigator.serviceWorker.addEventListener("message", e => {
+      if (!e.data || e.data.type !== "PV_UPDATED" || noticed) return;
+      noticed = true;
+      const show = () => {
+        if (document.querySelector(".modal-ov.show, .overlay.show")) return setTimeout(show, 4000);   // 編輯中不打擾
+        toast("🔄 有新版本 — 重新整理即可套用");
+      };
+      show();
+    });
+  }
+
   boot().then(openFromHash);
 })();

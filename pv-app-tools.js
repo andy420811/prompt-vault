@@ -837,6 +837,94 @@
     });
   });
 
+  // 把 AI 反推的結果寫進一筆既有記錄（批次反推用，單張走編輯器那條）
+  function applyRevToRec(rec, r) {
+    rec.type = r.type === "video" ? "video" : "image";
+    rec.prompt = r.prompt || "";
+    if (r.title) rec.title = r.title;
+    GROUPS.forEach(g => { rec[g] = (r[g] || []).filter(v => LABEL[v]); });
+    if (Array.isArray(r.tags) && r.tags.length) rec.tags = r.tags.filter(Boolean);
+    if (r.model) rec.model = r.model;
+    ["ar", "seed", "steps", "cfg"].forEach(k => { if (r[k]) rec.params[k] = r[k]; });
+    if (rec.type === "video") { if (r.duration) rec.params.duration = r.duration; if (r.fps) rec.params.fps = r.fps; }
+    if (r.constraint && !rec.notes.includes(r.constraint)) rec.notes = (rec.notes ? rec.notes + "；" : "") + r.constraint;
+    if (Array.isArray(r.variables)) rec.vars = cleanVars(rec.prompt, r.variables);
+    rec.edited = Date.now();
+  }
+  /* ---------- 批次圖反推（≥2 張）----------
+     先建一個新堆疊與每張的佔位記錄，再背景逐張反推寫回去；失敗只標記該張，不中斷整批。 */
+  let batchCancel = false;
+  function startBatchRev(items, common) {
+    const seg = uid(), d = new Date();
+    stackNames[seg] = `批次反推 ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    saveStackNames();
+    const ids = items.map((it, i) => {
+      const rec = normalize({ id: uid(), type: "image", title: `反推中…（${i + 1}）`, prompt: "",
+        imgs: [it.img], stack: seg, notes: "附圖為反推的參考圖" });
+      data.unshift(rec);
+      return rec.id;
+    });
+    commitStacks(`已建立堆疊「${stackNames[seg]}」，背景反推 ${items.length} 張進行中`);
+    runBatchRev(ids, items, common);
+  }
+  async function runBatchRev(ids, items, common) {
+    batchCancel = false;
+    bgJobShow(`批次圖反推（${items.length} 張）`, items.length, () => { batchCancel = true; });
+    let ok = 0, fail = 0, i = 0;
+    for (; i < ids.length; i++) {
+      if (batchCancel) break;
+      bgJobTick(i, items.length, `第 ${i + 1} 張反推中…`);
+      const rec = data.find(p => p.id === ids[i]);
+      if (!rec) continue;   // 這張已被使用者刪除 → 跳過
+      try {
+        applyRevToRec(rec, await aiCall(REV_SYS, revParts(items[i].img, mergeDesc(common, items[i].desc)), REV_SCHEMA));
+        ok++;
+      } catch (e) {
+        rec.title = `⚠ 反推失敗（${i + 1}）`;
+        rec.notes = (rec.notes ? rec.notes + "；" : "") + "AI 反推失敗：" + e.message;
+        rec.edited = Date.now();
+        fail++;
+      }
+      ensureNames(); syncGroups(); save(true); render();
+      bgJobTick(i + 1, items.length);
+    }
+    if (batchCancel && i < ids.length) {   // 取消 → 剩餘的標成未反推
+      for (; i < ids.length; i++) {
+        const rec = data.find(p => p.id === ids[i]);
+        if (rec && !rec.prompt) { rec.title = `（未反推）（${i + 1}）`; rec.edited = Date.now(); }
+      }
+      save(true); render();
+    }
+    bgJobDone();
+    toast(batchCancel
+      ? `批次反推已取消（完成 ${ok} 張）`
+      : `批次反推完成：成功 ${ok} 張` + (fail ? `、失敗 ${fail} 張` : ""));
+  }
+
+  /* ---------- 背景任務進度小視窗（通用 API）----------
+     使用者：語意索引（sem）、批次生成（gen）、批次反推（上面）、儲存後背景補完（analyze）。
+     ⚠ 這三支是跨檔共用的全域，2026-08-02 重寫本檔時曾整段掉光，害語意索引／批次生成按下去
+        直接丟出未捕捉的 rejection、畫面完全沒反應——別再刪掉。 */
+  let bgJobCancelCb = null;
+  function bgJobShow(label, total, onCancel) {
+    bgJobCancelCb = onCancel || null;
+    $("#bgJobLabel").textContent = label;
+    const c = $("#bgJobCancel");
+    c.disabled = false; c.textContent = "取消"; c.style.display = onCancel ? "" : "none";
+    bgJobTick(0, total);
+    $("#bgJob").hidden = false;
+  }
+  function bgJobTick(done, total, note) {
+    $("#bgJobFill").style.width = total ? Math.round(Math.min(done, total) / total * 100) + "%" : "0%";
+    $("#bgJobCount").textContent = (note ? note + "　" : "") + `${Math.min(done, total)} / ${total}`;
+  }
+  function bgJobDone() { $("#bgJob").hidden = true; bgJobCancelCb = null; }
+  $("#bgJobCancel").addEventListener("click", () => {
+    if (!bgJobCancelCb) return;
+    bgJobCancelCb(); bgJobCancelCb = null;
+    const c = $("#bgJobCancel"); c.disabled = true; c.textContent = "取消中…";
+  });
+
   // ---------- video → prompt (reverse engineering) ----------
   const VREV_SCHEMA = JSON.parse(JSON.stringify(AI_SCHEMA));
   VREV_SCHEMA.properties.prompt = { type: "STRING" };

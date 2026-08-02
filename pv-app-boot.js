@@ -15,10 +15,14 @@
   function updateBackupNote() {
     const n = +localStorage.getItem(DIRTY) || 0;
     const el = $("#backupNote");
+    if (el.dataset.upd) return;   // 正在顯示「有新版本」時不要被備份提醒蓋掉
     el.hidden = n < 15;
     if (n >= 15) el.textContent = `${n} 筆變更未備份 — 點此匯出`;
   }
-  $("#backupNote").addEventListener("click", exportJSON);
+  $("#backupNote").addEventListener("click", () => {
+    if ($("#backupNote").dataset.upd) location.reload();   // 版本提示模式：點了就換新版
+    else exportJSON();
+  });
   updateBackupNote();
 
   // ---------- 雲端同步（透過後端 KV）----------
@@ -175,6 +179,26 @@
   // PWA：註冊 service worker（file:// 直開不支援，略過；http(s) 才註冊）
   if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost" || location.hostname === "127.0.0.1")) {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
+    swUpdateNotice();
+  }
+  /* SW 改成「快取優先＋背景更新」後，切頁不必等網路，代價是新版會晚一輪才生效。
+     背景抓到新版時 SW 會 postMessage PV_UPDATED，這裡跳一次提示讓使用者自己決定何時換過去。
+     （只提示一次；編輯器／彈窗開著時不打擾，等關掉再說。） */
+  function swUpdateNotice() {
+    let noticed = false;
+    navigator.serviceWorker.addEventListener("message", e => {
+      if (!e.data || e.data.type !== "PV_UPDATED" || noticed) return;
+      noticed = true;
+      const show = () => {
+        if (document.querySelector(".overlay.show")) return setTimeout(show, 4000);
+        const el = $("#backupNote");   // 沿用 header 那條提示列（點擊行為靠 dataset.upd 切換）
+        if (!el) return;
+        el.dataset.upd = "1";
+        el.hidden = false;
+        el.textContent = "🔄 有新版本 — 點此重新整理";
+      };
+      show();
+    });
   }
   // 啟動時：只要設定了雲端後端就先檢查雲端，雲端較新就自動把最新資料讀入
   //（跨裝置：在別台開啟時若不是最新，一開就先載入最新；本機較新則不覆蓋。不再受「自動同步」開關限制）
