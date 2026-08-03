@@ -461,6 +461,7 @@
           ${v.tags.slice(0, 3).map(t => `<span class="vd-chip">#${esc(t)}</span>`).join("")}
         </div>
         ${v.todos.length ? `<div class="vd-prog${r === 1 ? " full" : ""}"><i style="width:${Math.round(r * 100)}%"></i></div>` : ""}
+        ${STAGE_ACT[v.status] ? `<button type="button" class="vd-do" data-do="${STAGE_ACT[v.status].act}" data-id="${v.id}" title="${esc(STAGE_ACT[v.status].hint)}">${STAGE_ACT[v.status].label}</button>` : ""}
       </div>
     </article>`;
   }
@@ -969,8 +970,52 @@
     videos.unshift(copy); save(); render();
     return copy;
   }
+  /* 每個階段的「該做的下一步」— 卡片底部一顆按鈕，按了直接跳到對應工具 */
+  const STAGE_ACT = {
+    idea:   { act: "ideate",   label: "💡 想大綱鉤子", hint: "AI 幫這集想大綱與開場鉤子" },
+    script: { act: "split",    label: "🎞 拆分鏡",     hint: "把腳本拆成一個個鏡頭並建進 Prompt 庫" },
+    assets: { act: "assets",   label: "🎨 生成素材",   hint: "到 Prompt 庫生成這組分鏡的圖／影片" },
+    edit:   { act: "chapters", label: "⏱ 排章節",      hint: "依分鏡秒數排出章節時間軸" },
+    ready:  { act: "publish",  label: "📋 發布文案",    hint: "AI 產出標題、說明欄與 hashtag" },
+    pub:    { act: "refresh",  label: "📊 更新觀看數",  hint: "用 YouTube API 更新觀看數與讚數" }
+  };
+  function stackOfVideo(v) {
+    const stacks = v.links.map(id => { const p = promptById(id); return p && p.stack ? p.stack : ""; }).filter(Boolean);
+    if (!stacks.length) return "";
+    return stacks.every(s => s === stacks[0]) ? stacks[0] : "";
+  }
+  function stageAction(act, v) {
+    if (act === "ideate") { openEditor(v); openAi("outline"); return; }
+    if (act === "split") { openEditor(v); openScriptSplit(); return; }
+    if (act === "publish") { openEditor(v); openAi("pack"); return; }
+    if (act === "chapters") {
+      openEditor(v); $("#vBlkPublish").classList.remove("closed");
+      if (v.links.length) $("#vImpChaps").click();   // 有掛分鏡就直接依秒數排章節
+      else toast("這集還沒有分鏡 — 可在下面直接填章節，或先到「腳本」階段拆分鏡");
+      return;
+    }
+    if (act === "assets") {
+      const s = stackOfVideo(v);
+      if (s) { location.href = "prompt-vault.html#sb=" + encodeURIComponent(s); return; }
+      if (v.links.length) { location.href = "prompt-vault.html#p=" + encodeURIComponent(v.links[0]); return; }
+      openEditor(v); openScriptSplit();
+      toast("先把腳本拆成分鏡，才有素材可以生成");
+      return;
+    }
+    if (act === "refresh") {
+      if (!cfg().apiKey) { toast("更新觀看數需要 YouTube Data API 金鑰（⚙ 設定裡填）"); openSettings(false); return; }
+      refreshStats(); return;
+    }
+  }
   document.addEventListener("click", e => {
     if (e.target.closest("[data-sel]")) return;   // 勾選框由批次那段處理，不要順便開編輯器
+    const doBtn = e.target.closest("[data-do]");
+    if (doBtn) {
+      e.stopPropagation();
+      const v = videos.find(x => x.id === doBtn.dataset.id);
+      if (v) stageAction(doBtn.dataset.do, v);
+      return;
+    }
     const q = e.target.closest("[data-q]");
     if (q) {
       e.stopPropagation();
