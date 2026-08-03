@@ -1186,7 +1186,10 @@ window.PVCanvas = (function () {
     const nFold = !!dir && nCount > 0;
     const p = isNote ? null : liveRec(n.ref);
     const gone = !isNote && !p;
-    const typeLabel = isNote ? "📝 筆記" : (n.ttype === "video" ? "🎬 影片" : "🖼 圖像");
+    // 影片 prompt 補上時間（秒）：分鏡的秒數存在 params.duration，故事板另存 sb.dur
+    const durOf = r => { const d = r && ((r.params && r.params.duration) || (r.sb && r.sb.dur)); const s = d != null ? String(d).replace(/[^\d.]/g, "") : ""; return s ? s + "s" : ""; };
+    const vdur = (!isNote && p && n.ttype === "video") ? durOf(p) : "";
+    const typeLabel = isNote ? "📝 筆記" : (n.ttype === "video" ? ("🎬 影片" + (vdur ? " · " + vdur : "")) : "🖼 圖像");
     // 顯示一律以庫裡的現況為準（標題被使用者在畫布上改過就保留畫布版本）
     const title = (p && !n.custom) ? (p.title || "") : (n.title || "");
     const text = p ? (p.prompt || "") : (n.text || "");

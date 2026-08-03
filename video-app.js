@@ -1803,12 +1803,69 @@
       required: ["shots"]
     };
   }
+  /* 企劃製作聖經 → 拆分鏡：讓每一鏡把「該鏡出現的角色＋場景＋整體風格」的固定設定接到 prompt 最前面，
+     這樣送去生成時角色外型／場景／色調跨鏡一致。castNames／sceneNames 由 AI 標（只能挑清單裡的名字）。 */
+  function shotSchemaFor(b) {
+    const sc = shotSchema();
+    const cn = ((b && b.chars) || []).map(c => c.name).filter(Boolean);
+    const sn = ((b && b.scenes) || []).map(s => s.name).filter(Boolean);
+    const props = sc.properties.shots.items.properties;
+    if (cn.length) props.castNames = { type: "ARRAY", items: { type: "STRING", enum: cn } };
+    if (sn.length) props.sceneNames = { type: "ARRAY", items: { type: "STRING", enum: sn } };
+    return sc;
+  }
+  function bibleAsk(b) {
+    const cn = ((b && b.chars) || []).map(c => c.name).filter(Boolean);
+    const sn = ((b && b.scenes) || []).map(s => s.name).filter(Boolean);
+    if (!cn.length && !sn.length) return "";   // 沒有固定角色／場景就不必加這段（風格另外處理）
+    const lines = [];
+    const brief = bibleBrief(b);
+    if (brief) lines.push(brief);
+    if (cn.length) lines.push("【固定角色清單】castNames 只能從這裡挑：" + cn.join("、"));
+    if (sn.length) lines.push("【固定場景清單】sceneNames 只能從這裡挑：" + sn.join("、"));
+    lines.push("每個鏡頭：castNames 填入這一鏡實際出現的角色（沒有就空陣列）、sceneNames 填入場景；prompt 專心寫動作／構圖／鏡頭運動／氛圍，**不要自己重寫角色外型或場景細節**——系統會把上面的固定設定自動接到每一鏡的最前面，確保跨鏡一致。");
+    return lines.join("\n\n");
+  }
+  // 判斷這一鏡帶入哪些固定角色／場景：優先用 AI 標的 castNames／sceneNames，沒有就用名字在文字裡出現與否；
+  // 只有一位主角時，沒標到也預設整片都出現（單主角系列的常見情況）。
+  function bibleHits(shot, b) {
+    const cast = Array.isArray(shot.castNames) ? shot.castNames : [];
+    const scn = Array.isArray(shot.sceneNames) ? shot.sceneNames : [];
+    const hay = ((shot.prompt || "") + " " + (shot.narration || "") + " " + (shot.title || "")).toLowerCase();
+    const hit = (name, tagged) => tagged.includes(name) || (name && hay.includes(name.toLowerCase()));
+    let chars = ((b && b.chars) || []).filter(c => c.name && hit(c.name, cast));
+    if (!chars.length && ((b && b.chars) || []).length === 1) chars = b.chars.slice();
+    const scenes = ((b && b.scenes) || []).filter(s => s.name && hit(s.name, scn));
+    return { chars, scenes };
+  }
+  function composeShotPrompt(shot, b) {
+    if (!b) return String(shot.prompt || "").trim();
+    const { chars, scenes } = bibleHits(shot, b);
+    const bits = [];
+    if (chars.length) bits.push("Characters: " + chars.map(c => c.desc ? `${c.name}（${c.desc}）` : c.name).join("; "));
+    if (scenes.length) bits.push("Scene: " + scenes.map(s => s.desc ? `${s.name}（${s.desc}）` : s.name).join("; "));
+    if (b.style) bits.push("Style: " + b.style);
+    const prefix = bits.length ? bits.join(". ") + ". " : "";
+    return prefix + String(shot.prompt || "").trim();
+  }
+  // 編輯器目前這支影片的有效製作聖經（企劃共用 ⊕ 本集追加），未存檔也能用
+  function curEditorBible() {
+    return effBible({
+      projectId: curProjectId,
+      series: $("#vfSeries").value.trim(),
+      style: $("#vfStyle").value.trim(),
+      chars: curChars, scenes: curScenes, refs: curRefs
+    });
+  }
   const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 一律用英文，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
   let scrShots = [], scrMeta = null, scrJob = null;
   function openScriptSplit() {
     $("#vScrText").value = $("#vfScript").value.trim();
     $("#vScrName").value = $("#vfTitle").value.trim().slice(0, 40);
-    $("#vScrStatus").textContent = "";
+    const eb = curEditorBible();
+    $("#vScrStatus").textContent = (eb.chars.length || eb.scenes.length || eb.style)
+      ? `會自動把企劃設定（${eb.chars.length} 人物／${eb.scenes.length} 場景${eb.style ? "／風格" : ""}）接到每一鏡 prompt 的最前面`
+      : "";
     scrShots = []; scrMeta = null; scrJob = null;
     $("#vScrGo").disabled = false;
     $("#vScrResult").innerHTML = ""; $("#vScrFoot").hidden = true;
@@ -1828,23 +1885,35 @@
     closeScriptSplit(true);
   }
   function renderShots() {
-    $("#vScrResult").innerHTML = scrShots.map((s, i) => `
+    const b = scrMeta && scrMeta.bible;
+    $("#vScrResult").innerHTML = scrShots.map((s, i) => {
+      const shown = b ? composeShotPrompt(s, b) : (s.prompt || "");
+      let hitsHtml = "";
+      if (b) {
+        const { chars, scenes } = bibleHits(s, b);
+        const names = [...chars.map(c => c.name), ...scenes.map(x => x.name)];
+        if (names.length || b.style) hitsHtml = `<p class="snar">帶入設定：${esc([...names, b.style ? "風格" : ""].filter(Boolean).join("、"))}</p>`;
+      }
+      return `
       <div class="vd-shot">
         <div class="sh"><span class="sn">鏡 ${i + 1}</span><span class="st">${esc(s.title || "未命名")}</span>
           ${s.dur ? `<span class="vd-chip">${esc(String(s.dur))} 秒</span>` : ""}
           ${s.trans ? `<span class="vd-chip">${esc(s.trans)}</span>` : ""}</div>
-        <p class="sp">${esc(s.prompt || "")}</p>
+        <p class="sp">${esc(shown)}</p>
+        ${hitsHtml}
         ${s.narration ? `<p class="snar">旁白：${esc(s.narration)}</p>` : ""}
         ${s.note ? `<p class="snar">重點：${esc(s.note)}</p>` : ""}
-      </div>`).join("");
+      </div>`;
+    }).join("");
     $("#vScrFoot").hidden = !scrShots.length;
   }
   function shotsText() {
+    const b = scrMeta && scrMeta.bible;
     return scrShots.map((s, i) => {
       const head = `【鏡 ${i + 1}】${s.title || "未命名"}` + (s.dur ? `（${s.dur} 秒）` : "");
       const nar = s.narration ? `\n旁白：${s.narration}` : "";
       const note = s.note ? `\n重點：${s.note}` : "";
-      return `${head}${nar}${note}\nPrompt：${(s.prompt || "").trim()}`;
+      return `${head}${nar}${note}\nPrompt：${(b ? composeShotPrompt(s, b) : (s.prompt || "")).trim()}`;
     }).join("\n\n");
   }
   function scrForm() {
@@ -1863,7 +1932,7 @@
   function showShots(res, j) {
     if (!ensureEditorFor(j)) return;
     scrJob = j; scrShots = res.shots;
-    scrMeta = { type: j.form.type, dur: j.form.dur, name: res.name };
+    scrMeta = { type: j.form.type, dur: j.form.dur, name: res.name, bible: j.form.bible || null };
     scrFill(j.form);
     $("#vScrName").value = res.name;
     $("#vScrGo").disabled = false;
@@ -1877,9 +1946,11 @@
     const f = scrForm();
     if (!f.text) { toast("請先貼上腳本或旁白"); return; }
     if (!needKey()) return;
+    const b = curEditorBible();
     const ask = [
       "【腳本／旁白】\n" + f.text,
       f.style ? "【視覺方向】" + f.style + "（每一鏡的 prompt 都要吃到這個風格）" : "",
+      bibleAsk(b),
       f.cnt ? "【鏡頭數】請剛好拆成 " + f.cnt + " 個鏡頭" : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
       f.dur ? "【每鏡預設秒數】約 " + f.dur + " 秒，長短依內容微調" : "",
       "【分鏡類型】" + (f.type === "video" ? "影片動態鏡頭" : "靜態畫面")
@@ -1888,9 +1959,9 @@
     $("#vScrGo").disabled = true;
     const stop = busy($("#vScrStatus"), "AI 拆鏡中（可以按 ⤓ 縮到右下角）");
     scrJob = jobRun({
-      title: "拆鏡：" + (f.name || f.text.slice(0, 12)), icon: "🎞", vid: editingId, form: f,
+      title: "拆鏡：" + (f.name || f.text.slice(0, 12)), icon: "🎞", vid: editingId, form: Object.assign({}, f, { bible: b }),
       work: async () => {
-        const r = await aiCall(SCR_SYS, ask, shotSchema());
+        const r = await aiCall(SCR_SYS, ask, shotSchemaFor(b));
         const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
         if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
         return { shots, name: (f.name || String(r.title || "").trim() || "腳本分鏡").slice(0, 40) };
@@ -1981,7 +2052,8 @@
       const seg = uid(), now = Date.now();
       const name = ($("#vScrName").value.trim() || (scrMeta && scrMeta.name) || "腳本分鏡").slice(0, 40);
       const type = (scrMeta && scrMeta.type) || "video", defDur = (scrMeta && scrMeta.dur) || "";
-      const recs = scrShots.map((s, i) => shotToRec(s, i, scrShots.length, type, defDur, seg, now));
+      const b = scrMeta && scrMeta.bible;
+      const recs = scrShots.map((s, i) => shotToRec(b ? { ...s, prompt: composeShotPrompt(s, b) } : s, i, scrShots.length, type, defDur, seg, now));
       await vaultAddSafe(recs, seg, name);
       recs.forEach(r => { if (!curLinks.includes(r.id)) curLinks.push(r.id); });
       renderLinked(); $("#vBlkLinked").classList.remove("closed");
@@ -2019,6 +2091,11 @@
       $("#vfNotes").value.trim() ? "【備註】" + $("#vfNotes").value.trim() : "",
       $("#vAiBrief").value.trim() ? "【特別要求】" + $("#vAiBrief").value.trim() : ""
     ].filter(Boolean);
+    // 企劃固定設定（人物／場景／風格）也給 AI 當背景，寫標題／說明欄／大綱時能扣住角色與世界觀
+    const b = curEditorBible();
+    const bb = bibleBrief(b);
+    if (bb) parts.push("【本片固定設定（人物／場景，供理解角色與世界觀）】\n" + bb);
+    if (b.style) parts.push("【視覺風格】" + b.style);
     return parts.join("\n\n");
   }
   function openAi(mode) {
@@ -2220,6 +2297,7 @@
     const material = [v.title, v.outline, v.script, v.notes, v.series].join(" ").trim();
     if (material.length < 12) return;   // 幾乎沒東西可以參考就不要亂猜
     enriching.add(v.id);
+    const eb = effBible(v), ebrief = bibleBrief(eb);
     const ask = [
       "【要補的欄位】" + miss.map(k => FILL_LABEL[k]).join("、"),
       "【類型】" + (v.kind === "short" ? "YouTube Shorts 直式短片" : "長片"),
@@ -2227,6 +2305,8 @@
       v.title ? "【目前標題】" + v.title : "",
       v.outline ? "【大綱】" + v.outline : "",
       v.tags.length ? "【既有標籤】" + v.tags.join("、") : "",
+      ebrief ? "【本片固定設定（人物／場景）】\n" + ebrief : "",
+      eb.style ? "【視覺風格】" + eb.style : "",
       v.script ? "【腳本】\n" + v.script.slice(0, 4000) : "",
       v.notes ? "【備註】" + v.notes : ""
     ].filter(Boolean).join("\n\n");
@@ -2794,23 +2874,22 @@
   function splitEpisode(v, scriptText) {
     if (!scriptText || !scriptText.trim()) return;
     const b = effBible(v);
-    const brief = bibleBrief(b);
     const name = (v.title || (v.series ? v.series + (v.ep !== "" ? " EP" + v.ep : "") : "") || "腳本分鏡").slice(0, 40);
     const ask = [
       "【腳本／旁白】\n" + scriptText,
       b.style ? "【視覺方向／風格】" + b.style + "（每一鏡的 prompt 都要吃到這個風格）" : "",
-      brief,
+      bibleAsk(b),
       "【鏡頭數】依內容長度自行判斷，約 4～12 個",
       "【分鏡類型】影片動態鏡頭" + (v.kind === "short" ? "（直式短片）" : "")
     ].filter(Boolean).join("\n\n");
     jobRun({
       title: "拆鏡：" + name.slice(0, 12), icon: "🎞", vid: v.id,
       work: async () => {
-        const r = await aiCall(SCR_SYS, ask, shotSchema());
+        const r = await aiCall(SCR_SYS, ask, shotSchemaFor(b));
         const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
         if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
         const seg = uid(), now = Date.now();
-        const recs = shots.map((s, i) => shotToRec(s, i, shots.length, "video", "", seg, now));
+        const recs = shots.map((s, i) => shotToRec({ ...s, prompt: composeShotPrompt(s, b) }, i, shots.length, "video", "", seg, now));
         await vaultAddSafe(recs, seg, name);
         const vid = videos.find(x => x.id === v.id);
         if (vid) {
