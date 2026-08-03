@@ -549,6 +549,26 @@
   </div>
 </div>
 
+<!-- ---------- 素材生成工作站（看板「素材生成」階段的介面） ---------- -->
+<div class="overlay" id="vAssetsOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:940px">
+    <div class="modal-head">
+      <h2 id="vAsTitle">素材生成工作站</h2>
+      <button class="icon-btn" id="vAsClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body" id="vAsBody"></div>
+    <div class="modal-foot">
+      <span class="vd-sub">分鏡表、prompt 都列在這裡；每一鏡可以放參考圖／參考影片連結／註解，整理好素材再去生成。內容會存在這支影片上。</span>
+      <span class="vd-spacer"></span>
+      <button class="btn ghost" id="vAsEdit">開啟影片編輯器</button>
+      <button class="btn primary" id="vAsDone">完成</button>
+    </div>
+  </div>
+</div>
+<input type="file" id="vAsFile" accept="image/*" multiple hidden>
+
 <!-- ---------- AI 依大綱設計人物造型／場景／風格（手動觸發，不自動執行） ---------- -->
 <div class="overlay" id="vDesignOv">
   <div class="modal" role="dialog" aria-modal="true" style="max-width:720px">

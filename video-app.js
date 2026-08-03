@@ -79,7 +79,7 @@
   function save() {
     // localStorage 只放去圖輕量版當備援；完整（含縮圖／參考圖 dataURI）進 IndexedDB
     try {
-      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [], refs: [] }))));
+      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [], refs: [], shotAssets: stripAssets(v.shotAssets) }))));
       localStorage.setItem("videodesk.updated", String(Date.now()));   // 雲端同步比新舊用
     } catch (e) {}
     scheduleCloudPush();
@@ -122,8 +122,26 @@
     v.chars = Array.isArray(v.chars) ? v.chars.map(c => ({ name: String(c.name || ""), desc: String(c.desc || "") })) : [];
     v.scenes = Array.isArray(v.scenes) ? v.scenes.map(s => ({ name: String(s.name || ""), desc: String(s.desc || "") })) : [];
     v.refs = Array.isArray(v.refs) ? v.refs.filter(x => typeof x === "string") : [];
+    // 素材生成工作站：每個分鏡／prompt 的參考圖、參考影片連結、註解（key＝prompt id）
+    v.shotAssets = (v.shotAssets && typeof v.shotAssets === "object" && !Array.isArray(v.shotAssets)) ? v.shotAssets : {};
+    Object.keys(v.shotAssets).forEach(k => {
+      const a = v.shotAssets[k] || {};
+      v.shotAssets[k] = {
+        imgs: Array.isArray(a.imgs) ? a.imgs.filter(x => typeof x === "string") : [],
+        vids: Array.isArray(a.vids) ? a.vids.filter(x => typeof x === "string") : [],
+        note: String(a.note || "")
+      };
+      const e = v.shotAssets[k];
+      if (!e.imgs.length && !e.vids.length && !e.note) delete v.shotAssets[k];   // 空的不留
+    });
     v.created = +v.created || Date.now(); v.edited = +v.edited || v.created;
     return v;
+  }
+  // localStorage 鏡像去圖用：把 shotAssets 裡的圖片 dataURI 拿掉（只留連結與註解）
+  function stripAssets(sa) {
+    const out = {};
+    Object.keys(sa || {}).forEach(k => { const a = sa[k]; out[k] = { imgs: [], vids: a.vids || [], note: a.note || "" }; });
+    return out;
   }
   function normalizeProject(p) {
     p.id = p.id || uid();
@@ -2683,6 +2701,13 @@
   // ---------- 深連結 video.html#v=<id> ----------
   function openFromHash() {
     const h = location.hash || "";
+    if (h.startsWith("#proj=")) {   // 三區串連：從 Prompt 庫／畫布跳來開這個企劃
+      const pid = decodeURIComponent(h.slice(6));
+      const p = projById(pid);
+      if (p) openProjEditor(p, {}); else toast("找不到這個企劃");
+      history.replaceState(null, "", location.pathname + location.search);
+      return;
+    }
     if (!h.startsWith("#v=")) return;
     const id = decodeURIComponent(h.slice(3));
     const v = videos.find(x => x.id === id);

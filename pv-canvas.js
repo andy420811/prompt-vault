@@ -81,10 +81,27 @@ window.PVCanvas = (function () {
     { k: "ready", zh: "待發布", ico: "📦" }, { k: "pub", zh: "已發布", ico: "🚀" }
   ];
   let vids = [];              // 影片快取（畫布開啟時載入）
+  let vprojects = [];         // 企劃快取（製作聖經：系列共用人物／風格／場景）
   function vidLoad() {
     const g = fn("idbGet");
     if (!g) return Promise.resolve([]);
+    g("vprojects").then(p => { vprojects = Array.isArray(p) ? p : []; }).catch(() => {});
     return g("videos").then(v => { vids = Array.isArray(v) ? v : []; return vids; }).catch(() => []);
+  }
+  // 影片沿用哪個企劃：先看 projectId，再用系列名回退（跟影片製作台的 projOfVideo 一致）
+  function projOfVid(v) {
+    if (!v) return null;
+    if (v.projectId) { const p = vprojects.find(x => x.id === v.projectId); if (p) return p; }
+    if (v.series) { const p = vprojects.find(x => x.name === v.series); if (p) return p; }
+    return null;
+  }
+  // 製作聖經摘要（企劃共用 ⊕ 本集追加）給畫布顯示用
+  function bibleOfVid(v) {
+    const p = projOfVid(v);
+    const chars = [...((p && p.chars) || []), ...((v && v.chars) || [])];
+    const scenes = [...((p && p.scenes) || []), ...((v && v.scenes) || [])];
+    const style = (v && v.style) || (p && p.style) || "";
+    return { proj: p, chars: chars.length, scenes: scenes.length, style: !!style };
   }
   function vidSave() {
     const s = fn("idbSet"); if (s) s("videos", vids);
@@ -1149,7 +1166,9 @@ window.PVCanvas = (function () {
     const v = liveVid(n.vref);
     const nDesc = f ? (f.desc.get(n.id) || 0) : 0;
     const dir = foldDir(n), nCount = f ? (f.count.get(n.id) || 0) : 0, nFold = !!dir && nCount > 0;
-    const w = n.w || NODE_W, h = n.h || (v && vidThumb(v) ? 300 : 210);
+    const bsum = v ? bibleOfVid(v) : null;
+    const bibleLine = !!(bsum && (bsum.proj || bsum.chars || bsum.scenes || bsum.style));
+    const w = n.w || NODE_W, h = n.h || ((v && vidThumb(v) ? 300 : 210) + (bibleLine ? 22 : 0));
     const st = v ? vidStage(v.status) : null;
     const src = v ? vidThumb(v) : "";
     const linked = v ? (v.links || []).length : 0;
@@ -1170,6 +1189,7 @@ window.PVCanvas = (function () {
       ${src ? `<div class="pvc-node-img"><img src="${esc(src)}" alt="" draggable="false"></div>` : ""}
       <div class="pvc-node-title" contenteditable="true" spellcheck="false">${esc(v ? (v.title || "未命名影片") : n.title)}</div>
       <div class="pvc-node-body">${v ? esc([v.series ? v.series + (v.ep !== "" ? " EP" + v.ep : "") : "", v.due ? "預定 " + v.due : "", v.published ? "已發布 " + v.published : ""].filter(Boolean).join("　")) : ""}</div>
+      ${bibleLine ? `<div class="pvc-meta">${[bsum.proj ? "🎭 企劃：" + esc(bsum.proj.name || "系列") : "", bsum.chars ? "👤 " + bsum.chars + " 人物" : "", bsum.scenes ? "🏞 " + bsum.scenes + " 場景" : "", bsum.style ? "🎨 風格" : ""].filter(Boolean).join("　")}</div>` : ""}
       ${v ? `<div class="pvc-meta">🗂 ${linked} 則 prompt${v.todos && v.todos.length ? `　☑ ${v.todos.filter(t => t.done).length}/${v.todos.length}` : ""}</div>` : ""}
       ${v ? "" : `<div class="pvc-warn">⚠ 這支影片已不在影片製作台</div>`}
       ${acts}

@@ -824,6 +824,8 @@
 .used-in button{font:inherit;font-size:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink-2);
   border-radius:999px;padding:3px 10px;cursor:pointer;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis}
 .used-in button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-tint)}
+.used-in button.proj{border-color:color-mix(in srgb,var(--accent) 40%,transparent);color:var(--accent);background:var(--accent-tint)}
+.used-in button.proj:hover{border-color:var(--accent)}
 
 /* ---------- 語意搜尋／找相似（pv-app-sem.js） ---------- */
 .sim-btn{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:7px;border:none;background:none;

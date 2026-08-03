@@ -293,9 +293,17 @@
     const used = vids.filter(v => Array.isArray(v.links) && v.links.includes(p.id));
     const onCanvas = canvasNodeFor(p.id);
     if (!used.length && !onCanvas) { box.hidden = true; box.innerHTML = ""; return; }
+    // 三區串連：影片同時帶出它的系列／企劃；有 projectId 就多一顆「企劃↗」跳到影片製作台開那個企劃
+    const projSeen = new Set();
+    const vLabel = v => (v.series ? "《" + v.series + "》" + (v.ep !== "" && v.ep != null ? " EP" + v.ep + " " : " ") : "") + (v.title || "未命名影片");
     box.innerHTML =
       (used.length ? `<span class="ul">🎬 用在</span>` + used.map(v =>
-        `<button type="button" data-vgo="${esc(v.id)}" title="到影片製作台開這一支">${esc(v.title || "未命名影片")}</button>`).join("") : "") +
+        `<button type="button" data-vgo="${esc(v.id)}" title="到影片製作台開這一支">${esc(vLabel(v))}</button>`).join("") : "") +
+      used.map(v => {
+        if (!v.projectId || projSeen.has(v.projectId)) return "";
+        projSeen.add(v.projectId);
+        return `<button type="button" class="proj" data-pgo="${esc(v.projectId)}" title="開這個企劃（系列共用人物／風格／場景）">🎭 企劃：${esc(v.series || "系列")}</button>`;
+      }).join("") +
       (onCanvas ? `<span class="ul">${used.length ? "·" : ""} 🧩</span>
         <button type="button" data-cgo="${esc(onCanvas.node.id)}" title="在畫布上顯示這一顆">在畫布上（${esc(onCanvas.proj.name || "專案")}）</button>` : "");
     box.hidden = false;
@@ -303,6 +311,8 @@
   $("#usedIn") && $("#usedIn").addEventListener("click", e => {
     const v = e.target.closest("[data-vgo]");
     if (v) { location.href = "video.html#v=" + encodeURIComponent(v.dataset.vgo); return; }
+    const pj = e.target.closest("[data-pgo]");
+    if (pj) { location.href = "video.html#proj=" + encodeURIComponent(pj.dataset.pgo); return; }
     const c = e.target.closest("[data-cgo]");
     if (c) {
       if (!window.PVCanvas) { toast("畫布模組未載入"); return; }
