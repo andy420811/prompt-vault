@@ -23,9 +23,12 @@
   const PRESET_TODOS = ["寫腳本", "生成／拍攝素材", "配音或字幕", "剪接", "做縮圖", "寫標題與說明", "排程發布"];
 
   let videos = [];
+  let projects = [];         // 企劃（系列共用設定：人物／風格／場景／參考圖）
+  const PROJ_KEY = "vprojects", PROJ_LS = "videodesk.projects.v1";
   let prompts = [];          // 從 Prompt 庫讀來的唯讀快照
   let editingId = null;
-  let curTodos = [], curLinks = [];
+  let curProjectId = "";
+  let curTodos = [], curLinks = [], curChars = [], curScenes = [], curRefs = [];
   const VIEWS = ["board", "list", "cal"];
   let view = VIEWS.includes(localStorage.getItem("videodesk.view")) ? localStorage.getItem("videodesk.view") : "board";
   let calMonth = new Date().toISOString().slice(0, 7);   // 月曆顯示的月份 YYYY-MM
@@ -74,13 +77,21 @@
     })).catch(() => false);
   }
   function save() {
-    // localStorage 只放去圖輕量版當備援；完整（含縮圖 dataURI）進 IndexedDB
+    // localStorage 只放去圖輕量版當備援；完整（含縮圖／參考圖 dataURI）進 IndexedDB
     try {
-      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [] }))));
+      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [], refs: [] }))));
       localStorage.setItem("videodesk.updated", String(Date.now()));   // 雲端同步比新舊用
     } catch (e) {}
     scheduleCloudPush();
     return idbSet(IDB_KEY, videos);   // 回傳 promise：要跳頁前可以先等寫入完成
+  }
+  // 企劃：完整（含參考圖）進 IndexedDB；localStorage 鏡像去圖。目前只存在本機＋匯出檔，不上雲端。
+  function saveProjects() {
+    try {
+      localStorage.setItem(PROJ_LS, JSON.stringify(projects.map(p =>
+        Object.assign({}, p, { refs: [], chars: p.chars.map(c => ({ name: c.name, desc: c.desc, ref: "" })) }))));
+    } catch (e) {}
+    return idbSet(PROJ_KEY, projects);
   }
   function cfg() {
     try { return JSON.parse(localStorage.getItem(KEY_CFG)) || {}; } catch (e) { return {}; }
@@ -105,8 +116,56 @@
     v.order = +v.order || 0;
     v.links = Array.isArray(v.links) ? v.links.filter(x => typeof x === "string") : [];
     v.views = +v.views || 0; v.likes = +v.likes || 0;
+    // 製作聖經：企劃連結＋本集額外的人物／風格／場景／參考圖
+    v.projectId = String(v.projectId || "");
+    v.style = String(v.style || "");
+    v.chars = Array.isArray(v.chars) ? v.chars.map(c => ({ name: String(c.name || ""), desc: String(c.desc || "") })) : [];
+    v.scenes = Array.isArray(v.scenes) ? v.scenes.map(s => ({ name: String(s.name || ""), desc: String(s.desc || "") })) : [];
+    v.refs = Array.isArray(v.refs) ? v.refs.filter(x => typeof x === "string") : [];
     v.created = +v.created || Date.now(); v.edited = +v.edited || v.created;
     return v;
+  }
+  function normalizeProject(p) {
+    p.id = p.id || uid();
+    p.name = String(p.name || "");
+    p.kind = p.kind === "short" ? "short" : "long";
+    p.style = String(p.style || "");
+    p.chars = Array.isArray(p.chars) ? p.chars.map(c => ({ name: String(c.name || ""), desc: String(c.desc || ""), ref: typeof c.ref === "string" ? c.ref : "" })) : [];
+    p.scenes = Array.isArray(p.scenes) ? p.scenes.map(s => ({ name: String(s.name || ""), desc: String(s.desc || "") })) : [];
+    p.refs = Array.isArray(p.refs) ? p.refs.filter(x => typeof x === "string") : [];
+    p.notes = String(p.notes || "");
+    p.created = +p.created || Date.now(); p.edited = +p.edited || p.created;
+    return p;
+  }
+  // ---------- 企劃／製作聖經 helpers ----------
+  const projById = id => projects.find(p => p.id === id) || null;
+  function projOfVideo(v) {
+    if (v && v.projectId) { const p = projById(v.projectId); if (p) return p; }
+    if (v && v.series) { const p = projects.find(x => x.name === v.series); if (p) return p; }
+    return null;
+  }
+  // 有效設定＝企劃共用 ＋ 本集追加（風格：本集有填就覆寫）
+  function effBible(v) {
+    const p = projOfVideo(v);
+    return {
+      project: p,
+      style: (v && v.style) ? v.style : (p ? p.style : ""),
+      chars: [...(p ? p.chars : []), ...((v && v.chars) || [])],
+      scenes: [...(p ? p.scenes : []), ...((v && v.scenes) || [])],
+      refs: [...(p ? p.refs : []), ...((v && v.refs) || [])]
+    };
+  }
+  function bibleBrief(b) {
+    const lines = [];
+    if (b.chars.length) {
+      lines.push("【固定角色設定（畫面出現這些角色時必須維持外型一致）】");
+      b.chars.forEach(c => lines.push(`- ${(c.name || "角色")}：${c.desc || ""}`.trim()));
+    }
+    if (b.scenes.length) {
+      lines.push("【固定場景設定】");
+      b.scenes.forEach(s => lines.push(`- ${(s.name || "場景")}：${s.desc || ""}`.trim()));
+    }
+    return lines.join("\n");
   }
 
   async function boot() {
@@ -115,6 +174,11 @@
       try { const ls = JSON.parse(localStorage.getItem(KEY_LS)); if (Array.isArray(ls)) list = ls; } catch (e) {}
     }
     videos = (Array.isArray(list) ? list : []).map(normalize);
+    let plist = await idbGet(PROJ_KEY);
+    if (!Array.isArray(plist)) {
+      try { const ls = JSON.parse(localStorage.getItem(PROJ_LS)); if (Array.isArray(ls)) plist = ls; } catch (e) {}
+    }
+    projects = (Array.isArray(plist) ? plist : []).map(normalizeProject);
     const c = cfg();
     if (!c.channel) setCfg({ channel: "UCCxQbx0erwfctMmCiKenrEQ" });   // 預設帶入使用者的頻道
     const sv = localStorage.getItem("videodesk.sort");   // 排序方式記住上次選的
@@ -370,6 +434,7 @@
   function cardHTML(v) {
     const th = thumbOf(v), done = v.todos.filter(t => t.done).length, r = doneRatio(v), dc = dueClass(v);
     const next = STAGES[STAGES.findIndex(s => s.k === v.status) + 1];
+    const b = effBible(v);
     return `<article class="vd-card${sel.has(v.id) ? " sel" : ""}" data-id="${v.id}" draggable="true">
       <input type="checkbox" class="vd-check" data-sel="${v.id}"${sel.has(v.id) ? " checked" : ""} title="選取（可批次處理）">
       <div class="vd-quick">
@@ -383,14 +448,17 @@
       <div class="vd-card-body">
         ${v.series ? `<div class="vd-ser">${esc(v.series)}${v.ep !== "" ? " EP" + esc(String(v.ep)) : ""}</div>` : ""}
         <h3>${esc(v.title || "未命名影片")}</h3>
+        ${v.outline ? `<p class="vd-outline">${esc(v.outline)}</p>` : ""}
         <div class="vd-meta">
           ${v.kind === "short" ? `<span class="vd-chip k">Shorts</span>` : ""}
           ${v.due ? `<span class="vd-chip ${dc}">${dc === "due" ? "⚠" : "📅"} ${dstr(v.due)}</span>` : ""}
           ${v.published ? `<span class="vd-chip">🚀 ${dstr(v.published)}</span>` : ""}
           ${!th && v.views ? `<span class="vd-chip">▶ ${nf(v.views)}</span>` : ""}
           ${v.todos.length ? `<span class="vd-chip">☑ ${done}/${v.todos.length}</span>` : ""}
-          ${v.links.length ? `<span class="vd-chip">🗂 ${v.links.length}</span>` : ""}
-          ${v.tags.slice(0, 2).map(t => `<span class="vd-chip">#${esc(t)}</span>`).join("")}
+          ${v.links.length ? `<span class="vd-chip">🎬 ${v.links.length} 分鏡</span>` : ""}
+          ${b.chars.length ? `<span class="vd-chip">🎭 ${b.chars.length}</span>` : ""}
+          ${b.refs.length ? `<span class="vd-chip">🖼 ${b.refs.length}</span>` : ""}
+          ${v.tags.slice(0, 3).map(t => `<span class="vd-chip">#${esc(t)}</span>`).join("")}
         </div>
         ${v.todos.length ? `<div class="vd-prog${r === 1 ? " full" : ""}"><i style="width:${Math.round(r * 100)}%"></i></div>` : ""}
       </div>
@@ -416,18 +484,21 @@
   }
   function renderList(list) {
     $("#vList").innerHTML = list.length ? list.map(v => {
-      const th = thumbOf(v), s = STAGE[v.status], done = v.todos.filter(t => t.done).length;
+      const th = thumbOf(v), s = STAGE[v.status], done = v.todos.filter(t => t.done).length, b = effBible(v);
       return `<article class="vd-row${sel.has(v.id) ? " sel" : ""}" data-id="${v.id}" data-stage="${v.status}">
         <input type="checkbox" class="vd-check" data-sel="${v.id}"${sel.has(v.id) ? " checked" : ""} title="選取（可批次處理）">
         <div class="rt">${th ? `<img src="${esc(th)}" alt="" loading="lazy">` : (v.kind === "short" ? "▯" : "🎬")}</div>
         <div class="rmain">
           <h3>${v.series ? `<span style="color:var(--accent)">${esc(v.series)}${v.ep !== "" ? " EP" + esc(String(v.ep)) : ""}</span> · ` : ""}${esc(v.title || "未命名影片")}</h3>
+          ${v.outline ? `<p class="vd-outline">${esc(v.outline)}</p>` : ""}
           <div class="vd-meta">
             <span class="vd-chip k">${s.ico} ${s.zh}</span>
             ${v.kind === "short" ? `<span class="vd-chip">Shorts</span>` : ""}
             ${v.due ? `<span class="vd-chip ${dueClass(v)}">📅 ${dstr(v.due)}</span>` : ""}
             ${v.published ? `<span class="vd-chip">🚀 ${dstr(v.published)}</span>` : ""}
-            ${v.links.length ? `<span class="vd-chip">🗂 ${v.links.length} 個 prompt</span>` : ""}
+            ${v.links.length ? `<span class="vd-chip">🎬 ${v.links.length} 分鏡</span>` : ""}
+            ${b.chars.length ? `<span class="vd-chip">🎭 ${b.chars.length} 人物</span>` : ""}
+            ${b.refs.length ? `<span class="vd-chip">🖼 ${b.refs.length} 參考圖</span>` : ""}
             ${v.tags.slice(0, 3).map(t => `<span class="vd-chip">#${esc(t)}</span>`).join("")}
           </div>
         </div>
@@ -505,6 +576,11 @@
     curLinks = v ? v.links.slice() : [];
     curThumbs = v ? v.thumbs.slice() : []; curPick = v ? v.thumbPick : 0;
     curChaps = v ? v.chapters.map(c => ({ ...c })) : [];
+    curProjectId = v ? v.projectId : "";
+    curChars = v ? v.chars.map(c => ({ ...c })) : [];
+    curScenes = v ? v.scenes.map(s => ({ ...s })) : [];
+    curRefs = v ? v.refs.slice() : [];
+    $("#vfStyle").value = v ? v.style : "";
     $("#vfDesc").value = v ? v.desc : "";
     $("#vfHash").value = v ? v.hashtags : "";
     $("#vfPlaylist").value = v ? v.playlist : "";
@@ -512,6 +588,7 @@
     $("#vDupBtn").style.display = v ? "" : "none";
     $("#vNextEp").style.display = v && v.series ? "" : "none";
     renderTodos(); renderLinked(); renderThumbs(); renderChaps(); renderThumb(v ? v.ytId : "");
+    clCharEd.render(); clSceneEd.render(); refEd.render(); renderBibleProj();
     $$("#vEditor .block").forEach(b => b.classList.toggle("closed", b.id !== "vBlkScript"));
     $("#vEditor").classList.add("show");
     setTimeout(() => $("#vfTitle").focus(), 60);
@@ -585,7 +662,12 @@
       links: curLinks.slice(),
       thumbs: curThumbs.slice(), thumbPick: curPick,
       desc: $("#vfDesc").value, hashtags: $("#vfHash").value.trim(), playlist: $("#vfPlaylist").value.trim(),
-      chapters: curChaps.filter(c => c.t.trim() || c.n.trim()).sort((a, b) => secOf(a.t) - secOf(b.t))
+      chapters: curChaps.filter(c => c.t.trim() || c.n.trim()).sort((a, b) => secOf(a.t) - secOf(b.t)),
+      projectId: curProjectId,
+      style: $("#vfStyle").value.trim(),
+      chars: curChars.filter(c => c.name.trim() || c.desc.trim()),
+      scenes: curScenes.filter(s => s.name.trim() || s.desc.trim()),
+      refs: curRefs.slice()
     };
     const old = videos.find(x => x.id === v.id);
     if (old) { v.views = old.views; v.likes = old.likes; v.created = old.created; v.thumb = old.thumb; v.order = old.order; }
@@ -1139,6 +1221,7 @@
     const copy = normalize({
       title: v.title.replace(/EP\s*\d+/i, m => m.replace(/\d+/, nextEp)),
       series: v.series, ep: nextEp, kind: v.kind, status: "idea",
+      projectId: v.projectId,   // 沿用同一個企劃的共用設定
       tags: v.tags.slice(), outline: "", script: "", notes: "",
       todos: PRESET_TODOS.map(t => ({ t, done: false })), links: []
     });
@@ -1854,7 +1937,7 @@
       const name = ($("#vScrName").value.trim() || (scrMeta && scrMeta.name) || "腳本分鏡").slice(0, 40);
       const type = (scrMeta && scrMeta.type) || "video", defDur = (scrMeta && scrMeta.dur) || "";
       const recs = scrShots.map((s, i) => shotToRec(s, i, scrShots.length, type, defDur, seg, now));
-      await vaultAdd(recs, seg, name);
+      await vaultAddSafe(recs, seg, name);
       recs.forEach(r => { if (!curLinks.includes(r.id)) curLinks.push(r.id); });
       renderLinked(); $("#vBlkLinked").classList.remove("closed");
       if (!$("#vfTitle").value.trim()) $("#vfTitle").value = name;   // 標題還空著就順手填上
@@ -2324,14 +2407,15 @@
   $("#vImportCh").addEventListener("click", importChannel);
   $("#vRefreshStats").addEventListener("click", refreshStats);
   $("#vExport").addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify(videos, null, 2)], { type: "application/json" });
+    // 新格式帶企劃；舊格式（純陣列）匯入時仍相容
+    const blob = new Blob([JSON.stringify({ videos, projects }, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `video-desk-${new Date().toISOString().slice(0, 10)}.json`;
     a.click(); URL.revokeObjectURL(a.href);
     setCfg({ lastExport: Date.now() });
     backupInfo();
-    toast(`已匯出 ${videos.length} 支`);
+    toast(`已匯出 ${videos.length} 支 · ${projects.length} 企劃`);
   });
   // 備份提醒：影片資料只在這台裝置，太久沒匯出就提醒一次
   const BACKUP_DAYS = 14;
@@ -2355,12 +2439,18 @@
     const rd = new FileReader();
     rd.onload = () => {
       try {
-        const arr = JSON.parse(rd.result);
-        if (!Array.isArray(arr)) throw new Error("格式不是陣列");
+        const data = JSON.parse(rd.result);
+        const arr = Array.isArray(data) ? data : (Array.isArray(data.videos) ? data.videos : null);
+        if (!arr) throw new Error("格式不對（不是影片陣列，也不是 {videos,projects}）");
+        const plist = !Array.isArray(data) && Array.isArray(data.projects) ? data.projects : [];
+        const havep = new Set(projects.map(p => p.id));
+        let pn = 0;
+        plist.forEach(p => { const np = normalizeProject(p); if (!havep.has(np.id)) { projects.push(np); pn++; } });
+        if (pn) saveProjects();
         const have = new Set(videos.map(v => v.id));
         let n = 0;
         arr.forEach(v => { const nv = normalize(v); if (!have.has(nv.id)) { videos.push(nv); n++; } });
-        save(); render(); toast(`已匯入 ${n} 支`);
+        save(); render(); toast(`已匯入 ${n} 支${pn ? ` · ${pn} 企劃` : ""}`);
       } catch (err) { toast("匯入失敗：" + err.message); }
     };
     rd.readAsText(f);
@@ -2380,6 +2470,7 @@
       if ($("#vTrashOv").classList.contains("show")) { $("#vTrashOv").classList.remove("show"); return; }
       if ($("#vTodoOv").classList.contains("show")) { $("#vTodoOv").classList.remove("show"); return; }
       if ($("#vStatsOv").classList.contains("show")) { $("#vStatsOv").classList.remove("show"); return; }
+      if ($("#vProjOv").classList.contains("show")) { closeProjEditor(); return; }
       if ($("#vEditor").classList.contains("show")) closeEditor();
       if (sel.size) clearSel();
       return;
@@ -2418,6 +2509,276 @@
     history.replaceState(null, "", location.pathname + location.search);
   }
   window.addEventListener("hashchange", openFromHash);
+
+  /* =========================================================================
+     製作聖經 — 人物／場景清單控制項（編輯器與企劃視窗共用同一套渲染）
+     ========================================================================= */
+  function namedListCtl(sel, get, ph, onChange) {
+    const el = $(sel);
+    const touched = () => { if (onChange) onChange(); };
+    function render() {
+      const arr = get();
+      el.innerHTML = arr.map((c, i) => `
+        <div class="vd-nl-row" data-i="${i}">
+          <input class="nl-name" data-k="name" value="${esc(c.name || "")}" placeholder="名稱">
+          <input class="nl-desc" data-k="desc" value="${esc(c.desc || "")}" placeholder="${esc(ph)}">
+          <button type="button" class="del" data-del="${i}" title="刪除">✕</button>
+        </div>`).join("") || `<p class="hint" style="margin:0">還沒有項目 — 按下面新增。</p>`;
+    }
+    el.addEventListener("input", e => {
+      const row = e.target.closest("[data-i]"); if (!row) return;
+      const k = e.target.dataset.k; if (k) { get()[+row.dataset.i][k] = e.target.value; touched(); }
+    });
+    el.addEventListener("click", e => {
+      const d = e.target.closest("[data-del]"); if (!d) return;
+      get().splice(+d.dataset.del, 1); render(); touched();
+    });
+    return { render, add() { get().push({ name: "", desc: "" }); render(); touched(); } };
+  }
+  function refListCtl(listSel, fileSel, get, onChange) {
+    const el = $(listSel);
+    const touched = () => { if (onChange) onChange(); };
+    function render() {
+      el.innerHTML = get().map((src, i) => `
+        <div class="vd-thumb-item" data-i="${i}" title="參考圖">
+          <img src="${src}" alt="">
+          <button type="button" class="x" data-del="${i}" title="移除">×</button>
+        </div>`).join("") || `<p class="hint" style="margin:0">還沒有參考圖。</p>`;
+    }
+    el.addEventListener("click", e => {
+      const d = e.target.closest("[data-del]"); if (!d) return;
+      get().splice(+d.dataset.del, 1); render(); touched();
+    });
+    $(fileSel).addEventListener("change", async e => {
+      const files = [...e.target.files]; e.target.value = "";
+      let n = 0;
+      for (const f of files) { if (!/^image\//.test(f.type)) continue; try { get().push(await downscale(f, 1024)); n++; } catch (err) { toast(err.message); } }
+      if (n) { render(); touched(); toast(`已加入 ${n} 張參考圖`); }
+    });
+    return { render };
+  }
+  function updBibleCount() { $("#vBibleCount").textContent = bibleCount(); }
+  const clCharEd = namedListCtl("#vCharList", () => curChars, "外型、服裝、特徵…", updBibleCount);
+  const clSceneEd = namedListCtl("#vSceneList", () => curScenes, "地點、氛圍、時間…", updBibleCount);
+  const refEd = refListCtl("#vRefList", "#vRefFile", () => curRefs, updBibleCount);
+  $("#vCharAdd").addEventListener("click", () => clCharEd.add());
+  $("#vSceneAdd").addEventListener("click", () => clSceneEd.add());
+  $("#vRefAdd").addEventListener("click", () => $("#vRefFile").click());
+  function bibleCount() {
+    return curChars.filter(c => c.name || c.desc).length + curScenes.filter(s => s.name || s.desc).length
+      + curRefs.length + ($("#vfStyle").value.trim() ? 1 : 0);
+  }
+  function renderBibleProj() {
+    const v = editingId ? videos.find(x => x.id === editingId) : null;
+    const probe = v || { projectId: curProjectId, series: $("#vfSeries").value.trim(), style: "" };
+    const p = projOfVideo(probe);
+    $("#vBibleCount").textContent = bibleCount();
+    const box = $("#vBibleProj");
+    if (p) {
+      box.innerHTML = `<div class="vd-bible-head">
+        <span class="vd-chip k">沿用企劃</span> <b>${esc(p.name)}</b>
+        <button type="button" class="link-btn" id="vBibleEdit">編輯企劃設定</button></div>
+        <div class="vd-meta">
+          ${p.style ? `<span class="vd-chip">🎨 有整體風格</span>` : ""}
+          <span class="vd-chip">🎭 ${p.chars.length} 人物</span>
+          <span class="vd-chip">🏞 ${p.scenes.length} 場景</span>
+          <span class="vd-chip">🖼 ${p.refs.length} 參考圖</span></div>`;
+      $("#vfStyle").placeholder = p.style ? p.style.slice(0, 60) : "（沿用企劃風格）";
+    } else {
+      box.innerHTML = `<div class="vd-bible-head"><span class="vd-sub">尚未連結企劃 — 建立企劃可讓整個系列共用人物／風格／場景。</span>
+        <button type="button" class="link-btn" id="vBibleEdit">建立／連結企劃</button></div>`;
+      $("#vfStyle").placeholder = "（沿用企劃風格）";
+    }
+  }
+  $("#vBibleProj").addEventListener("click", e => {
+    if (!e.target.closest("#vBibleEdit")) return;
+    const v = editingId ? videos.find(x => x.id === editingId) : null;
+    const probe = v || { projectId: curProjectId, series: $("#vfSeries").value.trim() };
+    const p = projOfVideo(probe);
+    if (p) openProjEditor(p, {});
+    else openProjEditor(null, { prefillName: $("#vfSeries").value.trim(), kind: $("#vfKind").value, linkVideoId: editingId || null });
+  });
+  $("#vfStyle").addEventListener("input", () => { $("#vBibleCount").textContent = bibleCount(); });
+
+  /* =========================================================================
+     企劃視窗（新增／編輯系列共用設定＋一次建立多集）
+     ========================================================================= */
+  let projEditingId = null, projChars = [], projScenes = [], projRefs = [], projLinkVideoId = null, projEps = [];
+  const clCharPj = namedListCtl("#vpCharList", () => projChars, "外型、服裝、特徵…");
+  const clScenePj = namedListCtl("#vpSceneList", () => projScenes, "地點、氛圍、時間…");
+  const refPj = refListCtl("#vpRefList", "#vpRefFile", () => projRefs);
+  $("#vpCharAdd").addEventListener("click", () => clCharPj.add());
+  $("#vpSceneAdd").addEventListener("click", () => clScenePj.add());
+  $("#vpRefAdd").addEventListener("click", () => $("#vpRefFile").click());
+
+  function blankEp(ep) { return { title: "", ep: ep || "", outline: "", script: "", split: false }; }
+  function renderEps() {
+    $("#vpEpList").innerHTML = projEps.map((e, i) => `
+      <div class="vd-ep-row" data-i="${i}">
+        <div class="er-top">
+          <input class="er-title" placeholder="這一集標題" value="${esc(e.title)}">
+          <input class="er-ep" type="number" min="0" placeholder="集" value="${esc(String(e.ep))}">
+          <button type="button" class="er-del" data-del="${i}" title="移除這一集">✕</button>
+        </div>
+        <input class="er-outline" placeholder="一句話大綱（選填）" value="${esc(e.outline)}">
+        <textarea class="er-script" placeholder="腳本／旁白（要自動拆分鏡就貼在這）">${esc(e.script)}</textarea>
+        <label class="er-split"><input type="checkbox" class="er-splitck"${e.split ? " checked" : ""}> 建立後自動拆分鏡（需腳本＋AI 金鑰）</label>
+      </div>`).join("");
+  }
+  function collectEpRows() {
+    return $$("#vpEpList .vd-ep-row").map(row => ({
+      title: row.querySelector(".er-title").value,
+      ep: row.querySelector(".er-ep").value,
+      outline: row.querySelector(".er-outline").value,
+      script: row.querySelector(".er-script").value,
+      split: row.querySelector(".er-splitck").checked
+    }));
+  }
+  function syncEpsFromDOM() { projEps = collectEpRows(); }
+  $("#vpEpAdd").addEventListener("click", () => {
+    syncEpsFromDOM();
+    const last = projEps.length ? projEps[projEps.length - 1].ep : "";
+    const nx = last !== "" && !isNaN(+last) ? String(+last + 1) : "";
+    projEps.push(blankEp(nx)); renderEps();
+  });
+  $("#vpEpList").addEventListener("click", e => {
+    const d = e.target.closest("[data-del]"); if (!d) return;
+    syncEpsFromDOM(); projEps.splice(+d.dataset.del, 1);
+    if (!projEps.length) projEps.push(blankEp(""));
+    renderEps();
+  });
+
+  function openProjEditor(project, opts) {
+    opts = opts || {};
+    projEditingId = project ? project.id : null;
+    projLinkVideoId = opts.linkVideoId || null;
+    $("#vProjTitle").textContent = project ? "編輯企劃" : "新增企劃";
+    $("#vpName").value = project ? project.name : (opts.prefillName || "");
+    $("#vpKind").value = project ? project.kind : (opts.kind || "long");
+    $("#vpStyle").value = project ? project.style : "";
+    $("#vpNotes").value = project ? project.notes : "";
+    projChars = project ? project.chars.map(c => ({ ...c })) : [];
+    projScenes = project ? project.scenes.map(s => ({ ...s })) : [];
+    projRefs = project ? project.refs.slice() : [];
+    clCharPj.render(); clScenePj.render(); refPj.render();
+    const existing = project ? videos.filter(v => v.projectId === project.id || (!v.projectId && v.series === project.name)).length : 0;
+    $("#vpEpExisting").textContent = project ? `此企劃已有 ${existing} 集${existing ? "（下面新增的是額外的集）" : ""}` : "";
+    $("#vpEpTitle").textContent = project ? "新增更多集數" : "集數清單";
+    projEps = [blankEp(project ? "" : "1")];
+    renderEps();
+    $("#vpDelBtn").style.display = project ? "" : "none";
+    $("#vpSave").textContent = project ? "儲存企劃" : "建立企劃";
+    $("#vProjOv").classList.add("show");
+    setTimeout(() => $("#vpName").focus(), 60);
+  }
+  function closeProjEditor() { $("#vProjOv").classList.remove("show"); projEditingId = null; projLinkVideoId = null; }
+  $("#vProjBtn").addEventListener("click", () => openProjEditor(null, {}));
+  $("#vProjClose").addEventListener("click", closeProjEditor);
+  $("#vpCancel").addEventListener("click", closeProjEditor);
+  $("#vProjOv").addEventListener("click", e => { if (e.target === $("#vProjOv")) closeProjEditor(); });
+
+  function projCollect() {
+    return normalizeProject({
+      id: projEditingId || uid(),
+      name: $("#vpName").value.trim(),
+      kind: $("#vpKind").value,
+      style: $("#vpStyle").value.trim(),
+      chars: projChars.filter(c => c.name.trim() || c.desc.trim()),
+      scenes: projScenes.filter(s => s.name.trim() || s.desc.trim()),
+      refs: projRefs.slice(),
+      notes: $("#vpNotes").value.trim()
+    });
+  }
+  async function saveProject() {
+    const create = !projEditingId;
+    const p = projCollect();
+    if (!p.name) { toast("請先填企劃名稱"); return; }
+    const idx = projects.findIndex(x => x.id === p.id);
+    if (idx >= 0) p.created = projects[idx].created;
+    p.edited = Date.now();
+    if (idx >= 0) projects[idx] = p; else projects.unshift(p);
+    await saveProjects();
+    syncEpsFromDOM();
+    const rows = projEps.filter(e => e.title.trim() || e.script.trim() || e.outline.trim());
+    const made = [];
+    rows.forEach(e => {
+      const v = normalize({
+        title: e.title.trim(), series: p.name, ep: e.ep.trim(), kind: p.kind,
+        status: "idea", projectId: p.id, outline: e.outline.trim(), script: e.script,
+        todos: PRESET_TODOS.map(t => ({ t, done: false }))
+      });
+      videos.unshift(v);
+      made.push({ v, split: e.split && e.script.trim() });
+    });
+    if (projLinkVideoId) {
+      const lv = videos.find(x => x.id === projLinkVideoId);
+      if (lv) { lv.projectId = p.id; if (!lv.series) lv.series = p.name; lv.edited = Date.now(); }
+    }
+    save(); render();
+    closeProjEditor();
+    toast(`${create ? "已建立" : "已更新"}企劃「${p.name}」${made.length ? `＋ ${create ? "" : "新增 "}${made.length} 集` : ""}`);
+    if ($("#vEditor").classList.contains("show")) {
+      if (projLinkVideoId === editingId) { curProjectId = p.id; if (editingId === null && !$("#vfSeries").value.trim()) $("#vfSeries").value = p.name; }
+      renderBibleProj();
+    }
+    const wantSplit = made.filter(m => m.split);
+    if (wantSplit.length && !hasAiKey()) { toast("有集數勾了自動拆分鏡，但還沒設定 AI 金鑰 — 已略過拆鏡"); return; }
+    wantSplit.forEach(m => splitEpisode(m.v, m.v.script));
+  }
+  $("#vpSave").addEventListener("click", saveProject);
+  $("#vpDelBtn").addEventListener("click", async () => {
+    if (!projEditingId) return;
+    const p = projById(projEditingId); if (!p) return;
+    const users = videos.filter(v => v.projectId === p.id).length;
+    if (!confirm(`刪除企劃「${p.name}」？${users ? `有 ${users} 支影片沿用它，影片不會被刪，但會失去共用設定。` : ""}`)) return;
+    projects = projects.filter(x => x.id !== p.id);
+    videos.forEach(v => { if (v.projectId === p.id) v.projectId = ""; });
+    await saveProjects(); save(); render(); closeProjEditor();
+    if ($("#vEditor").classList.contains("show")) renderBibleProj();
+    toast("已刪除企劃");
+  });
+
+  /* 背景自動拆分鏡：吃企劃的人物／場景／風格，拆完建進 Prompt 庫並掛到該集。
+     多集同時拆時用 vaultLock 序列化寫入，避免 read-modify-write 互相蓋掉。 */
+  let vaultLock = Promise.resolve();
+  function vaultAddSafe(recs, seg, name) {
+    const run = () => vaultAdd(recs, seg, name);
+    vaultLock = vaultLock.then(run, run);
+    return vaultLock;
+  }
+  function splitEpisode(v, scriptText) {
+    if (!scriptText || !scriptText.trim()) return;
+    const b = effBible(v);
+    const brief = bibleBrief(b);
+    const name = (v.title || (v.series ? v.series + (v.ep !== "" ? " EP" + v.ep : "") : "") || "腳本分鏡").slice(0, 40);
+    const ask = [
+      "【腳本／旁白】\n" + scriptText,
+      b.style ? "【視覺方向／風格】" + b.style + "（每一鏡的 prompt 都要吃到這個風格）" : "",
+      brief,
+      "【鏡頭數】依內容長度自行判斷，約 4～12 個",
+      "【分鏡類型】影片動態鏡頭" + (v.kind === "short" ? "（直式短片）" : "")
+    ].filter(Boolean).join("\n\n");
+    jobRun({
+      title: "拆鏡：" + name.slice(0, 12), icon: "🎞", vid: v.id,
+      work: async () => {
+        const r = await aiCall(SCR_SYS, ask, shotSchema());
+        const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
+        if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
+        const seg = uid(), now = Date.now();
+        const recs = shots.map((s, i) => shotToRec(s, i, shots.length, "video", "", seg, now));
+        await vaultAddSafe(recs, seg, name);
+        const vid = videos.find(x => x.id === v.id);
+        if (vid) {
+          recs.forEach(rc => { if (!vid.links.includes(rc.id)) vid.links.push(rc.id); });
+          if (vid.status === "idea") vid.status = "script";
+          vid.edited = Date.now(); save();
+        }
+        return { n: recs.length, name };
+      },
+      autoApply: () => true,
+      open: res => { render(); if (editingId === v.id) renderLinked(); toast(`「${res.name}」自動拆出 ${res.n} 鏡並掛上`); }
+    });
+  }
 
   /* PWA：這一頁本來只靠 Prompt 庫註冊的 SW（scope 涵蓋整站）來快取，直接開這頁時就沒有。
      SW 已改成「快取優先＋背景更新」，所以切頁不必等網路；背景抓到新版會 postMessage 通知。 */
