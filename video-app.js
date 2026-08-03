@@ -132,10 +132,14 @@
         note: String(a.note || ""),
         // 剪接（粗剪）用：秒數覆寫、順序覆寫、動畫／聲音／轉場註解
         dur: String(a.dur || ""), anim: String(a.anim || ""), sound: String(a.sound || ""), trans: String(a.trans || ""),
-        ord: (a.ord === "" || a.ord == null) ? null : (isNaN(+a.ord) ? null : +a.ord)
+        ord: (a.ord === "" || a.ord == null) ? null : (isNaN(+a.ord) ? null : +a.ord),
+        // 素材：prompt 變體（依修改指示 AI 生成）＋選中的版本（0＝原始）
+        variants: Array.isArray(a.variants) ? a.variants.map(x => ({ note: String(x.note || ""), prompt: String(x.prompt || "") })).filter(x => x.prompt) : [],
+        pick: Math.max(0, +a.pick || 0)
       };
+      if (e.pick > e.variants.length) e.pick = 0;
       v.shotAssets[k] = e;
-      if (!e.imgs.length && !e.vids.length && !e.note && !e.dur && !e.anim && !e.sound && !e.trans && e.ord == null) delete v.shotAssets[k];
+      if (!e.imgs.length && !e.vids.length && !e.note && !e.dur && !e.anim && !e.sound && !e.trans && e.ord == null && !e.variants.length) delete v.shotAssets[k];
     });
     v.created = +v.created || Date.now(); v.edited = +v.edited || v.created;
     return v;
@@ -1146,7 +1150,13 @@
      ========================================================================= */
   let asVid = null, asImgTarget = null, asSaveT = null;
   function asVideo() { return videos.find(x => x.id === asVid) || null; }
-  function shotAssetOf(v, id) { v.shotAssets = v.shotAssets || {}; return v.shotAssets[id] || (v.shotAssets[id] = { imgs: [], vids: [], note: "", dur: "", anim: "", sound: "", trans: "", ord: null }); }
+  function shotAssetOf(v, id) { v.shotAssets = v.shotAssets || {}; return v.shotAssets[id] || (v.shotAssets[id] = { imgs: [], vids: [], note: "", dur: "", anim: "", sound: "", trans: "", ord: null, variants: [], pick: 0 }); }
+  // 這一鏡目前選中的 prompt（0＝原始分鏡 prompt，其餘＝變體）
+  function effShotPrompt(v, id) {
+    const p = promptById(id), a = v && v.shotAssets && v.shotAssets[id];
+    if (a && a.pick > 0 && a.variants[a.pick - 1]) return a.variants[a.pick - 1].prompt;
+    return (p && p.prompt) || "";
+  }
   function asSave() { const v = asVideo(); if (!v) return; v.edited = Date.now(); clearTimeout(asSaveT); asSaveT = setTimeout(() => save(), 400); }
   async function openAssets(v) {
     asVid = v.id;
@@ -1164,14 +1174,25 @@
     const refImgs = a.imgs.map((src, i) => `<div class="vd-thumb-item" title="參考圖"><img src="${src}" alt=""><button type="button" class="x" data-as-imgdel="${id}" data-i="${i}">×</button></div>`).join("");
     const vidLabel = u => /^data:/.test(u) ? "內嵌影片" : (u.length > 32 ? u.slice(0, 32) + "…" : u);
     const vidChips = a.vids.map((u, i) => `<span class="vd-as-vid"><a href="${esc(u)}" target="_blank" rel="noopener">🎬 ${esc(vidLabel(u))}</a><button type="button" class="x" data-as-viddel="${id}" data-i="${i}">×</button></span>`).join("");
+    const vars = a.variants || [], pick = a.pick || 0;
+    const eff = pick > 0 && vars[pick - 1] ? vars[pick - 1].prompt : (p.prompt || "");
+    const tabs = `<div class="vd-as-tabs"><span class="vd-as-tl">版本</span>
+      <button type="button" class="vd-as-tab${pick === 0 ? " on" : ""}" data-astab="0" data-shot="${id}">原始</button>
+      ${vars.map((vr, i) => `<button type="button" class="vd-as-tab${pick === i + 1 ? " on" : ""}" data-astab="${i + 1}" data-shot="${id}" title="${esc(vr.note || "變體 " + (i + 1))}">${i + 1}<span class="x" data-asvdel="${i}" data-shot="${id}" title="刪除此變體">×</span></button>`).join("")}</div>`;
     return `<div class="vd-as-shot" data-shot="${id}">
       <div class="vd-as-h"><b>鏡 ${(p.sb && (+p.sb.ord + 1)) || idx}</b> <span class="vd-as-t">${esc(p.title || "未命名")}</span>${chips}
         <span class="sp" style="flex:1 1 auto"></span>
-        <button type="button" class="vd-as-b" data-as-copy="${id}">📋 複製</button>
+        <button type="button" class="vd-as-b" data-as-copy="${id}">📋 複製${pick > 0 ? " 變體" + pick : ""}</button>
         <button type="button" class="vd-as-b" data-open="${id}">👁 詳情</button></div>
       <div class="vd-as-cols">
         <div class="vd-as-main">
-          <p class="vd-as-prompt">${esc(p.prompt || "")}</p>
+          ${tabs}
+          <p class="vd-as-prompt">${esc(eff)}</p>
+          ${pick > 0 && vars[pick - 1] && vars[pick - 1].note ? `<p class="vd-note" style="margin:-3px 0 6px">🔧 變體 ${pick}：${esc(vars[pick - 1].note)}</p>` : ""}
+          <div class="vd-as-vargen">
+            <input class="vd-as-mod" data-asmod="${id}" placeholder="要改什麼（例：改成夜晚、加上雨、鏡頭拉近）">
+            <button type="button" class="vd-as-b vgen" data-asvargen="${id}">✨ 生成變體</button>
+          </div>
           ${p.notes ? `<p class="vd-note">旁白／備註：${esc(p.notes)}</p>` : ""}
           ${resImg}
         </div>
@@ -1212,12 +1233,34 @@
   }
   function copyStackPrompts(stack) {
     const v = asVideo(); if (!v) return;
-    const ps = v.links.map(promptById).filter(p => p && p.stack === stack).sort((a, b) => ((a.sb && +a.sb.ord || 0) - (b.sb && +b.sb.ord || 0)));
-    if (!ps.length) return;
-    copyText(ps.map((p, i) => `【鏡 ${(p.sb && +p.sb.ord + 1) || i + 1}】${p.title || ""}\n${(p.prompt || "").trim()}`).join("\n\n"), "已複製整版 prompt");
+    const ids = v.links.filter(id => { const p = promptById(id); return p && p.stack === stack; }).sort((a, b) => (((promptById(a) || {}).sb && +promptById(a).sb.ord || 0) - ((promptById(b) || {}).sb && +promptById(b).sb.ord || 0)));
+    if (!ids.length) return;
+    copyText(ids.map((id, i) => { const p = promptById(id); return `【鏡 ${(p.sb && +p.sb.ord + 1) || i + 1}】${p.title || ""}\n${effShotPrompt(v, id).trim()}`; }).join("\n\n"), "已複製整版 prompt（用選中的版本）");
+  }
+  // 依修改指示 AI 生成一個 prompt 變體（存在影片的 shotAssets，不動 Prompt 庫）
+  const VAR_SYS = "你是生成式影像／影片提示詞工程師。使用者會給一段原始英文 prompt，以及想修改的方向。請輸出修改後的**完整英文 prompt**：保留原本仍適用的描述，只依指示調整需要改的部分，維持可直接餵給生成模型的高品質提示詞。只回 JSON {prompt}，不要多餘文字。";
+  const VAR_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" } }, required: ["prompt"] };
+  async function genVariant(id, btn) {
+    if (!hasAiKey()) { toast("這個功能要用 AI，請先填金鑰"); openSettings(true); return; }
+    const v = asVideo(), p = promptById(id); if (!v || !p) return;
+    const modEl = btn.closest(".vd-as-shot").querySelector("[data-asmod]");
+    const mod = (modEl && modEl.value || "").trim();
+    if (!mod) { toast("先在左邊填「要改什麼」"); if (modEl) modEl.focus(); return; }
+    btn.disabled = true; const old = btn.textContent; btn.textContent = "生成中…";
+    try {
+      const r = await aiCall(VAR_SYS, "【原始 prompt】\n" + (p.prompt || "") + "\n\n【要修改的方向】\n" + mod, VAR_SCHEMA);
+      const np = String(r.prompt || "").trim(); if (!np) throw new Error("AI 沒有回傳 prompt");
+      const a = shotAssetOf(v, id); a.variants.push({ note: mod, prompt: np }); a.pick = a.variants.length;
+      asSave(); renderAssets(); toast(`已生成變體 ${a.variants.length}（已切到這個版本）`);
+    } catch (e) { btn.disabled = false; btn.textContent = old; toast("生成失敗：" + e.message); }
   }
   $("#vAsBody").addEventListener("click", e => {
-    const cp = e.target.closest("[data-as-copy]"); if (cp) { const p = promptById(cp.dataset.asCopy); if (p) copyText(p.prompt || "", "已複製這一鏡的 prompt"); return; }
+    const vdl = e.target.closest("[data-asvdel]");   // 刪某個變體（在 tab 上的 ✕，要先攔）
+    if (vdl) { e.stopPropagation(); const a = shotAssetOf(asVideo(), vdl.dataset.shot), i = +vdl.dataset.asvdel; a.variants.splice(i, 1); if (a.pick > i) a.pick = Math.max(0, a.pick - 1); asSave(); renderAssets(); return; }
+    const tab = e.target.closest("[data-astab]");
+    if (tab) { shotAssetOf(asVideo(), tab.dataset.shot).pick = +tab.dataset.astab; asSave(); renderAssets(); return; }
+    const vg = e.target.closest("[data-asvargen]"); if (vg) { genVariant(vg.dataset.asvargen, vg); return; }
+    const cp = e.target.closest("[data-as-copy]"); if (cp) { const v = asVideo(); if (v) copyText(effShotPrompt(v, cp.dataset.asCopy), "已複製這一鏡選中的 prompt"); return; }
     const ca = e.target.closest("[data-as-copyall]"); if (ca) { copyStackPrompts(ca.dataset.asCopyall); return; }
     const bd = e.target.closest("[data-board]"); if (bd) { location.href = "prompt-vault.html#sb=" + encodeURIComponent(bd.dataset.board); return; }
     const op = e.target.closest("[data-open]"); if (op) { openPreview(op.dataset.open); return; }
@@ -1274,11 +1317,11 @@
      各看板階段的工作站（構想／腳本／剪接／待發布／已發布）— 共用一個殼 #vWorkOv，
      欄位以 data-vf 直接綁到影片、即時存；AI／拆分鏡等重工具沿用既有流程（開編輯器再叫）。
      ========================================================================= */
-  let workVid = null, workStage = "", workSaveT = null;
+  let workVid = null, workStage = "", workSaveT = null, workSel = null;
   const workVideo = () => videos.find(x => x.id === workVid) || null;
   function workSave() { const v = workVideo(); if (!v) return; v.edited = Date.now(); clearTimeout(workSaveT); workSaveT = setTimeout(() => save(), 400); }
   async function openWork(stage, v) {
-    workVid = v.id; workStage = stage;
+    workVid = v.id; workStage = stage; workSel = null;
     if (!prompts.length) await reloadPrompts();
     renderWork();
     $("#vWorkOv").classList.add("show");
@@ -1346,34 +1389,54 @@
     });
     copyText(lines.join("\n") + `\n\n總長 ${fmtTC(sec)}`, "粗剪表已複製");
   }
+  // 選中的分鏡（剪接時間軸用），只活在這次開啟
+  const TL_PXPS = 9;   // 每秒的像素寬（時間軸依秒數決定 clip 寬度）
+  function clipEditPanel(v, stack, id) {
+    const p = promptById(id), a = (v.shotAssets && v.shotAssets[id]) || {};
+    const ids = editShots(v, stack), ri = ids.indexOf(id);
+    return `<div class="vd-clip-edit">
+      <div class="vd-ce-h"><b>鏡 ${ri + 1}</b><span class="vd-rc-t">${esc(p ? (p.title || "未命名") : "⚠ 已不在庫")}</span>
+        <span class="sp" style="flex:1 1 auto"></span>
+        <button type="button" class="vd-rc-mv" data-wmove="up" data-shot="${id}" data-stack="${esc(stack)}" title="往前移"${ri <= 0 ? " disabled" : ""}>◀</button>
+        <button type="button" class="vd-rc-mv" data-wmove="down" data-shot="${id}" data-stack="${esc(stack)}" title="往後移"${ri === ids.length - 1 ? " disabled" : ""}>▶</button>
+        <label class="vd-rc-dur">秒<input type="number" min="1" data-sa="dur" data-shot="${id}" value="${esc(String(a.dur || (p && p.sb && p.sb.dur) || ""))}" placeholder="${(p && p.sb && p.sb.dur) || 5}"></label></div>
+      <div class="vd-rc-grid">
+        <label>🎞 轉場<input data-sa="trans" data-shot="${id}" value="${esc(a.trans || (p && p.sb && p.sb.trans) || "")}" placeholder="硬切／淡入／疊化／甩鏡…"></label>
+        <label>✨ 動畫<input data-sa="anim" data-shot="${id}" value="${esc(a.anim || "")}" placeholder="運鏡、特效、動態…"></label>
+        <label>🔊 聲音<input data-sa="sound" data-shot="${id}" value="${esc(a.sound || "")}" placeholder="旁白、音效、BGM…"></label>
+      </div>
+      ${(p && p.prompt) ? `<p class="vd-note" style="margin:0 0 6px">${esc((p.prompt || "").slice(0, 140))}</p>` : ""}
+      <textarea class="vd-as-note" data-sa="note" data-shot="${id}" placeholder="剪接備註（節奏、要修的地方…）">${esc(a.note || "")}</textarea>
+    </div>`;
+  }
   function workEdit(v) {
     const groups = linkGroups(v.links).groups;
+    const all = []; groups.forEach(g => editShots(v, g.stack).forEach(id => all.push(id)));
+    if (workSel && !all.includes(workSel)) workSel = null;
+    if (!workSel && all.length) workSel = all[0];   // 預設選第一段
     const body = groups.map((g, gi) => {
       const ids = editShots(v, g.stack);
       let sec = 0;
-      const rows = ids.map((id, ri) => {
+      const clips = ids.map((id, ri) => {
         const p = promptById(id), a = (v.shotAssets && v.shotAssets[id]) || {}, d = effDur(v, id), tc = fmtTC(sec); sec += d;
-        return `<div class="vd-rc-shot" data-shot="${id}">
-          <div class="vd-rc-h"><span class="tc">${tc}</span><b>鏡 ${ri + 1}</b><span class="vd-rc-t">${esc(p ? (p.title || "未命名") : "⚠ 已不在庫")}</span>
-            <span class="sp" style="flex:1 1 auto"></span>
-            <button type="button" class="vd-rc-mv" data-wmove="up" data-shot="${id}" data-stack="${esc(g.stack)}" title="上移"${ri === 0 ? " disabled" : ""}>▲</button>
-            <button type="button" class="vd-rc-mv" data-wmove="down" data-shot="${id}" data-stack="${esc(g.stack)}" title="下移"${ri === ids.length - 1 ? " disabled" : ""}>▼</button>
-            <label class="vd-rc-dur">秒<input type="number" min="1" data-sa="dur" data-shot="${id}" value="${esc(String(a.dur || (p && p.sb && p.sb.dur) || ""))}" placeholder="${(p && p.sb && p.sb.dur) || 5}"></label></div>
-          <div class="vd-rc-grid">
-            <label>🎞 轉場<input data-sa="trans" data-shot="${id}" value="${esc(a.trans || (p && p.sb && p.sb.trans) || "")}" placeholder="硬切／淡入／疊化／甩鏡…"></label>
-            <label>✨ 動畫<input data-sa="anim" data-shot="${id}" value="${esc(a.anim || "")}" placeholder="運鏡、特效、動態…"></label>
-            <label>🔊 聲音<input data-sa="sound" data-shot="${id}" value="${esc(a.sound || "")}" placeholder="旁白、音效、BGM…"></label>
-          </div>
-          <textarea class="vd-as-note" data-sa="note" data-shot="${id}" placeholder="剪接備註（節奏、要修的地方…）">${esc(a.note || "")}</textarea>
-        </div>`;
+        const w = Math.max(56, Math.min(240, Math.round(d * TL_PXPS)));
+        const tr = a.trans || (p && p.sb && p.sb.trans) || "";
+        return `<button type="button" class="vd-clip${workSel === id ? " sel" : ""}${a.anim ? " has-anim" : ""}${a.sound ? " has-snd" : ""}" data-clip="${id}" style="width:${w}px" title="${esc((p && p.title) || "未命名")}　${d}s">
+          <span class="c-tc">${tc}</span>
+          <span class="c-body"><b>${ri + 1}</b> ${esc((p && p.title) || "未命名")}</span>
+          <span class="c-foot">${d}s${tr ? " · " + esc(tr) : ""}${a.anim ? " ✨" : ""}${a.sound ? " 🔊" : ""}</span>
+        </button>`;
       }).join("");
+      const panel = (workSel && ids.includes(workSel)) ? clipEditPanel(v, g.stack, workSel) : "";
       return `<div class="vd-as-ver"><div class="vd-as-verhead">${groups.length > 1 ? `<span class="vd-lg-ver">第 ${gi + 1} 版</span>` : ""}<b>${esc(g.name)}</b><span class="vd-chip">${ids.length} 鏡 · 總長 ${fmtTC(sec)}</span>
         <span class="sp" style="flex:1 1 auto"></span>
-        <button type="button" class="link-btn" data-wa="copy-edl" data-stack="${esc(g.stack)}">📋 複製粗剪表</button></div>${rows}</div>`;
+        <button type="button" class="link-btn" data-wa="copy-edl" data-stack="${esc(g.stack)}">📋 複製粗剪表</button></div>
+        <div class="vd-tl-track">${clips || `<span class="vd-note">還沒有分鏡</span>`}</div>
+        ${panel}</div>`;
     }).join("");
     const chaps = (v.chapters || []).filter(c => c.t || c.n).sort((a, b) => secOf(a.t) - secOf(b.t));
     const chapHTML = chaps.length ? `<div class="vd-tl">${chaps.map(c => `<div class="vd-tl-row"><span class="tc">${esc(c.t)}</span><span class="ti">${esc(c.n)}</span></div>`).join("")}</div>` : `<p class="vd-note">還沒有章節。</p>`;
-    return `<div class="vd-work-h">粗剪時間軸　<span class="vd-note">改秒數、▲▼ 調順序、填 轉場／動畫／聲音／剪接備註</span></div>
+    return `<div class="vd-work-h">粗剪時間軸　<span class="vd-note">點一段來編輯（寬度＝秒數）；◀▶ 換順序、改秒數、填 轉場／動畫／聲音／備註</span></div>
       ${body || `<p class="vd-note">還沒有分鏡 — 先到「腳本」拆分鏡。</p>`}
       <div class="vd-work-h">章節</div>${chapHTML}
       <div class="pk-actions">
@@ -1443,12 +1506,15 @@
     if (sa) { shotAssetOf(v, sa.dataset.shot)[sa.dataset.sa] = e.target.value; workSave(); return; }
   });
   $("#vWorkBody").addEventListener("change", e => {
-    // 秒數改完（失焦）才重排時間軸，避免打字時每個鍵都重繪搶焦點
-    if (e.target.closest("[data-sa='dur']")) renderWork();
+    // 秒數／轉場／動畫／聲音改完（失焦）才重排時間軸，讓 clip 寬度與徽章更新（打字時不重繪，免搶焦點）
+    const sa = e.target.closest("[data-sa]");
+    if (sa && ["dur", "trans", "anim", "sound"].includes(sa.dataset.sa)) renderWork();
   });
   $("#vWorkBody").addEventListener("click", e => {
     const th = e.target.closest("[data-wthumb]");
     if (th) { const v = workVideo(); if (v) { v.thumbPick = +th.dataset.wthumb; workSave(); renderWork(); } return; }
+    const clip = e.target.closest("[data-clip]");
+    if (clip) { workSel = clip.dataset.clip; renderWork(); return; }
     const mv = e.target.closest("[data-wmove]");
     if (mv) { const v = workVideo(); if (v) { moveShot(v, mv.dataset.stack, mv.dataset.shot, mv.dataset.wmove === "up" ? -1 : 1); renderWork(); } return; }
     const b = e.target.closest("[data-wa]"); if (!b) return;
