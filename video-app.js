@@ -97,6 +97,11 @@
     try { return JSON.parse(localStorage.getItem(KEY_CFG)) || {}; } catch (e) { return {}; }
   }
   function setCfg(o) { try { localStorage.setItem(KEY_CFG, JSON.stringify(Object.assign(cfg(), o))); } catch (e) {} }
+  // 系統生成的 prompt 用哪個語言（預設中文；可在設定改英文）
+  const promptLang = () => cfg().promptLang === "en" ? "en" : "zh";
+  const langLine = () => promptLang() === "en"
+    ? "【prompt 語言】所有 prompt 一律用英文書寫。"
+    : "【prompt 語言】所有 prompt 一律用繁體中文書寫（給中文生成模型用），保留必要的英文專有名詞即可。";
 
   function normalize(v) {
     v.id = v.id || uid();
@@ -1238,7 +1243,7 @@
     copyText(ids.map((id, i) => { const p = promptById(id); return `【鏡 ${(p.sb && +p.sb.ord + 1) || i + 1}】${p.title || ""}\n${effShotPrompt(v, id).trim()}`; }).join("\n\n"), "已複製整版 prompt（用選中的版本）");
   }
   // 依修改指示 AI 生成一個 prompt 變體（存在影片的 shotAssets，不動 Prompt 庫）
-  const VAR_SYS = "你是生成式影像／影片提示詞工程師。使用者會給一段原始英文 prompt，以及想修改的方向。請輸出修改後的**完整英文 prompt**：保留原本仍適用的描述，只依指示調整需要改的部分，維持可直接餵給生成模型的高品質提示詞。只回 JSON {prompt}，不要多餘文字。";
+  const VAR_SYS = "你是生成式影像／影片提示詞工程師。使用者會給一段原始 prompt，以及想修改的方向。請輸出修改後的**完整 prompt**：保留原本仍適用的描述，只依指示調整需要改的部分，維持可直接餵給生成模型的高品質提示詞，語言依使用者指定的「prompt 語言」。只回 JSON {prompt}，不要多餘文字。";
   const VAR_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" } }, required: ["prompt"] };
   async function genVariant(id, btn) {
     if (!hasAiKey()) { toast("這個功能要用 AI，請先填金鑰"); openSettings(true); return; }
@@ -1248,7 +1253,7 @@
     if (!mod) { toast("先在左邊填「要改什麼」"); if (modEl) modEl.focus(); return; }
     btn.disabled = true; const old = btn.textContent; btn.textContent = "生成中…";
     try {
-      const r = await aiCall(VAR_SYS, "【原始 prompt】\n" + (p.prompt || "") + "\n\n【要修改的方向】\n" + mod, VAR_SCHEMA);
+      const r = await aiCall(VAR_SYS, "【原始 prompt】\n" + (p.prompt || "") + "\n\n【要修改的方向】\n" + mod + "\n\n" + langLine(), VAR_SCHEMA);
       const np = String(r.prompt || "").trim(); if (!np) throw new Error("AI 沒有回傳 prompt");
       const a = shotAssetOf(v, id); a.variants.push({ note: mod, prompt: np }); a.pick = a.variants.length;
       asSave(); renderAssets(); toast(`已生成變體 ${a.variants.length}（已切到這個版本）`);
@@ -2380,11 +2385,13 @@
   function composeShotPrompt(shot, b) {
     if (!b) return String(shot.prompt || "").trim();
     const { chars, scenes } = bibleHits(shot, b);
+    const zh = promptLang() !== "en";
+    const L = zh ? { c: "角色：", s: "場景：", st: "風格：" } : { c: "Characters: ", s: "Scene: ", st: "Style: " };
     const bits = [];
-    if (chars.length) bits.push("Characters: " + chars.map(c => c.desc ? `${c.name}（${c.desc}）` : c.name).join("; "));
-    if (scenes.length) bits.push("Scene: " + scenes.map(s => s.desc ? `${s.name}（${s.desc}）` : s.name).join("; "));
-    if (b.style) bits.push("Style: " + b.style);
-    const prefix = bits.length ? bits.join(". ") + ". " : "";
+    if (chars.length) bits.push(L.c + chars.map(c => c.desc ? `${c.name}（${c.desc}）` : c.name).join("; "));
+    if (scenes.length) bits.push(L.s + scenes.map(s => s.desc ? `${s.name}（${s.desc}）` : s.name).join("; "));
+    if (b.style) bits.push(L.st + b.style);
+    const prefix = bits.length ? bits.join(zh ? "。" : ". ") + (zh ? "。" : ". ") : "";
     return prefix + String(shot.prompt || "").trim();
   }
   // 編輯器目前這支影片的有效製作聖經（企劃共用 ⊕ 本集追加），未存檔也能用
@@ -2395,7 +2402,7 @@
     };
   }
   function curEditorBible() { return effBible(editorProbe()); }
-  const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 一律用英文，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
+  const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 依使用者指定的「prompt 語言」書寫，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
   let scrShots = [], scrMeta = null, scrJob = null;
   function openScriptSplit() {
     $("#vScrText").value = $("#vfScript").value.trim();
@@ -2491,7 +2498,8 @@
       bibleAsk(b),
       f.cnt ? "【鏡頭數】請剛好拆成 " + f.cnt + " 個鏡頭" : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
       f.dur ? "【每鏡預設秒數】約 " + f.dur + " 秒，長短依內容微調" : "",
-      "【分鏡類型】" + (f.type === "video" ? "影片動態鏡頭" : "靜態畫面")
+      "【分鏡類型】" + (f.type === "video" ? "影片動態鏡頭" : "靜態畫面"),
+      langLine()
     ].filter(Boolean).join("\n\n");
     scrShots = []; $("#vScrResult").innerHTML = ""; $("#vScrFoot").hidden = true;
     $("#vScrGo").disabled = true;
@@ -3017,6 +3025,7 @@
     $("#vaiOr").value = orKeys().join("\n");
     const p = proxyCfg();
     $("#vaiProxy").value = p.url; $("#vaiProxyPw").value = p.pw;
+    $("#vPromptLang").value = promptLang();
     aiState();
   }
   function aiState() {
@@ -3047,7 +3056,8 @@
   function saveSettings() {
     setCfg({
       channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
-      autoFill: $("#vAutoFill").checked
+      autoFill: $("#vAutoFill").checked,
+      promptLang: $("#vPromptLang").value === "en" ? "en" : "zh"
     });
     saveAiFields();
   }
@@ -3279,7 +3289,7 @@
   /* =========================================================================
      AI 依大綱設計人物造型／服裝／場景／風格 —— 只在使用者按下才跑，不進任何自動流程
      ========================================================================= */
-  const DESIGN_SYS = "你是影片美術指導與角色設計師。根據使用者給的大綱與劇情，設計這支影片會登場的人物造型與主要場景，並定調整體視覺風格。回傳 JSON：style＝整體視覺風格（英文視覺關鍵詞，供生成模型用，例如 'cold desaturated realism, 35mm film grain, moody lighting'）；chars＝登場人物陣列，每個 name 給簡短的繁體中文名稱或代稱、desc 給可直接放進生成提示詞的英文視覺描述（外型、年齡、髮型、服裝、氣質等具體關鍵詞，精簡一行）；scenes＝主要場景陣列，name 繁中、desc 英文視覺描述（地點、氛圍、光線、時間）。只設計大綱／劇情裡實際會出現的，不要硬湊、不要超過必要數量；使用者已經有的角色／場景（會附在下面）不要重複。只回 JSON，不要多餘文字。";
+  const DESIGN_SYS = "你是影片美術指導與角色設計師。根據使用者給的大綱與劇情，設計這支影片會登場的人物造型與主要場景，並定調整體視覺風格。回傳 JSON：style＝整體視覺風格（依指定的描述語言，供生成模型用）；chars＝登場人物陣列，每個 name 給簡短的繁體中文名稱或代稱、desc 給可直接放進生成提示詞的視覺描述（外型、年齡、髮型、服裝、氣質等具體關鍵詞，精簡一行，依指定的描述語言）；scenes＝主要場景陣列，name 繁中、desc 依指定描述語言的視覺描述（地點、氛圍、光線、時間）。只設計大綱／劇情裡實際會出現的，不要硬湊、不要超過必要數量；使用者已經有的角色／場景（會附在下面）不要重複。只回 JSON，不要多餘文字。";
   const DESIGN_SCHEMA = {
     type: "OBJECT",
     properties: {
@@ -3299,7 +3309,8 @@
       $("#vfScript").value.trim() ? "【腳本／劇情】\n" + $("#vfScript").value.trim().slice(0, 4000) : "",
       b.chars.length ? "【已有的角色（不要重複）】" + b.chars.map(c => c.name).filter(Boolean).join("、") : "",
       b.scenes.length ? "【已有的場景（不要重複）】" + b.scenes.map(s => s.name).filter(Boolean).join("、") : "",
-      b.style ? "【已定的整體風格】" + b.style : ""
+      b.style ? "【已定的整體風格】" + b.style : "",
+      "【描述語言】" + (promptLang() === "en" ? "chars／scenes 的 desc、style 都用英文視覺關鍵詞。" : "chars／scenes 的 desc、style 都用繁體中文視覺描述（可保留必要的英文專有名詞）。")
     ].filter(Boolean).join("\n\n");
   }
   function openDesign() {
@@ -3534,7 +3545,8 @@
       b.style ? "【視覺方向／風格】" + b.style + "（每一鏡的 prompt 都要吃到這個風格）" : "",
       bibleAsk(b),
       "【鏡頭數】依內容長度自行判斷，約 4～12 個",
-      "【分鏡類型】影片動態鏡頭" + (v.kind === "short" ? "（直式短片）" : "")
+      "【分鏡類型】影片動態鏡頭" + (v.kind === "short" ? "（直式短片）" : ""),
+      langLine()
     ].filter(Boolean).join("\n\n");
     jobRun({
       title: "拆鏡：" + name.slice(0, 12), icon: "🎞", vid: v.id,
