@@ -1307,22 +1307,77 @@
         <button type="button" class="link-btn" data-wa="next" style="color:var(--ink-3)">推進到「素材生成」▶</button>
         ${v.links.length ? `<span class="vd-note">已有 ${v.links.length} 個分鏡${groups.length > 1 ? `（${groups.length} 版）` : ""}</span>` : ""}</div>`;
   }
+  /* 粗剪：有效秒數／順序＝影片上的覆寫（shotAssets）優先，否則用分鏡原本的 sb */
+  function effDur(v, id) {
+    const a = v.shotAssets && v.shotAssets[id];
+    if (a && a.dur) { const n = Math.round(+String(a.dur).replace(/[^\d.]/g, "") || 0); if (n > 0) return n; }
+    const p = promptById(id);
+    return Math.max(1, Math.round(+((p && p.sb && p.sb.dur) || (p && p.params && p.params.duration) || 5)));
+  }
+  function effOrd(v, id) {
+    const a = v.shotAssets && v.shotAssets[id];
+    if (a && a.ord != null) return a.ord;
+    const p = promptById(id);
+    return (p && p.sb && +p.sb.ord) || 0;
+  }
+  function editShots(v, stack) {
+    return v.links.filter(id => { const p = promptById(id); return p && p.stack === stack; }).sort((a, b) => effOrd(v, a) - effOrd(v, b) || 0);
+  }
+  function reindexVersion(v, stack) { editShots(v, stack).forEach((id, i) => { shotAssetOf(v, id).ord = i; }); }
+  function moveShot(v, stack, id, dir) {
+    reindexVersion(v, stack);
+    const ids = editShots(v, stack), i = ids.indexOf(id), j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    const oi = shotAssetOf(v, ids[i]).ord, oj = shotAssetOf(v, ids[j]).ord;
+    shotAssetOf(v, ids[i]).ord = oj; shotAssetOf(v, ids[j]).ord = oi;
+    v.edited = Date.now(); workSave();
+  }
+  function copyEDL(v, stack) {
+    const ids = editShots(v, stack); if (!ids.length) return;
+    let sec = 0;
+    const lines = ids.map((id, i) => {
+      const p = promptById(id), a = (v.shotAssets && v.shotAssets[id]) || {}, d = effDur(v, id), tc = fmtTC(sec); sec += d;
+      const bits = [`${tc}　鏡${i + 1} ${(p && p.title) || ""}（${d}s）`];
+      const tr = a.trans || (p && p.sb && p.sb.trans); if (tr) bits.push("轉場：" + tr);
+      if (a.anim) bits.push("動畫：" + a.anim);
+      if (a.sound) bits.push("聲音：" + a.sound);
+      if (a.note) bits.push("備註：" + a.note);
+      return bits.join("　");
+    });
+    copyText(lines.join("\n") + `\n\n總長 ${fmtTC(sec)}`, "粗剪表已複製");
+  }
   function workEdit(v) {
     const groups = linkGroups(v.links).groups;
-    let tl = groups.map((g, gi) => {
+    const body = groups.map((g, gi) => {
+      const ids = editShots(v, g.stack);
       let sec = 0;
-      const rows = g.ids.map(promptById).filter(Boolean).sort(byOrdP).map(p => {
-        const tc = fmtTC(sec), d = durOfP(p); sec += d;
-        return `<div class="vd-tl-row"><span class="tc">${tc}</span><span class="ti">${esc(p.title || "未命名")}</span><span class="vd-chip">${d}s</span>${p.sb && p.sb.trans ? `<span class="vd-chip">${esc(p.sb.trans)}</span>` : ""}</div>`;
+      const rows = ids.map((id, ri) => {
+        const p = promptById(id), a = (v.shotAssets && v.shotAssets[id]) || {}, d = effDur(v, id), tc = fmtTC(sec); sec += d;
+        return `<div class="vd-rc-shot" data-shot="${id}">
+          <div class="vd-rc-h"><span class="tc">${tc}</span><b>鏡 ${ri + 1}</b><span class="vd-rc-t">${esc(p ? (p.title || "未命名") : "⚠ 已不在庫")}</span>
+            <span class="sp" style="flex:1 1 auto"></span>
+            <button type="button" class="vd-rc-mv" data-wmove="up" data-shot="${id}" data-stack="${esc(g.stack)}" title="上移"${ri === 0 ? " disabled" : ""}>▲</button>
+            <button type="button" class="vd-rc-mv" data-wmove="down" data-shot="${id}" data-stack="${esc(g.stack)}" title="下移"${ri === ids.length - 1 ? " disabled" : ""}>▼</button>
+            <label class="vd-rc-dur">秒<input type="number" min="1" data-sa="dur" data-shot="${id}" value="${esc(String(a.dur || (p && p.sb && p.sb.dur) || ""))}" placeholder="${(p && p.sb && p.sb.dur) || 5}"></label></div>
+          <div class="vd-rc-grid">
+            <label>🎞 轉場<input data-sa="trans" data-shot="${id}" value="${esc(a.trans || (p && p.sb && p.sb.trans) || "")}" placeholder="硬切／淡入／疊化／甩鏡…"></label>
+            <label>✨ 動畫<input data-sa="anim" data-shot="${id}" value="${esc(a.anim || "")}" placeholder="運鏡、特效、動態…"></label>
+            <label>🔊 聲音<input data-sa="sound" data-shot="${id}" value="${esc(a.sound || "")}" placeholder="旁白、音效、BGM…"></label>
+          </div>
+          <textarea class="vd-as-note" data-sa="note" data-shot="${id}" placeholder="剪接備註（節奏、要修的地方…）">${esc(a.note || "")}</textarea>
+        </div>`;
       }).join("");
-      return `<div class="vd-as-ver"><div class="vd-as-verhead">${groups.length > 1 ? `<span class="vd-lg-ver">第 ${gi + 1} 版</span>` : ""}<b>${esc(g.name)}</b><span class="vd-chip">總長 ${fmtTC(sec)}</span></div>${rows}</div>`;
+      return `<div class="vd-as-ver"><div class="vd-as-verhead">${groups.length > 1 ? `<span class="vd-lg-ver">第 ${gi + 1} 版</span>` : ""}<b>${esc(g.name)}</b><span class="vd-chip">${ids.length} 鏡 · 總長 ${fmtTC(sec)}</span>
+        <span class="sp" style="flex:1 1 auto"></span>
+        <button type="button" class="link-btn" data-wa="copy-edl" data-stack="${esc(g.stack)}">📋 複製粗剪表</button></div>${rows}</div>`;
     }).join("");
     const chaps = (v.chapters || []).filter(c => c.t || c.n).sort((a, b) => secOf(a.t) - secOf(b.t));
     const chapHTML = chaps.length ? `<div class="vd-tl">${chaps.map(c => `<div class="vd-tl-row"><span class="tc">${esc(c.t)}</span><span class="ti">${esc(c.n)}</span></div>`).join("")}</div>` : `<p class="vd-note">還沒有章節。</p>`;
-    return `<div class="vd-work-h">分鏡時間軸</div>${tl || `<p class="vd-note">還沒有分鏡 — 先到「腳本」拆分鏡。</p>`}
+    return `<div class="vd-work-h">粗剪時間軸　<span class="vd-note">改秒數、▲▼ 調順序、填 轉場／動畫／聲音／剪接備註</span></div>
+      ${body || `<p class="vd-note">還沒有分鏡 — 先到「腳本」拆分鏡。</p>`}
       <div class="vd-work-h">章節</div>${chapHTML}
       <div class="pk-actions">
-        <button type="button" class="link-btn" data-wa="gen-chaps">⏱ 依分鏡秒數排章節</button>
+        <button type="button" class="link-btn" data-wa="gen-chaps">⏱ 依粗剪秒數排章節</button>
         <button type="button" class="link-btn" data-wa="copy-chaps">📋 複製章節</button>
         <button type="button" class="link-btn" data-wa="edit-chaps" style="color:var(--ink-3)">在編輯器微調章節</button>
         <button type="button" class="link-btn" data-wa="next" style="color:var(--ink-3)">推進到「待發布」▶</button></div>`;
@@ -1365,12 +1420,13 @@
     toast(`已推進到「${nx.zh}」`);
   }
   function genChapsFromShots(v) {
-    const ps = v.links.map(promptById).filter(p => p && p.sb).sort(byOrdP);
-    if (!ps.length) { toast("沒有分鏡可以排章節"); return; }
+    // 依粗剪的有效順序與有效秒數排（吃 shotAssets 的覆寫），跨版本的分鏡依序接起來
+    const ids = v.links.filter(id => { const p = promptById(id); return p && p.sb; }).sort((a, b) => effOrd(v, a) - effOrd(v, b));
+    if (!ids.length) { toast("沒有分鏡可以排章節"); return; }
     let sec = 0;
-    v.chapters = ps.map((p, i) => { const t = fmtTC(sec); sec += durOfP(p); return { t, n: (p.title || `鏡 ${i + 1}`).slice(0, 40) }; });
+    v.chapters = ids.map((id, i) => { const p = promptById(id); const t = fmtTC(sec); sec += effDur(v, id); return { t, n: (p.title || `鏡 ${i + 1}`).slice(0, 40) }; });
     v.edited = Date.now(); save();
-    toast(`已依分鏡排出 ${v.chapters.length} 個章節`);
+    toast(`已依粗剪排出 ${v.chapters.length} 個章節`);
   }
   function copyPackOf(v) {
     const parts = [v.title || "", "", v.desc || ""];
@@ -1380,16 +1436,25 @@
     copyText(parts.join("\n").trim(), "整包發布文案已複製");
   }
   $("#vWorkBody").addEventListener("input", e => {
-    const f = e.target.closest("[data-vf]"); if (!f) return;
     const v = workVideo(); if (!v) return;
-    v[f.dataset.vf] = e.target.value; workSave();
+    const f = e.target.closest("[data-vf]");
+    if (f) { v[f.dataset.vf] = e.target.value; workSave(); return; }
+    const sa = e.target.closest("[data-sa]");   // 粗剪：秒數／轉場／動畫／聲音／備註
+    if (sa) { shotAssetOf(v, sa.dataset.shot)[sa.dataset.sa] = e.target.value; workSave(); return; }
+  });
+  $("#vWorkBody").addEventListener("change", e => {
+    // 秒數改完（失焦）才重排時間軸，避免打字時每個鍵都重繪搶焦點
+    if (e.target.closest("[data-sa='dur']")) renderWork();
   });
   $("#vWorkBody").addEventListener("click", e => {
     const th = e.target.closest("[data-wthumb]");
     if (th) { const v = workVideo(); if (v) { v.thumbPick = +th.dataset.wthumb; workSave(); renderWork(); } return; }
+    const mv = e.target.closest("[data-wmove]");
+    if (mv) { const v = workVideo(); if (v) { moveShot(v, mv.dataset.stack, mv.dataset.shot, mv.dataset.wmove === "up" ? -1 : 1); renderWork(); } return; }
     const b = e.target.closest("[data-wa]"); if (!b) return;
     const v = workVideo(); if (!v) return;
     const a = b.dataset.wa;
+    if (a === "copy-edl") { copyEDL(v, b.dataset.stack); return; }
     if (a === "ai-outline") { closeWork(); openEditor(v); openAi("outline"); return; }
     if (a === "ai-pack") { closeWork(); openEditor(v); openAi("pack"); return; }
     if (a === "split") { closeWork(); openEditor(v); openScriptSplit(); return; }
