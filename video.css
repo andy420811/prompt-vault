@@ -120,6 +120,20 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 .vd-todo-row .del:hover { color: var(--danger); }
 .vd-todo-row.done input[type="text"] { text-decoration: line-through; color: var(--ink-3); }
 .vd-linked { display: flex; flex-direction: column; gap: 6px; }
+.vd-linkgroup { border: 1px solid var(--line); border-radius: 10px; padding: 7px; background: var(--surface-2);
+  display: flex; flex-direction: column; gap: 6px; }
+.vd-linkgroup + .vd-linkgroup { margin-top: 2px; }
+.vd-lg-head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding: 1px 2px 3px; }
+.vd-lg-ver { font-size: 11px; font-weight: 700; color: #fff; background: var(--accent);
+  border-radius: 999px; padding: 1px 9px; flex: 0 0 auto; }
+.vd-lg-name { font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.vd-lg-head .lk { border: 1px solid var(--line); background: var(--paper); border-radius: 7px; font-size: 11px;
+  color: var(--ink-2); padding: 2px 7px; cursor: pointer; white-space: nowrap; }
+.vd-lg-head .lk:hover { border-color: var(--accent); color: var(--accent); }
+.vd-lg-head .del { border: none; background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; padding: 0 3px; flex: 0 0 auto; }
+.vd-lg-head .del:hover { color: var(--danger); }
+.vd-linkgroup .vd-linked-row { background: var(--surface); }
 .vd-linked-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--surface-2);
   border: 1px solid var(--line); border-radius: 9px; font-size: 12.5px; }
 .vd-linked-row .lt { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

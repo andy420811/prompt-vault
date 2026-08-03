@@ -609,18 +609,64 @@
         <button type="button" class="del" data-td="${i}" title="刪除">✕</button>
       </div>`).join("") || `<p class="hint">還沒有待辦 — 可以按「套用預設流程」一次帶入常用步驟。</p>`;
   }
+  function linkRowHTML(id) {
+    const p = promptById(id);
+    const sb = p && p.sb ? `<span class="vd-chip">鏡 ${(+p.sb.ord || 0) + 1}${p.sb.dur ? " · " + esc(String(p.sb.dur)) + "s" : ""}</span>` : "";
+    return `<div class="vd-linked-row" data-id="${id}"${p ? ` data-open="${id}" style="cursor:pointer" title="點一下在這裡看內容"` : ""}>
+      <span class="lt">${p ? (p.type === "video" ? "🎬 " : "🖼 ") + esc(p.title || "未命名") : "⚠ 這則 prompt 已不在庫裡"}</span>
+      ${sb}
+      ${p ? `<button type="button" class="lk" data-open="${id}">👁 內容</button>` : ""}
+      <button type="button" class="del" data-unlink="${id}" title="移除">✕</button>
+    </div>`;
+  }
+  /* 把掛上的 prompt 依「所屬堆疊」分組：一次拆分鏡＝一個堆疊＝一個版本。
+     多次重拆掛上的鏡頭就不會混在一起，而是各成一組（版本）。散裝（沒有堆疊）的另外列。 */
+  function linkGroups(links) {
+    const names = stackNamesMap();
+    const groups = new Map(), loose = [];
+    links.forEach(id => {
+      const p = promptById(id);
+      const st = p && p.stack ? p.stack : "";
+      if (st) {
+        if (!groups.has(st)) groups.set(st, { stack: st, name: names[st] || (p.title || "分鏡"), ids: [] });
+        groups.get(st).ids.push(id);
+      } else loose.push(id);
+    });
+    return { groups: [...groups.values()], loose };
+  }
+  // 目前這支影片已掛的分鏡堆疊有幾組 → 下一次重拆就是第幾版
+  function nextVersion(links) {
+    const st = new Set();
+    links.forEach(id => { const p = promptById(id); if (p && p.stack) st.add(p.stack); });
+    return st.size + 1;
+  }
+  function versionedName(base, ver) {
+    base = String(base || "腳本分鏡").trim().slice(0, 36);
+    return (ver > 1 && !/v\s*\d/i.test(base)) ? `${base}（v${ver}）` : base;
+  }
   function renderLinked() {
     $("#vLinkCount").textContent = curLinks.length;
-    $("#vLinkedList").innerHTML = curLinks.map(id => {
-      const p = promptById(id);
-      const sb = p && p.sb ? `<span class="vd-chip">鏡 ${(+p.sb.ord || 0) + 1}${p.sb.dur ? " · " + esc(String(p.sb.dur)) + "s" : ""}</span>` : "";
-      return `<div class="vd-linked-row" data-id="${id}"${p ? ` data-open="${id}" style="cursor:pointer" title="點一下在這裡看內容"` : ""}>
-        <span class="lt">${p ? (p.type === "video" ? "🎬 " : "🖼 ") + esc(p.title || "未命名") : "⚠ 這則 prompt 已不在庫裡"}</span>
-        ${sb}
-        ${p ? `<button type="button" class="lk" data-open="${id}">👁 內容</button>` : ""}
-        <button type="button" class="del" data-unlink="${id}" title="移除">✕</button>
+    const { groups, loose } = linkGroups(curLinks);
+    const multi = groups.length > 1;
+    let html = groups.map((g, gi) => {
+      const shots = g.ids.slice().sort((a, b) => {
+        const pa = promptById(a), pb = promptById(b);
+        return (((pa && pa.sb && +pa.sb.ord) || 0) - ((pb && pb.sb && +pb.sb.ord) || 0));
+      });
+      return `<div class="vd-linkgroup">
+        <div class="vd-lg-head">
+          ${multi ? `<span class="vd-lg-ver">第 ${gi + 1} 版</span>` : ""}
+          <span class="vd-lg-name">${esc(g.name)}</span>
+          <span class="vd-chip">${g.ids.length} 鏡</span>
+          <span class="sp" style="flex:1 1 auto"></span>
+          <button type="button" class="lk" data-board="${esc(g.stack)}" title="開這組故事板">🎬 故事板</button>
+          <button type="button" class="del" data-unlinkgroup="${esc(g.stack)}" title="移除整個版本">✕</button>
+        </div>
+        ${shots.map(linkRowHTML).join("")}
       </div>`;
-    }).join("") || `<p class="hint">尚未掛任何 prompt。</p>`;
+    }).join("");
+    html += loose.map(linkRowHTML).join("");
+    $("#vLinkedList").innerHTML = html || `<p class="hint">尚未掛任何 prompt。</p>`;
     $("#vLinkBoard").hidden = !linkedStack();
   }
   // 掛上的 prompt 若同屬一個堆疊，就能一鍵開 Prompt 庫的故事板
@@ -1328,6 +1374,14 @@
     setTimeout(() => $("#vPickQ").focus(), 60);
   });
   $("#vLinkedList").addEventListener("click", e => {
+    const bg = e.target.closest("[data-board]");
+    if (bg) { location.href = "prompt-vault.html#sb=" + encodeURIComponent(bg.dataset.board); return; }
+    const ug = e.target.closest("[data-unlinkgroup]");
+    if (ug) {
+      const st = ug.dataset.unlinkgroup;
+      curLinks = curLinks.filter(id => { const p = promptById(id); return !(p && p.stack === st); });
+      renderLinked(); return;
+    }
     const d = e.target.closest("[data-unlink]");
     if (d) { curLinks = curLinks.filter(x => x !== d.dataset.unlink); renderLinked(); return; }
     const o = e.target.closest("[data-open]");
@@ -2050,7 +2104,9 @@
     const stop = busy($("#vScrStatus"), "建立分鏡中");
     try {
       const seg = uid(), now = Date.now();
-      const name = ($("#vScrName").value.trim() || (scrMeta && scrMeta.name) || "腳本分鏡").slice(0, 40);
+      // 多次重拆＝不同版本：依這支影片已掛的分鏡堆疊數算下一版，名稱補上（v2）（v3）…
+      const ver = nextVersion(curLinks);
+      const name = versionedName($("#vScrName").value.trim() || (scrMeta && scrMeta.name) || "腳本分鏡", ver).slice(0, 40);
       const type = (scrMeta && scrMeta.type) || "video", defDur = (scrMeta && scrMeta.dur) || "";
       const b = scrMeta && scrMeta.bible;
       const recs = scrShots.map((s, i) => shotToRec(b ? { ...s, prompt: composeShotPrompt(s, b) } : s, i, scrShots.length, type, defDur, seg, now));
@@ -2059,7 +2115,7 @@
       renderLinked(); $("#vBlkLinked").classList.remove("closed");
       if (!$("#vfTitle").value.trim()) $("#vfTitle").value = name;   // 標題還空著就順手填上
       stop(); scrFinish();
-      toast(`已在 Prompt 庫建立「${name}」${recs.length} 個分鏡並掛到這支影片（Prompt 庫若開著請重新整理）`);
+      toast(`已建立${ver > 1 ? "第 " + ver + " 版" : ""}分鏡「${name}」${recs.length} 鏡並掛上（Prompt 庫若開著請重新整理）`);
     } catch (e) {
       stop(); $("#vScrStatus").textContent = "失敗：" + e.message; toast("建立失敗：" + e.message);
     } finally { btn.disabled = false; }
@@ -2890,14 +2946,16 @@
         if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
         const seg = uid(), now = Date.now();
         const recs = shots.map((s, i) => shotToRec({ ...s, prompt: composeShotPrompt(s, b) }, i, shots.length, "video", "", seg, now));
-        await vaultAddSafe(recs, seg, name);
         const vid = videos.find(x => x.id === v.id);
+        // 重拆＝新版本：用寫入當下最新的 links 算版號（第一次拆＝v1，名稱不加尾碼）
+        const vname = versionedName(name, nextVersion(vid ? vid.links : []));
+        await vaultAddSafe(recs, seg, vname);
         if (vid) {
           recs.forEach(rc => { if (!vid.links.includes(rc.id)) vid.links.push(rc.id); });
           if (vid.status === "idea") vid.status = "script";
           vid.edited = Date.now(); save();
         }
-        return { n: recs.length, name };
+        return { n: recs.length, name: vname };
       },
       autoApply: () => true,
       open: res => { render(); if (editingId === v.id) renderLinked(); toast(`「${res.name}」自動拆出 ${res.n} 鏡並掛上`); }
