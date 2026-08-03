@@ -126,21 +126,27 @@
     v.shotAssets = (v.shotAssets && typeof v.shotAssets === "object" && !Array.isArray(v.shotAssets)) ? v.shotAssets : {};
     Object.keys(v.shotAssets).forEach(k => {
       const a = v.shotAssets[k] || {};
-      v.shotAssets[k] = {
+      const e = {
         imgs: Array.isArray(a.imgs) ? a.imgs.filter(x => typeof x === "string") : [],
         vids: Array.isArray(a.vids) ? a.vids.filter(x => typeof x === "string") : [],
-        note: String(a.note || "")
+        note: String(a.note || ""),
+        // 剪接（粗剪）用：秒數覆寫、順序覆寫、動畫／聲音／轉場註解
+        dur: String(a.dur || ""), anim: String(a.anim || ""), sound: String(a.sound || ""), trans: String(a.trans || ""),
+        ord: (a.ord === "" || a.ord == null) ? null : (isNaN(+a.ord) ? null : +a.ord)
       };
-      const e = v.shotAssets[k];
-      if (!e.imgs.length && !e.vids.length && !e.note) delete v.shotAssets[k];   // 空的不留
+      v.shotAssets[k] = e;
+      if (!e.imgs.length && !e.vids.length && !e.note && !e.dur && !e.anim && !e.sound && !e.trans && e.ord == null) delete v.shotAssets[k];
     });
     v.created = +v.created || Date.now(); v.edited = +v.edited || v.created;
     return v;
   }
-  // localStorage 鏡像去圖用：把 shotAssets 裡的圖片 dataURI 拿掉（只留連結與註解）
+  // localStorage 鏡像去圖用：把 shotAssets 的圖片與內嵌影片 dataURI 拿掉（只留連結、註解、剪接資訊）
   function stripAssets(sa) {
     const out = {};
-    Object.keys(sa || {}).forEach(k => { const a = sa[k]; out[k] = { imgs: [], vids: a.vids || [], note: a.note || "" }; });
+    Object.keys(sa || {}).forEach(k => {
+      const a = sa[k];
+      out[k] = Object.assign({}, a, { imgs: [], vids: (a.vids || []).filter(x => !/^data:/.test(x)) });
+    });
     return out;
   }
   function normalizeProject(p) {
@@ -838,6 +844,20 @@
       rd.readAsDataURL(file);
     });
   }
+  function fileToDataURL(file) {
+    return new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = () => rej(new Error("檔案讀取失敗")); rd.readAsDataURL(file); });
+  }
+  // 讓一個容器可以「把檔案拖進來」：拖上去會highlight，放開就把檔案交給 handle
+  function fileDropZone(el, handle) {
+    if (!el || el.dataset.dz) return; el.dataset.dz = "1";
+    const has = e => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+    el.addEventListener("dragover", e => { if (has(e)) { e.preventDefault(); el.classList.add("drag-over"); } });
+    el.addEventListener("dragleave", e => { if (!el.contains(e.relatedTarget)) el.classList.remove("drag-over"); });
+    el.addEventListener("drop", async e => {
+      if (!has(e)) return; e.preventDefault(); el.classList.remove("drag-over");
+      await handle([...(e.dataTransfer.files || [])]);
+    });
+  }
   async function addThumbFiles(files) {
     let n = 0;
     for (const f of files) {
@@ -848,6 +868,7 @@
   }
   $("#vThumbAdd").addEventListener("click", () => $("#vThumbFile").click());
   $("#vThumbFile").addEventListener("change", e => { addThumbFiles([...e.target.files]); e.target.value = ""; });
+  fileDropZone($("#vThumbList"), addThumbFiles);   // 縮圖候選：可拖曳加入
   $("#vThumbYt").addEventListener("click", () => {
     const id = ytIdFrom($("#vfUrl").value);
     if (!id) { toast("請先貼上 YouTube 連結"); return; }
@@ -1125,7 +1146,7 @@
      ========================================================================= */
   let asVid = null, asImgTarget = null, asSaveT = null;
   function asVideo() { return videos.find(x => x.id === asVid) || null; }
-  function shotAssetOf(v, id) { v.shotAssets = v.shotAssets || {}; return v.shotAssets[id] || (v.shotAssets[id] = { imgs: [], vids: [], note: "" }); }
+  function shotAssetOf(v, id) { v.shotAssets = v.shotAssets || {}; return v.shotAssets[id] || (v.shotAssets[id] = { imgs: [], vids: [], note: "", dur: "", anim: "", sound: "", trans: "", ord: null }); }
   function asSave() { const v = asVideo(); if (!v) return; v.edited = Date.now(); clearTimeout(asSaveT); asSaveT = setTimeout(() => save(), 400); }
   async function openAssets(v) {
     asVid = v.id;
@@ -1141,8 +1162,9 @@
     const chips = [p.sb && p.sb.dur ? p.sb.dur + "s" : "", p.sb && p.sb.trans ? p.sb.trans : ""].filter(Boolean).map(x => `<span class="vd-chip">${esc(x)}</span>`).join("");
     const resImg = (p.imgs && p.imgs[0]) ? `<img class="vd-as-res" src="${p.imgs[0]}" alt="" title="目前的生成結果">` : "";
     const refImgs = a.imgs.map((src, i) => `<div class="vd-thumb-item" title="參考圖"><img src="${src}" alt=""><button type="button" class="x" data-as-imgdel="${id}" data-i="${i}">×</button></div>`).join("");
-    const vidChips = a.vids.map((u, i) => `<span class="vd-as-vid"><a href="${esc(u)}" target="_blank" rel="noopener">🎬 ${esc(u.length > 38 ? u.slice(0, 38) + "…" : u)}</a><button type="button" class="x" data-as-viddel="${id}" data-i="${i}">×</button></span>`).join("");
-    return `<div class="vd-as-shot">
+    const vidLabel = u => /^data:/.test(u) ? "內嵌影片" : (u.length > 32 ? u.slice(0, 32) + "…" : u);
+    const vidChips = a.vids.map((u, i) => `<span class="vd-as-vid"><a href="${esc(u)}" target="_blank" rel="noopener">🎬 ${esc(vidLabel(u))}</a><button type="button" class="x" data-as-viddel="${id}" data-i="${i}">×</button></span>`).join("");
+    return `<div class="vd-as-shot" data-shot="${id}">
       <div class="vd-as-h"><b>鏡 ${(p.sb && (+p.sb.ord + 1)) || idx}</b> <span class="vd-as-t">${esc(p.title || "未命名")}</span>${chips}
         <span class="sp" style="flex:1 1 auto"></span>
         <button type="button" class="vd-as-b" data-as-copy="${id}">📋 複製</button>
@@ -1157,11 +1179,12 @@
           <div class="vd-as-lbl">參考圖</div>
           <div class="vd-thumbs">${refImgs || `<span class="vd-note" style="margin:0">尚無</span>`}</div>
           <button type="button" class="link-btn" data-as-imgadd="${id}">＋ 上傳參考圖</button>
-          <div class="vd-as-lbl">參考影片連結</div>
+          <div class="vd-as-lbl">參考影片</div>
           <div class="vd-as-vids">${vidChips || `<span class="vd-note" style="margin:0">尚無</span>`}</div>
           <button type="button" class="link-btn" data-as-vidadd="${id}">＋ 加影片連結</button>
           <div class="vd-as-lbl">註解</div>
           <textarea class="vd-as-note" data-as-note="${id}" placeholder="這一鏡的生成備註、種子、參數、要調整的地方…">${esc(a.note)}</textarea>
+          <p class="vd-note" style="margin:2px 0 0">💡 圖片／影片可直接拖進這張卡片</p>
         </div>
       </div>
     </div>`;
@@ -1211,9 +1234,36 @@
   $("#vAsFile").addEventListener("change", async e => {
     const files = [...e.target.files]; e.target.value = "";
     const v = asVideo(); if (!v || !asImgTarget) return;
-    const a = shotAssetOf(v, asImgTarget); let cnt = 0;
-    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { a.imgs.push(await downscale(f, 1024)); cnt++; } catch (err) { toast(err.message); } }
-    if (cnt) { asSave(); renderAssets(); toast(`已加入 ${cnt} 張參考圖`); }
+    await addFilesToShot(v, asImgTarget, files);
+  });
+  // 把圖片／影片檔案加到某一鏡：圖片壓縮存 dataURI；影片存 dataURI（太大就略過，建議改貼連結）
+  async function addFilesToShot(v, id, files) {
+    const a = shotAssetOf(v, id); let img = 0, vid = 0, skip = 0;
+    for (const f of files) {
+      if (/^image\//.test(f.type)) { try { a.imgs.push(await downscale(f, 1024)); img++; } catch (e) {} }
+      else if (/^video\//.test(f.type)) {
+        if (f.size > 60 * 1024 * 1024) { skip++; continue; }
+        try { a.vids.push(await fileToDataURL(f)); vid++; } catch (e) {}
+      }
+    }
+    if (img || vid) { asSave(); renderAssets(); toast(`已加入${img ? " " + img + " 張圖" : ""}${vid ? " " + vid + " 支影片" : ""}`); }
+    if (skip) toast(`有 ${skip} 支影片太大沒收（>60MB，建議改貼連結）`);
+  }
+  // 拖曳圖片／影片到某一鏡的卡片上就加進去
+  $("#vAsBody").addEventListener("dragover", e => {
+    const shot = e.target.closest(".vd-as-shot[data-shot]"); if (!shot) return;
+    if (![...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files")) return;
+    e.preventDefault();
+    if (!shot.classList.contains("drag-over")) { $$("#vAsBody .vd-as-shot.drag-over").forEach(s => s.classList.remove("drag-over")); shot.classList.add("drag-over"); }
+  });
+  $("#vAsBody").addEventListener("dragleave", e => {
+    const shot = e.target.closest(".vd-as-shot"); if (shot && !shot.contains(e.relatedTarget)) shot.classList.remove("drag-over");
+  });
+  $("#vAsBody").addEventListener("drop", async e => {
+    const shot = e.target.closest(".vd-as-shot[data-shot]"); if (!shot) return;
+    e.preventDefault(); shot.classList.remove("drag-over");
+    const v = asVideo(); if (!v) return;
+    await addFilesToShot(v, shot.dataset.shot, [...(e.dataTransfer.files || [])]);
   });
   $("#vAsClose").addEventListener("click", closeAssets);
   $("#vAsDone").addEventListener("click", closeAssets);
@@ -3043,12 +3093,13 @@
       const d = e.target.closest("[data-del]"); if (!d) return;
       get().splice(+d.dataset.del, 1); render(); touched();
     });
-    $(fileSel).addEventListener("change", async e => {
-      const files = [...e.target.files]; e.target.value = "";
+    async function addRefFiles(files) {
       let n = 0;
       for (const f of files) { if (!/^image\//.test(f.type)) continue; try { get().push(await downscale(f, 1024)); n++; } catch (err) { toast(err.message); } }
       if (n) { render(); touched(); toast(`已加入 ${n} 張參考圖`); }
-    });
+    }
+    $(fileSel).addEventListener("change", e => { addRefFiles([...e.target.files]); e.target.value = ""; });
+    fileDropZone(el, addRefFiles);   // 參考圖：可直接把圖片拖進來
     return { render };
   }
   function updBibleCount() { $("#vBibleCount").textContent = bibleCount(); }

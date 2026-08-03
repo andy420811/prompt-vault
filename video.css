@@ -406,6 +406,10 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 .vd-as-empty { text-align: center; padding: 34px 16px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
 @media (max-width: 720px) { .vd-as-cols { grid-template-columns: 1fr; } }
 
+/* ---- 拖曳檔案進來的落點高亮 ---- */
+.drag-over { outline: 2.5px dashed var(--accent); outline-offset: 2px; background: var(--accent-tint) !important; border-radius: 8px; }
+.vd-as-shot.drag-over { position: relative; }
+
 /* ---- 編輯器未儲存草稿的恢復列 ---- */
 .vd-draft-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 12px;
   background: var(--accent-tint); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
