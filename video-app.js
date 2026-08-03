@@ -204,6 +204,7 @@
     render();
     trashLoad().then(renderTrash);
     backupNag();
+    draftNag();
     if (localStorage.getItem(AUTOSYNC) === "1" && cloudBase()) cloudPull(false);
     // Prompt 庫：讀來掛連結與顯示內容（只有「腳本→分鏡」會寫回去）
     await reloadPrompts();
@@ -609,10 +610,75 @@
     renderTodos(); renderLinked(); renderThumbs(); renderChaps(); renderThumb(v ? v.ytId : "");
     clCharEd.render(); clSceneEd.render(); refEd.render(); renderBibleProj();
     $$("#vEditor .block").forEach(b => b.classList.toggle("closed", b.id !== "vBlkScript"));
+    editorDirty = false;
+    showDraftBar(v ? v.id : null);   // 若有上次未儲存的草稿，跳出「恢復」列
     $("#vEditor").classList.add("show");
     setTimeout(() => $("#vfTitle").focus(), 60);
   }
-  function closeEditor() { $("#vEditor").classList.remove("show"); editingId = null; }
+  function closeEditor() {
+    // 有改動但沒存就關掉：草稿留著，下次開這支（或新影片）可恢復，避免誤觸遺失
+    if (editorDirty) { saveDraftNow(); toast("已暫存草稿 — 重新開啟即可恢復"); }
+    editorDirty = false; $("#vDraftBar").hidden = true;
+    $("#vEditor").classList.remove("show"); editingId = null;
+  }
+
+  /* ---------- 編輯器自動暫存（防止誤觸／重新整理／關視窗遺失未存的內容）----------
+     打字時把整份表單（去圖，只留文字與小陣列）防抖寫進 localStorage；儲存成功就清掉。
+     重新開同一支（或新影片）時，若有對得上的草稿就跳「恢復」列。 */
+  const DRAFT_KEY = "videodesk.draft";
+  let editorDirty = false, draftT = null;
+  function draftSnapshot() {
+    const v = collect();
+    return { at: Date.now(), forId: editingId || null, title: v.title || v.series || "",
+      data: Object.assign({}, v, { thumbs: [], refs: [] }) };   // 圖片不進草稿（省空間；恢復時保留記錄裡原本的圖）
+  }
+  function saveDraftNow() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftSnapshot())); } catch (e) {} }
+  function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
+  function getDraft() { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch (e) { return null; } }
+  function scheduleDraft() { clearTimeout(draftT); draftT = setTimeout(saveDraftNow, 700); }
+  // 打字就標記 dirty ＋ 排一次暫存（草稿列上的按鈕不算）
+  $("#vEditor").addEventListener("input", e => {
+    if (e.target.closest("#vDraftBar")) return;
+    editorDirty = true; scheduleDraft();
+  });
+  function showDraftBar(forId) {
+    const d = getDraft();
+    const bar = $("#vDraftBar");
+    if (!bar) return;
+    // 對得上（同一支影片，或都是「新影片」）才顯示
+    if (d && (d.forId || null) === (forId || null)) {
+      bar.querySelector("span").textContent = `🔄 偵測到未儲存的草稿「${(d.title || "未命名").slice(0, 20)}」（可能是上次不小心關掉的）`;
+      bar.hidden = false;
+    } else bar.hidden = true;
+  }
+  function applyDraft(d) {
+    const x = d.data || {};
+    $("#vfTitle").value = x.title || ""; $("#vfSeries").value = x.series || ""; $("#vfEp").value = x.ep == null ? "" : x.ep;
+    $("#vfKind").value = x.kind || "long"; $("#vfStatus").value = STAGE[x.status] ? x.status : "idea";
+    $("#vfDue").value = x.due || ""; $("#vfPub").value = x.published || "";
+    $("#vfUrl").value = x.url || ""; $("#vfTags").value = (x.tags || []).join(", ");
+    $("#vfOutline").value = x.outline || ""; $("#vfScript").value = x.script || ""; $("#vfNotes").value = x.notes || "";
+    $("#vfDesc").value = x.desc || ""; $("#vfHash").value = x.hashtags || ""; $("#vfPlaylist").value = x.playlist || ""; $("#vfStyle").value = x.style || "";
+    curTodos = (x.todos || []).map(t => ({ ...t })); curLinks = (x.links || []).slice();
+    curChaps = (x.chapters || []).map(c => ({ ...c })); curChars = (x.chars || []).map(c => ({ ...c })); curScenes = (x.scenes || []).map(s => ({ ...s }));
+    curProjectId = x.projectId || "";
+    // 圖片（縮圖／參考圖）不在草稿裡：沿用開啟時從記錄載入的 curThumbs/curRefs
+    renderTodos(); renderLinked(); renderChaps(); clCharEd.render(); clSceneEd.render(); updBibleCount(); renderBibleProj(); renderThumb(ytIdFrom(x.url || ""));
+  }
+  $("#vDraftRestore").addEventListener("click", () => {
+    const d = getDraft(); if (!d) { $("#vDraftBar").hidden = true; return; }
+    applyDraft(d); $("#vDraftBar").hidden = true; editorDirty = true; toast("已恢復未儲存的內容 — 記得按儲存");
+  });
+  $("#vDraftDiscard").addEventListener("click", () => { clearDraft(); $("#vDraftBar").hidden = true; toast("已捨棄草稿"); });
+  // 離開頁面前若還有沒存的編輯，提醒一下
+  window.addEventListener("beforeunload", e => {
+    if (editorDirty && $("#vEditor").classList.contains("show")) { saveDraftNow(); e.preventDefault(); e.returnValue = ""; }
+  });
+  // 啟動時若有上次遺留的草稿，提醒一次（開對應的編輯器就會跳恢復列）
+  function draftNag() {
+    const d = getDraft(); if (!d) return;
+    setTimeout(() => toast(`🔄 有未儲存的草稿「${(d.title || "未命名").slice(0, 16)}」— 開啟${d.forId ? "該影片" : "新影片（按 n）"}即可恢復`), 1800);
+  }
   function renderThumb(ytId) {
     const box = $("#vfThumb");
     const url = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "";
@@ -1036,12 +1102,12 @@
   }
   /* 每個階段的「該做的下一步」— 卡片底部一顆按鈕，按了直接跳到對應工具 */
   const STAGE_ACT = {
-    idea:   { act: "ideate",   label: "💡 想大綱鉤子", hint: "AI 幫這集想大綱與開場鉤子" },
-    script: { act: "split",    label: "🎞 拆分鏡",     hint: "把腳本拆成一個個鏡頭並建進 Prompt 庫" },
-    assets: { act: "assets",   label: "🎨 生成素材",   hint: "到 Prompt 庫生成這組分鏡的圖／影片" },
-    edit:   { act: "chapters", label: "⏱ 排章節",      hint: "依分鏡秒數排出章節時間軸" },
-    ready:  { act: "publish",  label: "📋 發布文案",    hint: "AI 產出標題、說明欄與 hashtag" },
-    pub:    { act: "refresh",  label: "📊 更新觀看數",  hint: "用 YouTube API 更新觀看數與讚數" }
+    idea:   { act: "idea",   label: "💡 發想工作站", hint: "大綱、鉤子、AI 想標題的發想台" },
+    script: { act: "script", label: "📝 腳本工作站", hint: "寫腳本並一鍵拆分鏡" },
+    assets: { act: "assets", label: "🎨 素材工作站", hint: "分鏡表＋每鏡參考圖／影片／註解" },
+    edit:   { act: "edit",   label: "✂️ 剪接工作站", hint: "分鏡時間軸與章節" },
+    ready:  { act: "ready",  label: "📦 發布工作站", hint: "標題／說明欄／章節／縮圖與整包文案" },
+    pub:    { act: "pub",    label: "🚀 成效工作站", hint: "觀看數、成效與發布後備註" }
   };
   function stackOfVideo(v) {
     const stacks = v.links.map(id => { const p = promptById(id); return p && p.stack ? p.stack : ""; }).filter(Boolean);
@@ -1049,28 +1115,247 @@
     return stacks.every(s => s === stacks[0]) ? stacks[0] : "";
   }
   function stageAction(act, v) {
-    if (act === "ideate") { openEditor(v); openAi("outline"); return; }
-    if (act === "split") { openEditor(v); openScriptSplit(); return; }
-    if (act === "publish") { openEditor(v); openAi("pack"); return; }
-    if (act === "chapters") {
-      openEditor(v); $("#vBlkPublish").classList.remove("closed");
-      if (v.links.length) $("#vImpChaps").click();   // 有掛分鏡就直接依秒數排章節
-      else toast("這集還沒有分鏡 — 可在下面直接填章節，或先到「腳本」階段拆分鏡");
-      return;
-    }
-    if (act === "assets") {
-      const s = stackOfVideo(v);
-      if (s) { location.href = "prompt-vault.html#sb=" + encodeURIComponent(s); return; }
-      if (v.links.length) { location.href = "prompt-vault.html#p=" + encodeURIComponent(v.links[0]); return; }
-      openEditor(v); openScriptSplit();
-      toast("先把腳本拆成分鏡，才有素材可以生成");
-      return;
-    }
-    if (act === "refresh") {
-      if (!cfg().apiKey) { toast("更新觀看數需要 YouTube Data API 金鑰（⚙ 設定裡填）"); openSettings(false); return; }
-      refreshStats(); return;
-    }
+    if (act === "assets") { openAssets(v); return; }
+    if (["idea", "script", "edit", "ready", "pub"].includes(act)) { openWork(act, v); return; }
   }
+
+  /* =========================================================================
+     素材生成工作站：這支影片的分鏡表（依版本分組）＋每一鏡的 prompt 全列出來，
+     每一鏡可放參考圖／參考影片連結／註解，整理素材再生成。內容存在影片的 shotAssets。
+     ========================================================================= */
+  let asVid = null, asImgTarget = null, asSaveT = null;
+  function asVideo() { return videos.find(x => x.id === asVid) || null; }
+  function shotAssetOf(v, id) { v.shotAssets = v.shotAssets || {}; return v.shotAssets[id] || (v.shotAssets[id] = { imgs: [], vids: [], note: "" }); }
+  function asSave() { const v = asVideo(); if (!v) return; v.edited = Date.now(); clearTimeout(asSaveT); asSaveT = setTimeout(() => save(), 400); }
+  async function openAssets(v) {
+    asVid = v.id;
+    if (!prompts.length) await reloadPrompts();
+    renderAssets();
+    $("#vAssetsOv").classList.add("show");
+  }
+  function closeAssets() { clearTimeout(asSaveT); const v = asVideo(); if (v) save(); asVid = null; $("#vAssetsOv").classList.remove("show"); render(); }
+  function asShotCard(id, idx) {
+    const p = promptById(id), v = asVideo();
+    const a = (v && v.shotAssets && v.shotAssets[id]) || { imgs: [], vids: [], note: "" };
+    if (!p) return `<div class="vd-as-shot"><div class="vd-as-h"><b>鏡 ${idx}</b> <span class="vd-note">⚠ 這則 prompt 已不在 Prompt 庫</span></div></div>`;
+    const chips = [p.sb && p.sb.dur ? p.sb.dur + "s" : "", p.sb && p.sb.trans ? p.sb.trans : ""].filter(Boolean).map(x => `<span class="vd-chip">${esc(x)}</span>`).join("");
+    const resImg = (p.imgs && p.imgs[0]) ? `<img class="vd-as-res" src="${p.imgs[0]}" alt="" title="目前的生成結果">` : "";
+    const refImgs = a.imgs.map((src, i) => `<div class="vd-thumb-item" title="參考圖"><img src="${src}" alt=""><button type="button" class="x" data-as-imgdel="${id}" data-i="${i}">×</button></div>`).join("");
+    const vidChips = a.vids.map((u, i) => `<span class="vd-as-vid"><a href="${esc(u)}" target="_blank" rel="noopener">🎬 ${esc(u.length > 38 ? u.slice(0, 38) + "…" : u)}</a><button type="button" class="x" data-as-viddel="${id}" data-i="${i}">×</button></span>`).join("");
+    return `<div class="vd-as-shot">
+      <div class="vd-as-h"><b>鏡 ${(p.sb && (+p.sb.ord + 1)) || idx}</b> <span class="vd-as-t">${esc(p.title || "未命名")}</span>${chips}
+        <span class="sp" style="flex:1 1 auto"></span>
+        <button type="button" class="vd-as-b" data-as-copy="${id}">📋 複製</button>
+        <button type="button" class="vd-as-b" data-open="${id}">👁 詳情</button></div>
+      <div class="vd-as-cols">
+        <div class="vd-as-main">
+          <p class="vd-as-prompt">${esc(p.prompt || "")}</p>
+          ${p.notes ? `<p class="vd-note">旁白／備註：${esc(p.notes)}</p>` : ""}
+          ${resImg}
+        </div>
+        <div class="vd-as-side">
+          <div class="vd-as-lbl">參考圖</div>
+          <div class="vd-thumbs">${refImgs || `<span class="vd-note" style="margin:0">尚無</span>`}</div>
+          <button type="button" class="link-btn" data-as-imgadd="${id}">＋ 上傳參考圖</button>
+          <div class="vd-as-lbl">參考影片連結</div>
+          <div class="vd-as-vids">${vidChips || `<span class="vd-note" style="margin:0">尚無</span>`}</div>
+          <button type="button" class="link-btn" data-as-vidadd="${id}">＋ 加影片連結</button>
+          <div class="vd-as-lbl">註解</div>
+          <textarea class="vd-as-note" data-as-note="${id}" placeholder="這一鏡的生成備註、種子、參數、要調整的地方…">${esc(a.note)}</textarea>
+        </div>
+      </div>
+    </div>`;
+  }
+  function renderAssets() {
+    const v = asVideo();
+    if (!v) { $("#vAsBody").innerHTML = `<p class="vd-note">找不到影片。</p>`; return; }
+    $("#vAsTitle").textContent = "素材生成工作站 · " + (v.title || "未命名影片");
+    const { groups, loose } = linkGroups(v.links);
+    const multi = groups.length > 1;
+    let n = 0;
+    let html = groups.map((g, gi) => {
+      const shots = g.ids.slice().sort((a, b) => { const pa = promptById(a), pb = promptById(b); return ((pa && pa.sb && +pa.sb.ord || 0) - (pb && pb.sb && +pb.sb.ord || 0)); });
+      return `<div class="vd-as-ver">
+        <div class="vd-as-verhead">${multi ? `<span class="vd-lg-ver">第 ${gi + 1} 版</span>` : ""}<b>${esc(g.name)}</b><span class="vd-chip">${g.ids.length} 鏡</span>
+          <span class="sp" style="flex:1 1 auto"></span>
+          <button type="button" class="link-btn" data-board="${esc(g.stack)}">🎬 開故事板生成</button>
+          <button type="button" class="link-btn" data-as-copyall="${esc(g.stack)}">📋 複製整版 prompt</button></div>
+        ${shots.map(id => asShotCard(id, ++n)).join("")}
+      </div>`;
+    }).join("");
+    if (loose.length) html += `<div class="vd-as-ver"><div class="vd-as-verhead"><b>散裝 prompt</b><span class="vd-chip">${loose.length}</span></div>${loose.map(id => asShotCard(id, ++n)).join("")}</div>`;
+    if (!groups.length && !loose.length) html = `<div class="vd-as-empty"><p class="vd-note">這支影片還沒有分鏡。先把腳本拆成分鏡，才有素材可以生成。</p><button type="button" class="btn primary" id="vAsSplit">🎞 去拆分鏡</button></div>`;
+    $("#vAsBody").innerHTML = html;
+  }
+  function copyStackPrompts(stack) {
+    const v = asVideo(); if (!v) return;
+    const ps = v.links.map(promptById).filter(p => p && p.stack === stack).sort((a, b) => ((a.sb && +a.sb.ord || 0) - (b.sb && +b.sb.ord || 0)));
+    if (!ps.length) return;
+    copyText(ps.map((p, i) => `【鏡 ${(p.sb && +p.sb.ord + 1) || i + 1}】${p.title || ""}\n${(p.prompt || "").trim()}`).join("\n\n"), "已複製整版 prompt");
+  }
+  $("#vAsBody").addEventListener("click", e => {
+    const cp = e.target.closest("[data-as-copy]"); if (cp) { const p = promptById(cp.dataset.asCopy); if (p) copyText(p.prompt || "", "已複製這一鏡的 prompt"); return; }
+    const ca = e.target.closest("[data-as-copyall]"); if (ca) { copyStackPrompts(ca.dataset.asCopyall); return; }
+    const bd = e.target.closest("[data-board]"); if (bd) { location.href = "prompt-vault.html#sb=" + encodeURIComponent(bd.dataset.board); return; }
+    const op = e.target.closest("[data-open]"); if (op) { openPreview(op.dataset.open); return; }
+    const ia = e.target.closest("[data-as-imgadd]"); if (ia) { asImgTarget = ia.dataset.asImgadd; $("#vAsFile").click(); return; }
+    const idel = e.target.closest("[data-as-imgdel]"); if (idel) { shotAssetOf(asVideo(), idel.dataset.asImgdel).imgs.splice(+idel.dataset.i, 1); asSave(); renderAssets(); return; }
+    const va = e.target.closest("[data-as-vidadd]"); if (va) { const u = prompt("貼上參考影片連結（YouTube 或任何網址）："); if (u && u.trim()) { shotAssetOf(asVideo(), va.dataset.asVidadd).vids.push(u.trim()); asSave(); renderAssets(); } return; }
+    const vdel = e.target.closest("[data-as-viddel]"); if (vdel) { shotAssetOf(asVideo(), vdel.dataset.asViddel).vids.splice(+vdel.dataset.i, 1); asSave(); renderAssets(); return; }
+    const sp = e.target.closest("#vAsSplit"); if (sp) { const v = asVideo(); asVid = null; $("#vAssetsOv").classList.remove("show"); if (v) { openEditor(v); openScriptSplit(); } return; }
+  });
+  $("#vAsBody").addEventListener("input", e => {
+    const nt = e.target.closest("[data-as-note]"); if (!nt) return;
+    shotAssetOf(asVideo(), nt.dataset.asNote).note = e.target.value; asSave();
+  });
+  $("#vAsFile").addEventListener("change", async e => {
+    const files = [...e.target.files]; e.target.value = "";
+    const v = asVideo(); if (!v || !asImgTarget) return;
+    const a = shotAssetOf(v, asImgTarget); let cnt = 0;
+    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { a.imgs.push(await downscale(f, 1024)); cnt++; } catch (err) { toast(err.message); } }
+    if (cnt) { asSave(); renderAssets(); toast(`已加入 ${cnt} 張參考圖`); }
+  });
+  $("#vAsClose").addEventListener("click", closeAssets);
+  $("#vAsDone").addEventListener("click", closeAssets);
+  $("#vAsEdit").addEventListener("click", () => { const v = asVideo(); closeAssets(); if (v) openEditor(v); });
+  $("#vAssetsOv").addEventListener("click", e => { if (e.target === $("#vAssetsOv")) closeAssets(); });
+
+  /* =========================================================================
+     各看板階段的工作站（構想／腳本／剪接／待發布／已發布）— 共用一個殼 #vWorkOv，
+     欄位以 data-vf 直接綁到影片、即時存；AI／拆分鏡等重工具沿用既有流程（開編輯器再叫）。
+     ========================================================================= */
+  let workVid = null, workStage = "", workSaveT = null;
+  const workVideo = () => videos.find(x => x.id === workVid) || null;
+  function workSave() { const v = workVideo(); if (!v) return; v.edited = Date.now(); clearTimeout(workSaveT); workSaveT = setTimeout(() => save(), 400); }
+  async function openWork(stage, v) {
+    workVid = v.id; workStage = stage;
+    if (!prompts.length) await reloadPrompts();
+    renderWork();
+    $("#vWorkOv").classList.add("show");
+  }
+  function closeWork() { clearTimeout(workSaveT); const v = workVideo(); if (v) save(); workVid = null; $("#vWorkOv").classList.remove("show"); render(); }
+  const fmtTC = sec => String(Math.floor(sec / 60)).padStart(2, "0") + ":" + String(Math.round(sec) % 60).padStart(2, "0");
+  const wTA = (prop, label, val, ph, h) => `<div class="field"><label>${esc(label)}</label><textarea data-vf="${prop}" placeholder="${esc(ph || "")}" style="min-height:${h || 70}px">${esc(val || "")}</textarea></div>`;
+  const wIn = (prop, label, val, ph) => `<div class="field"><label>${esc(label)}</label><input data-vf="${prop}" value="${esc(val || "")}" placeholder="${esc(ph || "")}"></div>`;
+  const durOfP = p => Math.max(1, Math.round(+((p.sb && p.sb.dur) || (p.params && p.params.duration) || 5)));
+  const byOrdP = (a, b) => ((a.sb && +a.sb.ord || 0) - (b.sb && +b.sb.ord || 0));
+  const chapTextOf = v => (v.chapters || []).filter(c => (c.t || "").trim()).sort((a, b) => secOf(a.t) - secOf(b.t)).map(c => `${c.t.trim()} ${c.n.trim()}`).join("\n");
+  function workIdea(v) {
+    return wIn("outline", "一句話大綱", v.outline, "這集要講什麼、鉤子是什麼")
+      + wTA("notes", "發想筆記／參考", v.notes, "點子、參考連結、要注意的地方", 90)
+      + `<div class="pk-actions">
+        <button type="button" class="btn primary" data-wa="ai-outline" style="padding:8px 16px">✨ AI 想大綱與鉤子</button>
+        <button type="button" class="link-btn" data-wa="ai-pack">✨ AI 想標題與說明欄</button>
+        <button type="button" class="link-btn" data-wa="next" style="color:var(--ink-3)">推進到「腳本」▶</button></div>`;
+  }
+  function workScript(v) {
+    const groups = linkGroups(v.links).groups;
+    return (v.outline ? `<p class="vd-note" style="margin-top:0">大綱：${esc(v.outline)}</p>` : "")
+      + wTA("script", "腳本／旁白", v.script, "貼腳本或逐字稿…（下面可一鍵拆分鏡）", 200)
+      + `<div class="pk-actions">
+        <button type="button" class="btn primary" data-wa="split" style="padding:8px 16px">🎞 拆分鏡（企劃設定會自動接上）</button>
+        <button type="button" class="link-btn" data-wa="next" style="color:var(--ink-3)">推進到「素材生成」▶</button>
+        ${v.links.length ? `<span class="vd-note">已有 ${v.links.length} 個分鏡${groups.length > 1 ? `（${groups.length} 版）` : ""}</span>` : ""}</div>`;
+  }
+  function workEdit(v) {
+    const groups = linkGroups(v.links).groups;
+    let tl = groups.map((g, gi) => {
+      let sec = 0;
+      const rows = g.ids.map(promptById).filter(Boolean).sort(byOrdP).map(p => {
+        const tc = fmtTC(sec), d = durOfP(p); sec += d;
+        return `<div class="vd-tl-row"><span class="tc">${tc}</span><span class="ti">${esc(p.title || "未命名")}</span><span class="vd-chip">${d}s</span>${p.sb && p.sb.trans ? `<span class="vd-chip">${esc(p.sb.trans)}</span>` : ""}</div>`;
+      }).join("");
+      return `<div class="vd-as-ver"><div class="vd-as-verhead">${groups.length > 1 ? `<span class="vd-lg-ver">第 ${gi + 1} 版</span>` : ""}<b>${esc(g.name)}</b><span class="vd-chip">總長 ${fmtTC(sec)}</span></div>${rows}</div>`;
+    }).join("");
+    const chaps = (v.chapters || []).filter(c => c.t || c.n).sort((a, b) => secOf(a.t) - secOf(b.t));
+    const chapHTML = chaps.length ? `<div class="vd-tl">${chaps.map(c => `<div class="vd-tl-row"><span class="tc">${esc(c.t)}</span><span class="ti">${esc(c.n)}</span></div>`).join("")}</div>` : `<p class="vd-note">還沒有章節。</p>`;
+    return `<div class="vd-work-h">分鏡時間軸</div>${tl || `<p class="vd-note">還沒有分鏡 — 先到「腳本」拆分鏡。</p>`}
+      <div class="vd-work-h">章節</div>${chapHTML}
+      <div class="pk-actions">
+        <button type="button" class="link-btn" data-wa="gen-chaps">⏱ 依分鏡秒數排章節</button>
+        <button type="button" class="link-btn" data-wa="copy-chaps">📋 複製章節</button>
+        <button type="button" class="link-btn" data-wa="edit-chaps" style="color:var(--ink-3)">在編輯器微調章節</button>
+        <button type="button" class="link-btn" data-wa="next" style="color:var(--ink-3)">推進到「待發布」▶</button></div>`;
+  }
+  function workReady(v) {
+    const thumbs = (v.thumbs || []).map((src, i) => `<div class="vd-thumb-item${i === v.thumbPick ? " on" : ""}" data-wthumb="${i}" title="點一下設為主縮圖"><img src="${src}" alt="">${i === v.thumbPick ? `<span class="pick">主圖</span>` : ""}</div>`).join("");
+    return wIn("title", "影片標題", v.title, "這集的標題")
+      + wTA("desc", "說明欄草稿", v.desc, "這集在講什麼、相關連結…", 100)
+      + `<div class="vd-grid2">${wIn("hashtags", "Hashtags", v.hashtags, "#AI短片 #裂痕")}${wIn("playlist", "播放清單", v.playlist, "裂痕系列")}</div>`
+      + `<div class="vd-work-h">縮圖 A/B</div><div class="vd-thumbs">${thumbs || `<span class="vd-note">還沒有縮圖 — 到完整編輯器上傳。</span>`}</div>`
+      + `<div class="pk-actions">
+        <button type="button" class="btn primary" data-wa="ai-pack" style="padding:8px 16px">✨ AI 想標題與說明欄</button>
+        <button type="button" class="link-btn" data-wa="copy-pack">📋 複製整包發布文案</button>
+        <button type="button" class="link-btn" data-wa="copy-chaps">複製章節</button>
+        <button type="button" class="link-btn" data-wa="next" style="color:var(--ink-3)">推進到「已發布」▶</button></div>`;
+  }
+  function workPub(v) {
+    const kpi = [["觀看", nf(v.views || 0)], ["讚", nf(v.likes || 0)], ["發布日", v.published || "—"]];
+    return `<div class="vd-kpi">${kpi.map(([t, n]) => `<div><b>${n}</b><span>${t}</span></div>`).join("")}</div>`
+      + `<div class="pk-actions">
+        <button type="button" class="btn primary" data-wa="refresh" style="padding:8px 16px">📊 更新觀看數／讚</button>
+        ${v.ytId ? `<a class="link-btn" href="https://www.youtube.com/watch?v=${esc(v.ytId)}" target="_blank" rel="noopener">▶ 在 YouTube 開啟</a>` : ""}
+        ${v.ytId ? `<button type="button" class="link-btn" data-wa="play" style="color:var(--ink-3)">在這裡播放</button>` : ""}</div>`
+      + wTA("notes", "發布後備註／後續點子", v.notes, "成效觀察、下一集可以怎麼調整…", 90);
+  }
+  function renderWork() {
+    const v = workVideo(); if (!v) { $("#vWorkBody").innerHTML = ""; return; }
+    const HEAD = { idea: "💡 發想工作站", script: "📝 腳本工作站", edit: "✂️ 剪接工作站", ready: "📦 發布工作站", pub: "🚀 成效工作站" };
+    $("#vWorkTitle").textContent = (HEAD[workStage] || "工作站") + " · " + (v.title || "未命名影片");
+    const R = { idea: workIdea, script: workScript, edit: workEdit, ready: workReady, pub: workPub }[workStage];
+    $("#vWorkBody").innerHTML = R ? R(v) : "";
+  }
+  function advanceStage(v) {
+    const i = STAGES.findIndex(s => s.k === v.status), nx = STAGES[i + 1];
+    if (!nx) { toast("已經是最後一個階段了"); return; }
+    v.status = nx.k;
+    if (nx.k === "pub" && !v.published) v.published = new Date().toISOString().slice(0, 10);
+    v.edited = Date.now(); save();
+    workStage = nx.k; renderWork();
+    toast(`已推進到「${nx.zh}」`);
+  }
+  function genChapsFromShots(v) {
+    const ps = v.links.map(promptById).filter(p => p && p.sb).sort(byOrdP);
+    if (!ps.length) { toast("沒有分鏡可以排章節"); return; }
+    let sec = 0;
+    v.chapters = ps.map((p, i) => { const t = fmtTC(sec); sec += durOfP(p); return { t, n: (p.title || `鏡 ${i + 1}`).slice(0, 40) }; });
+    v.edited = Date.now(); save();
+    toast(`已依分鏡排出 ${v.chapters.length} 個章節`);
+  }
+  function copyPackOf(v) {
+    const parts = [v.title || "", "", v.desc || ""];
+    const ch = chapTextOf(v); if (ch) parts.push("", "【章節】", ch);
+    if (v.hashtags) parts.push("", v.hashtags);
+    if (v.tags && v.tags.length) parts.push("標籤：" + v.tags.join(", "));
+    copyText(parts.join("\n").trim(), "整包發布文案已複製");
+  }
+  $("#vWorkBody").addEventListener("input", e => {
+    const f = e.target.closest("[data-vf]"); if (!f) return;
+    const v = workVideo(); if (!v) return;
+    v[f.dataset.vf] = e.target.value; workSave();
+  });
+  $("#vWorkBody").addEventListener("click", e => {
+    const th = e.target.closest("[data-wthumb]");
+    if (th) { const v = workVideo(); if (v) { v.thumbPick = +th.dataset.wthumb; workSave(); renderWork(); } return; }
+    const b = e.target.closest("[data-wa]"); if (!b) return;
+    const v = workVideo(); if (!v) return;
+    const a = b.dataset.wa;
+    if (a === "ai-outline") { closeWork(); openEditor(v); openAi("outline"); return; }
+    if (a === "ai-pack") { closeWork(); openEditor(v); openAi("pack"); return; }
+    if (a === "split") { closeWork(); openEditor(v); openScriptSplit(); return; }
+    if (a === "next") { advanceStage(v); return; }
+    if (a === "gen-chaps") { genChapsFromShots(v); renderWork(); return; }
+    if (a === "copy-chaps") { const t = chapTextOf(v); if (t) copyText(t, "章節已複製"); else toast("還沒有章節"); return; }
+    if (a === "copy-pack") { copyPackOf(v); return; }
+    if (a === "edit-chaps") { closeWork(); openEditor(v); $("#vBlkPublish").classList.remove("closed"); return; }
+    if (a === "refresh") { if (!cfg().apiKey) { toast("更新觀看數需要 YouTube Data API 金鑰（⚙ 設定裡填）"); openSettings(false); return; } refreshStats(); return; }
+    if (a === "play") { openPlayer(v.ytId, v.title); return; }
+  });
+  $("#vWorkClose").addEventListener("click", closeWork);
+  $("#vWorkDone").addEventListener("click", closeWork);
+  $("#vWorkEdit").addEventListener("click", () => { const v = workVideo(); closeWork(); if (v) openEditor(v); });
+  $("#vWorkOv").addEventListener("click", e => { if (e.target === $("#vWorkOv")) closeWork(); });
+
   document.addEventListener("click", e => {
     if (e.target.closest("[data-sel]")) return;   // 勾選框由批次那段處理，不要順便開編輯器
     const doBtn = e.target.closest("[data-do]");
@@ -1288,6 +1573,7 @@
     const i = videos.findIndex(x => x.id === v.id);
     if (i >= 0) videos[i] = v; else videos.unshift(v);
     if (wasNew) bindJobsTo(v.id);   // 背景還在跑的 AI 工作接到剛存的這一支
+    editorDirty = false; clearDraft(); $("#vDraftBar").hidden = true;   // 存好了就不需要草稿
     save(); render();
     return v;
   }
@@ -2669,6 +2955,8 @@
       if ($("#vTodoOv").classList.contains("show")) { $("#vTodoOv").classList.remove("show"); return; }
       if ($("#vStatsOv").classList.contains("show")) { $("#vStatsOv").classList.remove("show"); return; }
       if ($("#vDesignOv").classList.contains("show")) { closeDesign(); return; }
+      if ($("#vAssetsOv").classList.contains("show")) { closeAssets(); return; }
+      if ($("#vWorkOv").classList.contains("show")) { closeWork(); return; }
       if ($("#vProjOv").classList.contains("show")) { closeProjEditor(); return; }
       if ($("#vEditor").classList.contains("show")) closeEditor();
       if (sel.size) clearSel();
