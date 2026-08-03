@@ -1903,14 +1903,13 @@
     return prefix + String(shot.prompt || "").trim();
   }
   // 編輯器目前這支影片的有效製作聖經（企劃共用 ⊕ 本集追加），未存檔也能用
-  function curEditorBible() {
-    return effBible({
-      projectId: curProjectId,
-      series: $("#vfSeries").value.trim(),
-      style: $("#vfStyle").value.trim(),
-      chars: curChars, scenes: curScenes, refs: curRefs
-    });
+  function editorProbe() {
+    return {
+      projectId: curProjectId, series: $("#vfSeries").value.trim(),
+      style: $("#vfStyle").value.trim(), chars: curChars, scenes: curScenes, refs: curRefs
+    };
   }
+  function curEditorBible() { return effBible(editorProbe()); }
   const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 一律用英文，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
   let scrShots = [], scrMeta = null, scrJob = null;
   function openScriptSplit() {
@@ -2651,6 +2650,7 @@
       if ($("#vTrashOv").classList.contains("show")) { $("#vTrashOv").classList.remove("show"); return; }
       if ($("#vTodoOv").classList.contains("show")) { $("#vTodoOv").classList.remove("show"); return; }
       if ($("#vStatsOv").classList.contains("show")) { $("#vStatsOv").classList.remove("show"); return; }
+      if ($("#vDesignOv").classList.contains("show")) { closeDesign(); return; }
       if ($("#vProjOv").classList.contains("show")) { closeProjEditor(); return; }
       if ($("#vEditor").classList.contains("show")) closeEditor();
       if (sel.size) clearSel();
@@ -2780,6 +2780,109 @@
     else openProjEditor(null, { prefillName: $("#vfSeries").value.trim(), kind: $("#vfKind").value, linkVideoId: editingId || null });
   });
   $("#vfStyle").addEventListener("input", () => { $("#vBibleCount").textContent = bibleCount(); });
+
+  /* =========================================================================
+     AI 依大綱設計人物造型／服裝／場景／風格 —— 只在使用者按下才跑，不進任何自動流程
+     ========================================================================= */
+  const DESIGN_SYS = "你是影片美術指導與角色設計師。根據使用者給的大綱與劇情，設計這支影片會登場的人物造型與主要場景，並定調整體視覺風格。回傳 JSON：style＝整體視覺風格（英文視覺關鍵詞，供生成模型用，例如 'cold desaturated realism, 35mm film grain, moody lighting'）；chars＝登場人物陣列，每個 name 給簡短的繁體中文名稱或代稱、desc 給可直接放進生成提示詞的英文視覺描述（外型、年齡、髮型、服裝、氣質等具體關鍵詞，精簡一行）；scenes＝主要場景陣列，name 繁中、desc 英文視覺描述（地點、氛圍、光線、時間）。只設計大綱／劇情裡實際會出現的，不要硬湊、不要超過必要數量；使用者已經有的角色／場景（會附在下面）不要重複。只回 JSON，不要多餘文字。";
+  const DESIGN_SCHEMA = {
+    type: "OBJECT",
+    properties: {
+      style: { type: "STRING" },
+      chars: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } }, required: ["name", "desc"] } },
+      scenes: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } }, required: ["name", "desc"] } }
+    },
+    required: ["chars"]
+  };
+  let designRes = null, designTarget = "proj";
+  function designAsk() {
+    const b = curEditorBible();
+    return [
+      "【影片標題】" + ($("#vfTitle").value.trim() || "（未命名）"),
+      $("#vfSeries").value.trim() ? "【系列】" + $("#vfSeries").value.trim() : "",
+      "【大綱】" + ($("#vfOutline").value.trim() || "（沒有大綱，就依標題與腳本推想劇情）"),
+      $("#vfScript").value.trim() ? "【腳本／劇情】\n" + $("#vfScript").value.trim().slice(0, 4000) : "",
+      b.chars.length ? "【已有的角色（不要重複）】" + b.chars.map(c => c.name).filter(Boolean).join("、") : "",
+      b.scenes.length ? "【已有的場景（不要重複）】" + b.scenes.map(s => s.name).filter(Boolean).join("、") : "",
+      b.style ? "【已定的整體風格】" + b.style : ""
+    ].filter(Boolean).join("\n\n");
+  }
+  function openDesign() {
+    designRes = null;
+    $("#vDesignResult").innerHTML = "";
+    $("#vDesignFoot").hidden = true;
+    $("#vDesignGo").disabled = false;
+    const hasProj = !!projOfVideo(editorProbe());
+    designTarget = hasProj ? "proj" : "ep";
+    $("#vDesignToProj").disabled = !hasProj;
+    $("#vDesignToProj").title = hasProj ? "" : "尚未連結企劃（可先建立企劃，或改成只加這一集）";
+    $("#vDesignToProj").setAttribute("aria-pressed", String(hasProj));
+    $("#vDesignToEp").setAttribute("aria-pressed", String(!hasProj));
+    $("#vDesignStatus").textContent = ($("#vfOutline").value.trim() || $("#vfScript").value.trim())
+      ? "" : "提示：先填一點大綱或腳本，設計會更準。";
+    $("#vDesignOv").classList.add("show");
+  }
+  function closeDesign() { $("#vDesignOv").classList.remove("show"); }
+  $("#vDesignBtn").addEventListener("click", openDesign);
+  $("#vDesignClose").addEventListener("click", closeDesign);
+  $("#vDesignCancel").addEventListener("click", closeDesign);
+  $("#vDesignOv").addEventListener("click", e => { if (e.target === $("#vDesignOv")) closeDesign(); });
+  $("#vDesignToProj").addEventListener("click", () => {
+    if ($("#vDesignToProj").disabled) { toast("這一集還沒連結企劃"); return; }
+    designTarget = "proj"; $("#vDesignToProj").setAttribute("aria-pressed", "true"); $("#vDesignToEp").setAttribute("aria-pressed", "false");
+  });
+  $("#vDesignToEp").addEventListener("click", () => {
+    designTarget = "ep"; $("#vDesignToEp").setAttribute("aria-pressed", "true"); $("#vDesignToProj").setAttribute("aria-pressed", "false");
+  });
+  $("#vDesignGo").addEventListener("click", () => {
+    if (!needKey()) return;
+    $("#vDesignGo").disabled = true;
+    const stop = busy($("#vDesignStatus"), "AI 設計中");
+    aiCall(DESIGN_SYS, designAsk(), DESIGN_SCHEMA).then(r => {
+      stop(); $("#vDesignGo").disabled = false;
+      const clean = arr => (Array.isArray(arr) ? arr : []).map(x => ({ name: String(x.name || "").trim(), desc: String(x.desc || "").trim() })).filter(x => x.name || x.desc);
+      designRes = { style: String(r.style || "").trim(), chars: clean(r.chars), scenes: clean(r.scenes) };
+      renderDesign();
+    }).catch(e => { stop(); $("#vDesignGo").disabled = false; $("#vDesignStatus").textContent = "失敗：" + e.message; toast("設計失敗：" + e.message); });
+  });
+  function renderDesign() {
+    if (!designRes) { $("#vDesignResult").innerHTML = ""; $("#vDesignFoot").hidden = true; return; }
+    const styleRow = designRes.style
+      ? `<div class="vd-dz-sec"><label class="vd-dz-row"><input type="checkbox" data-dz="style" checked><span class="dzn">🎨 整體風格</span><span class="dzd">${esc(designRes.style)}</span></label></div>` : "";
+    const list = (arr, dz, ico) => arr.map((c, i) => `<label class="vd-dz-row"><input type="checkbox" data-dz="${dz}" data-i="${i}" checked><span class="dzn">${ico} ${esc(c.name || (dz === "char" ? "角色" : "場景"))}</span><span class="dzd">${esc(c.desc)}</span></label>`).join("");
+    const charSec = designRes.chars.length ? `<p class="vd-dz-h">人物造型（${designRes.chars.length}）</p><div class="vd-dz-sec">${list(designRes.chars, "char", "🎭")}</div>` : "";
+    const sceneSec = designRes.scenes.length ? `<p class="vd-dz-h">場景（${designRes.scenes.length}）</p><div class="vd-dz-sec">${list(designRes.scenes, "scene", "🏞")}</div>` : "";
+    $("#vDesignResult").innerHTML = (styleRow + charSec + sceneSec) || `<p class="vd-note">AI 這次沒有設計出內容，換個大綱或腳本再試。</p>`;
+    $("#vDesignFoot").hidden = !(designRes.style || designRes.chars.length || designRes.scenes.length);
+  }
+  $("#vDesignApply").addEventListener("click", () => {
+    if (!designRes) return;
+    const on = dz => $$("#vDesignResult input[data-dz='" + dz + "']").filter(x => x.checked);
+    const styleEl = $("#vDesignResult input[data-dz='style']");
+    const styleOn = !!(styleEl && styleEl.checked && designRes.style);
+    const chars = on("char").map(x => designRes.chars[+x.dataset.i]);
+    const scenes = on("scene").map(x => designRes.scenes[+x.dataset.i]);
+    if (!styleOn && !chars.length && !scenes.length) { toast("沒有勾選任何項目"); return; }
+    if (designTarget === "proj") {
+      const p = projOfVideo(editorProbe());
+      if (!p) { toast("尚未連結企劃，已改成加到這一集"); designTarget = "ep"; }
+      else {
+        let n = 0;
+        chars.forEach(c => { if (!p.chars.some(x => x.name === c.name)) { p.chars.push({ name: c.name, desc: c.desc, ref: "" }); n++; } });
+        scenes.forEach(s => { if (!p.scenes.some(x => x.name === s.name)) { p.scenes.push({ name: s.name, desc: s.desc }); n++; } });
+        if (styleOn) { p.style = designRes.style; n++; }
+        p.edited = Date.now(); saveProjects(); renderBibleProj();
+        toast(`已加到企劃「${p.name}」（${n} 項）`); closeDesign(); return;
+      }
+    }
+    // 加到這一集（本集追加）：只改編輯器狀態，隨影片一起存
+    let n = 0;
+    chars.forEach(c => { if (!curChars.some(x => x.name === c.name)) { curChars.push({ name: c.name, desc: c.desc }); n++; } });
+    scenes.forEach(s => { if (!curScenes.some(x => x.name === s.name)) { curScenes.push({ name: s.name, desc: s.desc }); n++; } });
+    if (styleOn) { $("#vfStyle").value = designRes.style; n++; }
+    clCharEd.render(); clSceneEd.render(); updBibleCount(); renderBibleProj();
+    toast(`已加到這一集（${n} 項）— 記得按儲存`); closeDesign();
+  });
 
   /* =========================================================================
      企劃視窗（新增／編輯系列共用設定＋一次建立多集）

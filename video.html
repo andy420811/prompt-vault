@@ -238,6 +238,9 @@
         <div class="block-body">
           <p class="hint">人物設定、風格、場景可以綁在「企劃（系列）」層級整組共用；下面則是「只有這一集」額外要加的。拆分鏡時 AI 會吃到這些設定，讓每一鏡的角色與風格保持一致。</p>
           <div class="vd-bible-proj" id="vBibleProj"></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vDesignBtn">✨ AI 依大綱設計人物造型／服裝／場景／風格</button>
+          </div>
           <div class="field"><label for="vfStyle">本集風格覆寫 <span class="opt">留空＝沿用企劃</span></label>
             <input id="vfStyle" placeholder="（沿用企劃風格）"></div>
           <div class="field"><label>本集追加人物 <span class="opt">只在這一集額外出現的角色</span></label>
@@ -543,6 +546,35 @@
       <div id="vAiResult"></div>
     </div>
     <div class="modal-foot"><button class="btn primary" id="vAiDone">完成</button></div>
+  </div>
+</div>
+
+<!-- ---------- AI 依大綱設計人物造型／場景／風格（手動觸發，不自動執行） ---------- -->
+<div class="overlay" id="vDesignOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:720px">
+    <div class="modal-head">
+      <h2>AI 依大綱設計人物與場景</h2>
+      <button class="icon-btn" id="vDesignClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">AI 會讀這一集的大綱與腳本劇情，設計登場人物的造型／服裝／氣質、主要場景，並定調整體視覺風格。勾選要採用的，選擇加到「企劃共用」或「只加這一集」，再套用。人物／場景描述會直接接到拆分鏡的 prompt 前面。</p>
+      <div class="pk-actions">
+        <button type="button" class="btn primary" id="vDesignGo" style="padding:9px 18px">✨ 產生設計</button>
+        <span class="vd-note" id="vDesignStatus"></span>
+      </div>
+      <div id="vDesignResult"></div>
+    </div>
+    <div class="modal-foot" id="vDesignFoot" hidden>
+      <div class="seg" id="vDesignTarget" style="display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden">
+        <button type="button" id="vDesignToProj" aria-pressed="true">加到企劃共用</button>
+        <button type="button" id="vDesignToEp" aria-pressed="false">只加這一集</button>
+      </div>
+      <span class="vd-spacer"></span>
+      <button type="button" class="btn ghost" id="vDesignCancel">取消</button>
+      <button type="button" class="btn primary" id="vDesignApply">套用勾選的</button>
+    </div>
   </div>
 </div>
 
