@@ -2416,7 +2416,7 @@
     if (cn.length) lines.push("【固定角色清單】castNames 只能從這裡挑：" + cn.join("、"));
     if (sn.length) lines.push("【固定場景清單】sceneNames 只能從這裡挑：" + sn.join("、"));
     if (on.length) lines.push("【固定物件清單】objNames 只能從這裡挑：" + on.join("、"));
-    lines.push("每個鏡頭：castNames／sceneNames／objNames 分別填入這一鏡實際出現的角色／場景／物件（沒有就空陣列）；prompt 專心寫這一鏡的動作、情緒與畫面——像小說場景那樣把角色的具體動作與細微肢體語言、當下的情緒張力（用看得見的表情、姿態、力度呈現）、以及場景當下的環境與感官氛圍（光影、天氣、空氣感、飄落物／塵埃／風等動態細節）寫飽滿，再加上構圖與鏡頭運動；但**不要自己重寫角色外型、場景或物件的固定外觀細節**——那些系統會把上面的固定設定自動接到每一鏡的最前面，確保跨鏡一致，你只寫「他們在這一鏡做什麼、情緒如何、環境當下的樣子」。");
+    lines.push("每個鏡頭：castNames／sceneNames／objNames 分別填入這一鏡實際出現的角色／場景／物件（沒有就空陣列）；prompt 依上面的「提示詞寫作規則」寫這一鏡的動作、情緒、空間與畫面，但**不要自己重寫角色外型、場景或物件的固定外觀細節**——那些系統會把上面的固定設定自動接到每一鏡的最前面，確保跨鏡一致，你只寫「他們在這一鏡做什麼、情緒如何、環境當下的樣子」。");
     return lines.join("\n\n");
   }
   // 判斷這一鏡帶入哪些固定角色／場景／物件：優先用 AI 標的名字，沒有就用名字在文字裡出現與否；
@@ -2500,7 +2500,35 @@
   $("#vObjSheetClose").addEventListener("click", closeObjSheet);
   $("#vObjSheetCopy").addEventListener("click", () => copyText($("#vObjSheetText").value, "已複製物件參考圖 prompt"));
   $("#vObjSheetOv").addEventListener("click", e => { if (e.target === $("#vObjSheetOv")) closeObjSheet(); });
-  const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 依使用者指定的「prompt 語言」書寫，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍，並且像小說場景那樣把細節寫飽滿——角色的具體動作與細微肢體語言（手勢、視線、步態、呼吸、表情的細微變化）、當下流露的情緒與心理張力（用看得見的表情、姿態、力度去呈現，而不是只寫「難過」「生氣」這種抽象詞）、以及場景的環境與感官氛圍（時間、天氣、光影變化、材質質感、空氣感，以及飄落物／塵埃／風等環境中的動態元素）都要帶進畫面描述，讓每一鏡有臨場感與情緒；但仍要精準、可被生成模型執行，不要寫成內心獨白或抽象比喻；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
+  // 拆分鏡系統提示詞＝固定的「角色與輸出格式」底稿 ＋ 使用者可在設定裡開關／編輯／新增的「提示詞寫作規則」。
+  const SCR_SYS_BASE = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 依使用者指定的「prompt 語言」書寫，並嚴格遵守下方「提示詞寫作規則」；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
+  // 預設拆鏡規則（恢復預設會還原成這一份）。label＝選單顯示名；text＝實際送給 AI 的規則內容。
+  const SCR_RULES_DEF = [
+    { id: "cam",     label: "鏡頭語言（基本）",       text: "prompt 寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍。" },
+    { id: "novel",   label: "動作與情緒細節（小說式描寫）", text: "像小說場景那樣把細節寫飽滿——角色的具體動作與細微肢體語言（手勢、視線、步態、呼吸、表情的細微變化）、當下流露的情緒與心理張力（用看得見的表情、姿態、力度去呈現，而不是只寫「難過」「生氣」這種抽象詞）、以及場景的環境與感官氛圍（時間、天氣、光影變化、材質質感、空氣感，以及飄落物／塵埃／風等動態元素）都要帶進畫面，讓每一鏡有臨場感與情緒。" },
+    { id: "space",   label: "物件位置與空間邏輯",     text: "明確標出每個主體與物件在畫面中的相對位置與空間關係（左／右／畫面中央、前景／中景／背景、誰在誰的哪一側、彼此的距離與朝向），位置與動線要符合現實邏輯與物理常識（例如乘客從公車右側車門上下車、駕駛坐左前方、影子方向與光源一致、物體受重力合理擺放、車輛行進方向與車道一致），同一場景跨鏡之間的空間關係也要保持一致、不要無故左右翻轉。" },
+    { id: "consist", label: "跨鏡一致性",             text: "同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格。" },
+    { id: "exec",    label: "精準可生成",             text: "prompt 要精準、可被生成模型執行，不要寫成內心獨白或抽象比喻。" },
+    { id: "motion",  label: "動態 vs 靜態",           text: "分鏡類型是影片時要寫清楚動態與時間演變；是靜態畫面時就描述決定性的一格。" }
+  ];
+  const SCR_RULES_KEY = "videodesk.scrrules";
+  function loadScrRules() {
+    try {
+      const a = JSON.parse(localStorage.getItem(SCR_RULES_KEY) || "null");
+      if (Array.isArray(a) && a.length) return a.map(r => ({ id: r.id || uid(), label: String(r.label || "規則").slice(0, 40), text: String(r.text || ""), on: r.on !== false }));
+    } catch (e) {}
+    return SCR_RULES_DEF.map(r => ({ ...r, on: true }));
+  }
+  let scrRuleList = loadScrRules();
+  function persistScrRules() { try { localStorage.setItem(SCR_RULES_KEY, JSON.stringify(scrRuleList)); } catch (e) {} }
+  // 依目前啟用的規則組出完整系統提示詞
+  function scrSys() {
+    const on = scrRuleList.filter(r => r.on && r.text.trim());
+    const body = on.length
+      ? "\n\n【提示詞寫作規則】每個鏡頭的 prompt 都必須全部遵守：\n" + on.map((r, i) => `${i + 1}. ${r.text.trim()}`).join("\n")
+      : "";
+    return SCR_SYS_BASE + body;
+  }
   let scrShots = [], scrMeta = null, scrJob = null;
   function openScriptSplit() {
     $("#vScrText").value = $("#vfScript").value.trim();
@@ -2608,7 +2636,7 @@
     scrJob = jobRun({
       title: "拆鏡：" + (f.name || f.text.slice(0, 12)), icon: "🎞", vid: editingId, form: Object.assign({}, f, { bible: b }),
       work: async () => {
-        const r = await aiCall(SCR_SYS, ask, shotSchemaFor(b));
+        const r = await aiCall(scrSys(), ask, shotSchemaFor(b));
         const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
         if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
         return { shots, name: (f.name || String(r.title || "").trim() || "腳本分鏡").slice(0, 40) };
@@ -3154,6 +3182,49 @@
     } catch (e) { toast("金鑰存不進瀏覽器（空間已滿？）"); }
     aiState();
   }
+  /* ---------- 拆鏡規則管理（設定選單） ---------- */
+  function rulesState() {
+    const n = scrRuleList.filter(r => r.on && r.text.trim()).length;
+    const el = $("#vRulesState"); if (el) el.textContent = n + " 條啟用";
+  }
+  function renderScrRules() {
+    const box = $("#vRulesList"); if (!box) return;
+    box.innerHTML = scrRuleList.map(r => `
+      <div class="vd-rule${r.on ? "" : " off"}" data-rid="${r.id}">
+        <div class="vd-rule-top">
+          <input type="checkbox" class="vd-rule-on" ${r.on ? "checked" : ""} title="啟用／停用">
+          <input class="vd-rule-label" value="${esc(r.label)}" placeholder="規則名稱" maxlength="40">
+          <button type="button" class="vd-rule-del" title="刪除這條規則">✕</button>
+        </div>
+        <textarea class="vd-rule-text" rows="3" placeholder="這條規則實際會送給 AI 的內容…">${esc(r.text)}</textarea>
+      </div>`).join("");
+    rulesState();
+  }
+  $("#vRulesList").addEventListener("input", e => {
+    const row = e.target.closest("[data-rid]"); if (!row) return;
+    const r = scrRuleList.find(x => x.id === row.dataset.rid); if (!r) return;
+    if (e.target.classList.contains("vd-rule-on")) { r.on = e.target.checked; row.classList.toggle("off", !r.on); rulesState(); }
+    else if (e.target.classList.contains("vd-rule-label")) r.label = e.target.value.slice(0, 40);
+    else if (e.target.classList.contains("vd-rule-text")) { r.text = e.target.value; rulesState(); }
+    persistScrRules();
+  });
+  $("#vRulesList").addEventListener("click", e => {
+    const del = e.target.closest(".vd-rule-del"); if (!del) return;
+    const row = del.closest("[data-rid]"); if (!row) return;
+    scrRuleList = scrRuleList.filter(x => x.id !== row.dataset.rid);
+    persistScrRules(); renderScrRules();
+  });
+  $("#vRuleAdd").addEventListener("click", () => {
+    scrRuleList.push({ id: uid(), label: "自訂規則", text: "", on: true });
+    persistScrRules(); renderScrRules();
+    const rows = $$("#vRulesList .vd-rule"); const last = rows[rows.length - 1];
+    if (last) last.querySelector(".vd-rule-text").focus();
+  });
+  $("#vRuleReset").addEventListener("click", () => {
+    if (!confirm("恢復成預設的拆鏡規則？你新增或修改過的內容會被覆蓋。")) return;
+    scrRuleList = SCR_RULES_DEF.map(r => ({ ...r, on: true }));
+    persistScrRules(); renderScrRules(); toast("已恢復預設拆鏡規則");
+  });
   function saveSettings() {
     setCfg({
       channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
@@ -3172,6 +3243,7 @@
     $("#vAutoSync").checked = localStorage.getItem(AUTOSYNC) === "1";
     cloudInfo();
     loadAiFields();
+    renderScrRules();
     // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開
     $$("#vSetOv .block").forEach(b => b.classList.toggle("closed", focusAi ? b.id !== "vSetAiBlock" : false));
     $("#vSetOv").classList.add("show");
@@ -3706,7 +3778,7 @@
     jobRun({
       title: "拆鏡：" + name.slice(0, 12), icon: "🎞", vid: v.id,
       work: async () => {
-        const r = await aiCall(SCR_SYS, ask, shotSchemaFor(b));
+        const r = await aiCall(scrSys(), ask, shotSchemaFor(b));
         const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
         if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
         const seg = uid(), now = Date.now();

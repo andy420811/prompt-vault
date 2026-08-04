@@ -438,6 +438,19 @@
           <p class="vd-note" id="vaiInfo"></p>
         </div>
       </div>
+      <div class="block" id="vSetRulesBlock">
+        <div class="block-head" data-toggle><span class="bt">拆鏡規則（AI 怎麼寫每一鏡的 prompt）</span><span class="bn" id="vRulesState"></span>
+          <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
+        </div>
+        <div class="block-body">
+          <p class="hint">「腳本→分鏡」時，AI 會依這裡啟用的規則來寫每一鏡的 prompt。可以直接勾選開關、修改內容、或新增自己的規則；<b>關掉的不會送給 AI</b>。改完自動存，只影響之後新拆的分鏡。</p>
+          <div id="vRulesList"></div>
+          <div class="pk-actions">
+            <button type="button" class="link-btn" id="vRuleAdd">＋ 新增規則</button>
+            <button type="button" class="link-btn" id="vRuleReset">↺ 恢復預設</button>
+          </div>
+        </div>
+      </div>
       <div class="block">
         <div class="block-head" data-toggle><span class="bt">備份</span>
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>

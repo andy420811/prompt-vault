@@ -500,3 +500,20 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
   .vd-cell { min-height: 66px; padding: 4px; }
   .vd-cal-grid { gap: 4px; }
 }
+
+/* ---- 拆鏡規則管理 ---- */
+#vRulesList { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
+.vd-rule { border: 1px solid var(--line); border-radius: 10px; padding: 8px 9px; background: var(--surface-2); }
+.vd-rule.off { opacity: .5; }
+.vd-rule-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.vd-rule-on { width: 16px; height: 16px; flex: 0 0 auto; cursor: pointer; }
+.vd-rule-label { flex: 1 1 auto; min-width: 0; font: inherit; font-size: 13px; font-weight: 600; color: var(--ink);
+  border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 3px 6px; }
+.vd-rule-label:hover { border-color: var(--line); }
+.vd-rule-label:focus { border-color: var(--line); background: var(--paper); outline: none; }
+.vd-rule-del { flex: 0 0 auto; width: 26px; height: 26px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--paper); color: var(--ink-3); font-size: 13px; cursor: pointer; line-height: 1; }
+.vd-rule-del:hover { color: #d64545; border-color: #d64545; }
+.vd-rule-text { width: 100%; font: inherit; font-size: 12.5px; line-height: 1.55; color: var(--ink-2);
+  border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 7px 9px; resize: vertical; }
+.vd-rule-text:focus { outline: none; border-color: var(--accent, var(--ink-3)); }
