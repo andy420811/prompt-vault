@@ -452,11 +452,11 @@
         </div>
       </div>
       <div class="block" id="vSetTplBlock">
-        <div class="block-head" data-toggle><span class="bt">拆鏡範本（風格套組）</span><span class="bn" id="vTplState"></span>
+        <div class="block-head" data-toggle><span class="bt">拆鏡範本（描述手法／風格）</span><span class="bn" id="vTplState"></span>
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
         </div>
         <div class="block-body">
-          <p class="hint">範本是一整套「風格設定＋範例示範（few-shot）」——套用哪個範本，AI 就往那個風格與筆觸寫每一鏡，解決 prompt 生硬的問題。<b>這跟上面的「拆鏡規則」是分開的兩套</b>：規則管『怎麼寫得好』，範本管『寫成什麼風格』。可切換、編輯、新增，改完自動存，只影響之後新拆的分鏡。</p>
+          <p class="hint">範本是一套「描述手法＋範例示範（few-shot）」——套用哪個範本，AI 就照那套手法與筆觸寫每一鏡，解決 prompt 生硬的問題。預設是通用的電影感敘事筆觸（題材不限）；也可以自己做成特定風格。<b>這跟上面的「拆鏡規則」是分開的兩套</b>：規則管『怎麼寫得好』，範本管『用什麼描述手法與風格』。可切換、編輯、新增，改完自動存，只影響之後新拆的分鏡。</p>
           <div class="field"><label for="vTplActive">目前套用的範本 <span class="opt">選「不套用」就完全不加範本</span></label>
             <select id="vTplActive"></select></div>
           <div class="field"><label for="vTplName">範本名稱</label><input id="vTplName" maxlength="40" placeholder="範本名稱"></div>
