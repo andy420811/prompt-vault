@@ -2562,6 +2562,7 @@
   function scrForm() {
     return {
       text: $("#vScrText").value.trim(), name: $("#vScrName").value.trim(), style: $("#vScrStyle").value.trim(),
+      guide: $("#vScrGuide").value.trim(),
       cnt: $("#vScrCount").value, dur: $("#vScrDur").value.trim(),
       type: $("#vScrType").value === "image" ? "image" : "video"
     };
@@ -2569,6 +2570,7 @@
   function scrFill(f) {
     if (!f) return;
     $("#vScrText").value = f.text; $("#vScrName").value = f.name; $("#vScrStyle").value = f.style;
+    $("#vScrGuide").value = f.guide || "";
     $("#vScrCount").value = f.cnt; $("#vScrDur").value = f.dur; $("#vScrType").value = f.type;
   }
   // 結果回來（不管是視窗還開著、還是從右下角膠囊點開）都走這一支
@@ -2592,6 +2594,7 @@
     const b = curEditorBible();
     const ask = [
       "【腳本／旁白】\n" + f.text,
+      f.guide ? "【分鏡草稿／拆鏡指示】" + f.guide + "（這是導演的分鏡意圖。若這裡已經列出一鏡一鏡的分鏡草稿，就照它的鏡數與順序、一鏡對一鏡展開成完整鏡頭，不要自行合併、拆開或增減鏡頭，只把每一鏡補成可直接生成的完整 prompt；若只是寫大方向，就照它決定在哪裡切鏡、每一鏡拍什麼與節奏取景。與下面『鏡頭數』的自動判斷衝突時，一律以這裡為準）" : "",
       f.style ? "【視覺方向】" + f.style + "（每一鏡的 prompt 都要吃到這個風格）" : "",
       bibleAsk(b),
       f.cnt ? "【鏡頭數】請剛好拆成 " + f.cnt + " 個鏡頭" : "【鏡頭數】依內容長度自行判斷，約 4～12 個",
