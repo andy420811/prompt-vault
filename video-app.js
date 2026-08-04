@@ -2455,6 +2455,51 @@
     };
   }
   function curEditorBible() { return effBible(editorProbe()); }
+
+  /* ---------- 一次生成所有物件參考圖 prompt ---------- */
+  // 把製作聖經（企劃共用 ⊕ 本集追加）裡的所有物件組成一張設定參考圖的提示詞
+  function objSheetPrompt() {
+    const objs = (curEditorBible().objects || []).filter(o => (o.name || "").trim() || (o.desc || "").trim());
+    if (!objs.length) return null;
+    const style = ($("#vfStyle").value.trim() || curEditorBible().style || "").trim();
+    const zh = promptLang() !== "en";
+    const list = objs.map((o, i) => {
+      const name = (o.name || "").trim() || (zh ? `物件${i + 1}` : `Object ${i + 1}`);
+      const desc = (o.desc || "").trim();
+      return zh
+        ? `${i + 1}. ${name}${desc ? "：" + desc : ""}`
+        : `${i + 1}. ${name}${desc ? " — " + desc : ""}`;
+    }).join("\n");
+    if (zh) {
+      return [
+        "物件設定參考圖（object reference sheet / model sheet）：請在【同一張圖】裡一次呈現以下所有物件，做成整齊的設定參考表。",
+        "要求：每個物件各自獨立、彼此不重疊，整齊排列成網格；在每個物件旁邊清楚標註它的名稱；採乾淨的產品／道具參考視角（以正面為主，可帶側面或 3/4 角度）；純色淺灰或白色背景、均勻棚拍打光、無雜物、無強烈陰影；所有物件維持一致的比例與畫風。" + (style ? `整體風格：${style}。` : ""),
+        "",
+        "物件清單：",
+        list
+      ].join("\n");
+    }
+    return [
+      "Object reference sheet / model sheet: show ALL of the following objects together in ONE single image, laid out as a clean, organized reference sheet.",
+      "Requirements: each object separated and non-overlapping, arranged in a neat grid; clearly label each object with its name; clean product/prop reference angles (front view primary, optional side or 3/4 view); plain light-gray or white background, even studio lighting, no clutter, no harsh shadows; consistent scale and art style across all objects." + (style ? ` Overall style: ${style}.` : ""),
+      "",
+      "Objects:",
+      list
+    ].join("\n");
+  }
+  function openObjSheet() {
+    const p = objSheetPrompt();
+    if (!p) { toast("目前沒有物件 — 先在「本集追加物件」或企劃裡加物件"); return; }
+    const n = (curEditorBible().objects || []).filter(o => (o.name || "").trim() || (o.desc || "").trim()).length;
+    $("#vObjSheetText").value = p;
+    $("#vObjSheetStat").textContent = `共 ${n} 個物件`;
+    $("#vObjSheetOv").classList.add("show");
+  }
+  function closeObjSheet() { $("#vObjSheetOv").classList.remove("show"); }
+  $("#vObjSheet").addEventListener("click", openObjSheet);
+  $("#vObjSheetClose").addEventListener("click", closeObjSheet);
+  $("#vObjSheetCopy").addEventListener("click", () => copyText($("#vObjSheetText").value, "已複製物件參考圖 prompt"));
+  $("#vObjSheetOv").addEventListener("click", e => { if (e.target === $("#vObjSheetOv")) closeObjSheet(); });
   const SCR_SYS = "你是資深影片分鏡師兼生成式影片／圖像提示詞工程師。使用者會給一段旁白或腳本，請把它拆成依播出順序排列的連續鏡頭，填入 shots 陣列（順序即播出順序）。每個鏡頭：prompt 依使用者指定的「prompt 語言」書寫，寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍；同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格；narration 放這一鏡對應的原腳本文字（原文照抄，不要翻譯）；title 給 12 字內的繁體中文鏡頭名；dur 給預估秒數（只填數字字串）；trans 給進入下一鏡的轉場（硬切、淡入、淡出、疊化、擦除、縮放推近、甩鏡 Whip pan、跳接 擇一）；note 用繁體中文一句寫拍攝重點；camera/style/light/shot 只從 schema 允許的英文關鍵字挑明確符合的，沒有就空陣列不要硬湊；tags 給 2~4 個繁體中文主題標籤。title（最外層）給整支影片 16 字內的繁中標題。不要輸出腳本以外的內容，也不要重複同一個鏡頭。";
   let scrShots = [], scrMeta = null, scrJob = null;
   function openScriptSplit() {
@@ -3191,6 +3236,7 @@
       // 由上往下關：設定可能是被「需要金鑰」從別的視窗叫出來的，所以排在前面
       if ($("#vPlayOv").classList.contains("show")) { closePlayer(); return; }
       if ($("#vSetOv").classList.contains("show")) { saveSettings(); $("#vSetOv").classList.remove("show"); return; }
+      if ($("#vObjSheetOv").classList.contains("show")) { closeObjSheet(); return; }
       if ($("#vPromptOv").classList.contains("show")) { closePreview(); return; }
       if ($("#vAiOv").classList.contains("show")) { closeAi(); return; }
       if ($("#vScrOv").classList.contains("show")) { closeScriptSplit(); return; }

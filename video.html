@@ -257,7 +257,8 @@
             <div class="pk-actions"><button type="button" class="link-btn" id="vSceneAdd">＋ 新增場景</button></div></div>
           <div class="field"><label>本集追加物件 <span class="opt">車輛、道具等，可各放參考圖</span></label>
             <div class="vd-objs" id="vObjList"></div>
-            <div class="pk-actions"><button type="button" class="link-btn" id="vObjAdd">＋ 新增物件</button></div></div>
+            <div class="pk-actions"><button type="button" class="link-btn" id="vObjAdd">＋ 新增物件</button>
+              <button type="button" class="link-btn" id="vObjSheet" title="把所有物件組成一張參考設定圖的提示詞">🖼 一次生成所有物件參考圖 prompt</button></div></div>
           <div class="field"><label>本集參考圖 <span class="opt">餵給生成模型的視覺參考，可放多張</span></label>
             <div class="vd-thumbs" id="vRefList"></div>
             <div class="pk-actions"><button type="button" class="link-btn" id="vRefAdd">＋ 上傳參考圖</button></div>
@@ -560,6 +561,27 @@
       <div id="vAiResult"></div>
     </div>
     <div class="modal-foot"><button class="btn primary" id="vAiDone">完成</button></div>
+  </div>
+</div>
+
+<!-- ---------- 一次生成所有物件參考圖 prompt ---------- -->
+<div class="overlay" id="vObjSheetOv">
+  <div class="modal" role="dialog" aria-modal="true" style="max-width:640px">
+    <div class="modal-head">
+      <h2>一次生成所有物件參考圖 prompt</h2>
+      <button class="icon-btn" id="vObjSheetClose" title="關閉" style="width:34px;height:34px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" id="vObjSheetHint">把製作聖經裡的所有物件（企劃共用＋本集追加）組成一段提示詞，餵給生成模型就能在同一張圖裡一次畫出全部物件的設定參考圖。可自行修改後再複製。</p>
+      <div class="field"><textarea id="vObjSheetText" rows="14" style="font-family:inherit"></textarea></div>
+    </div>
+    <div class="modal-foot">
+      <span class="vd-note" id="vObjSheetStat"></span>
+      <span class="vd-spacer"></span>
+      <button class="btn primary" id="vObjSheetCopy">📋 複製提示詞</button>
+    </div>
   </div>
 </div>
 
