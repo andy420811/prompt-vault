@@ -165,9 +165,15 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
   .vd-stats { flex-wrap: nowrap; overflow-x: auto; width: 100%; gap: 12px; scrollbar-width: none; }
   .vd-stats::-webkit-scrollbar { display: none; }
   .vd-stat b { font-size: 15px; }
-  .vd-toolbar { gap: 8px; padding: 9px 12px; }
+  /* PWA 全螢幕時頂列補瀏海安全區；底部捲動區補 home 列安全區，卡片才不會被切到 */
+  .vd-toolbar { gap: 8px;
+    padding: calc(9px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 9px calc(12px + env(safe-area-inset-left)); }
   .vd-controls select { max-width: 110px; }
   .vd-row .rside { display: none; }
+  .vd-board { padding-bottom: calc(18px + env(safe-area-inset-bottom));
+    padding-left: calc(14px + env(safe-area-inset-left)); padding-right: calc(14px + env(safe-area-inset-right)); }
+  .vd-list { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
+  .vd-cal { padding-bottom: calc(20px + env(safe-area-inset-bottom)); }
 }
 
 /* ---- 月曆檢視 ---- */
@@ -322,8 +328,8 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 #vTrashOv { z-index: 140; }
 
 @media (max-width: 640px) {
-  .vd-selbar { bottom: 66px; gap: 6px; padding: 8px 10px; }
-  .vd-selbar button, .vd-selbar select { padding: 5px 9px; font-size: 12px; }
+  .vd-selbar { bottom: calc(66px + env(safe-area-inset-bottom)); gap: 6px; padding: 8px 10px; }
+  .vd-selbar button, .vd-selbar select { padding: 7px 10px; font-size: 12px; }
 }
 
 /* ---- 卡片的階段行動鈕（依所在看板欄做該階段的下一步） ---- */

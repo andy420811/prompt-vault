@@ -632,7 +632,9 @@
 
   /* ---------- mobile ---------- */
   @media (max-width:600px) {
-    .top-inner { gap:9px; padding:11px 14px; row-gap:9px; }
+    /* PWA 全螢幕時 header 會頂到瀏海／狀態列，補上安全區 */
+    .top-inner { gap:9px; row-gap:9px;
+      padding:calc(11px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 11px calc(14px + env(safe-area-inset-left)); }
     .brand { margin-right:6px; }
     .brand .mark { font-size:21px; }
     .search { order:5; flex-basis:100%; max-width:none; }
@@ -647,17 +649,20 @@
     .result img { max-height:200px; }
     /* modals fill the screen edge-to-edge */
     .overlay { padding:0; }
-    .overlay.show { place-items:stretch; }
-    .modal { margin:0; min-height:100%; width:auto; max-width:none; border-radius:0; }
-    .modal-head { border-radius:0; }
+    /* align:start（不要 stretch）讓 modal 隨內容長高；min-height 給滿版地板。
+       用 stretch 會把 modal 卡死在視窗高度，內容溢出後底下就露出半透明遮罩＝背景變透明看不清（手機長頁面的老問題） */
+    .overlay.show { place-items:start stretch; }
+    .modal { margin:0; min-height:100vh; min-height:100dvh; width:auto; max-width:none; border-radius:0; }
+    .modal-head { border-radius:0; padding-top:calc(13px + env(safe-area-inset-top)); }
     .modal-body { padding:16px; gap:15px; }
     .modal-head, .modal-foot { padding:13px 16px; }
-    .modal-foot { position:sticky; bottom:0; flex-wrap:wrap; }
-    .modal-foot .btn { flex:1; justify-content:center; }
+    .modal-foot { position:sticky; bottom:0; flex-wrap:wrap;
+      padding-bottom:calc(13px + env(safe-area-inset-bottom)); }
+    .modal-foot .btn { flex:1; justify-content:center; min-height:44px; }
     .modal-foot .del-side { flex-basis:100%; margin-right:0; order:5; }
     .lib-list { max-height:none; }
     /* 社群牆：手機吃滿螢幕，卡片常駐顯示提示詞（無 hover），詳情改上下堆疊 */
-    .lib-modal.wide { height:100%; min-height:0; max-width:none; }
+    .lib-modal.wide { height:100vh; height:100dvh; min-height:0; max-width:none; }
     .lib-modal.wide .modal-body { padding:12px; }
     .ext-feed { gap:10px; }
     .exf-col { gap:10px; }
@@ -670,8 +675,15 @@
     .exd-nav { width:34px; height:34px; }
     .lb-nav { width:40px; height:40px; }
     #lbPrev { left:6px; } #lbNext { right:6px; }
-    .toast { left:12px; right:12px; transform:translateY(20px); bottom:16px; }
+    .toast { left:12px; right:12px; transform:translateY(20px); bottom:calc(16px + env(safe-area-inset-bottom)); }
     .toast.show { transform:translateY(0); }
+    /* 手機表單控制項用 16px：小於 16px iOS 一聚焦就自動放大整頁，很惱人 */
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+    textarea, select { font-size:16px; }
+    /* 觸控目標放大好按 */
+    .chip { padding:8px 13px; }
+    .icon-btn { width:40px; height:40px; }
+    .seg button { padding:11px; }
   }
   @media (max-width:380px) {
     .brand .mark { font-size:19px; }
