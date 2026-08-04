@@ -338,7 +338,8 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 .vd-row .vd-outline { -webkit-line-clamp: 1; margin-top: 3px; }
 
 /* ---- 製作聖經：人物／場景清單（編輯器＋企劃視窗共用） ---- */
-.vd-nl-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+.vd-nl-row { border: 1px solid var(--line); border-radius: 9px; padding: 7px; margin-bottom: 7px; background: var(--surface); }
+.vd-nl-top { display: flex; gap: 6px; align-items: center; }
 .vd-nl-row .nl-name { flex: 0 0 32%; min-width: 0; }
 .vd-nl-row .nl-desc { flex: 1 1 auto; min-width: 0; }
 .vd-nl-row .del { border: none; background: none; color: var(--ink-3); cursor: pointer; font-size: 14px; padding: 0 4px; flex: 0 0 auto; }
@@ -347,6 +348,11 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
   font: inherit; font-size: 13px; color: var(--ink); background: var(--paper);
   border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; }
 .vd-nl-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.vd-nl-imgs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 7px; padding: 4px; border-radius: 8px; }
+.vd-nl-imgs .vd-thumb-item { width: 60px; aspect-ratio: 1/1; }
+.vd-nl-imgadd { border: 1px dashed var(--line); background: var(--surface-2); color: var(--ink-3); border-radius: 8px;
+  font: inherit; font-size: 11px; padding: 4px 8px; cursor: pointer; flex: 0 0 auto; align-self: stretch; min-height: 40px; }
+.vd-nl-imgadd:hover { border-color: var(--accent); color: var(--accent); }
 .vd-bible-proj { padding: 9px 11px; background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 10px; margin-bottom: 10px; }
 .vd-bible-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

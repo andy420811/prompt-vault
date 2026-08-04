@@ -28,7 +28,7 @@
   let prompts = [];          // 從 Prompt 庫讀來的唯讀快照
   let editingId = null;
   let curProjectId = "";
-  let curTodos = [], curLinks = [], curChars = [], curScenes = [], curRefs = [];
+  let curTodos = [], curLinks = [], curChars = [], curScenes = [], curObjects = [], curRefs = [];
   const VIEWS = ["board", "list", "cal"];
   let view = VIEWS.includes(localStorage.getItem("videodesk.view")) ? localStorage.getItem("videodesk.view") : "board";
   let calMonth = new Date().toISOString().slice(0, 7);   // 月曆顯示的月份 YYYY-MM
@@ -79,7 +79,7 @@
   function save() {
     // localStorage 只放去圖輕量版當備援；完整（含縮圖／參考圖 dataURI）進 IndexedDB
     try {
-      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [], refs: [], shotAssets: stripAssets(v.shotAssets) }))));
+      localStorage.setItem(KEY_LS, JSON.stringify(videos.map(v => Object.assign({}, v, { thumbs: [], refs: [], chars: stripNamed(v.chars), scenes: stripNamed(v.scenes), objects: stripNamed(v.objects), shotAssets: stripAssets(v.shotAssets) }))));
       localStorage.setItem("videodesk.updated", String(Date.now()));   // 雲端同步比新舊用
     } catch (e) {}
     scheduleCloudPush();
@@ -89,7 +89,7 @@
   function saveProjects() {
     try {
       localStorage.setItem(PROJ_LS, JSON.stringify(projects.map(p =>
-        Object.assign({}, p, { refs: [], chars: p.chars.map(c => ({ name: c.name, desc: c.desc, ref: "" })) }))));
+        Object.assign({}, p, { refs: [], chars: stripNamed(p.chars), scenes: stripNamed(p.scenes), objects: stripNamed(p.objects) }))));
     } catch (e) {}
     return idbSet(PROJ_KEY, projects);
   }
@@ -121,11 +121,12 @@
     v.order = +v.order || 0;
     v.links = Array.isArray(v.links) ? v.links.filter(x => typeof x === "string") : [];
     v.views = +v.views || 0; v.likes = +v.likes || 0;
-    // 製作聖經：企劃連結＋本集額外的人物／風格／場景／參考圖
+    // 製作聖經：企劃連結＋本集額外的人物／場景／物件（各自可有多張參考圖）／風格／參考圖
     v.projectId = String(v.projectId || "");
     v.style = String(v.style || "");
-    v.chars = Array.isArray(v.chars) ? v.chars.map(c => ({ name: String(c.name || ""), desc: String(c.desc || "") })) : [];
-    v.scenes = Array.isArray(v.scenes) ? v.scenes.map(s => ({ name: String(s.name || ""), desc: String(s.desc || "") })) : [];
+    v.chars = normNamed(v.chars);
+    v.scenes = normNamed(v.scenes);
+    v.objects = normNamed(v.objects);
     v.refs = Array.isArray(v.refs) ? v.refs.filter(x => typeof x === "string") : [];
     // 素材生成工作站：每個分鏡／prompt 的參考圖、參考影片連結、註解（key＝prompt id）
     v.shotAssets = (v.shotAssets && typeof v.shotAssets === "object" && !Array.isArray(v.shotAssets)) ? v.shotAssets : {};
@@ -149,6 +150,15 @@
     v.created = +v.created || Date.now(); v.edited = +v.edited || v.created;
     return v;
   }
+  // 人物／場景／物件的清單：{name, desc, imgs[]}（imgs＝多張參考圖 dataURI）。舊資料的 ref 併進 imgs
+  function normNamed(arr) {
+    return Array.isArray(arr) ? arr.map(c => {
+      let imgs = Array.isArray(c.imgs) ? c.imgs.filter(x => typeof x === "string") : [];
+      if (typeof c.ref === "string" && c.ref && !imgs.includes(c.ref)) imgs = [c.ref, ...imgs];
+      return { name: String(c.name || ""), desc: String(c.desc || ""), imgs };
+    }) : [];
+  }
+  const stripNamed = arr => (arr || []).map(c => ({ name: c.name, desc: c.desc, imgs: [] }));
   // localStorage 鏡像去圖用：把 shotAssets 的圖片與內嵌影片 dataURI 拿掉（只留連結、註解、剪接資訊）
   function stripAssets(sa) {
     const out = {};
@@ -163,8 +173,9 @@
     p.name = String(p.name || "");
     p.kind = p.kind === "short" ? "short" : "long";
     p.style = String(p.style || "");
-    p.chars = Array.isArray(p.chars) ? p.chars.map(c => ({ name: String(c.name || ""), desc: String(c.desc || ""), ref: typeof c.ref === "string" ? c.ref : "" })) : [];
-    p.scenes = Array.isArray(p.scenes) ? p.scenes.map(s => ({ name: String(s.name || ""), desc: String(s.desc || "") })) : [];
+    p.chars = normNamed(p.chars);
+    p.scenes = normNamed(p.scenes);
+    p.objects = normNamed(p.objects);
     p.refs = Array.isArray(p.refs) ? p.refs.filter(x => typeof x === "string") : [];
     p.notes = String(p.notes || "");
     p.created = +p.created || Date.now(); p.edited = +p.edited || p.created;
@@ -185,6 +196,7 @@
       style: (v && v.style) ? v.style : (p ? p.style : ""),
       chars: [...(p ? p.chars : []), ...((v && v.chars) || [])],
       scenes: [...(p ? p.scenes : []), ...((v && v.scenes) || [])],
+      objects: [...(p ? (p.objects || []) : []), ...((v && v.objects) || [])],
       refs: [...(p ? p.refs : []), ...((v && v.refs) || [])]
     };
   }
@@ -197,6 +209,10 @@
     if (b.scenes.length) {
       lines.push("【固定場景設定】");
       b.scenes.forEach(s => lines.push(`- ${(s.name || "場景")}：${s.desc || ""}`.trim()));
+    }
+    if ((b.objects || []).length) {
+      lines.push("【固定物件設定（車輛、道具等，出現時外型要一致）】");
+      b.objects.forEach(o => lines.push(`- ${(o.name || "物件")}：${o.desc || ""}`.trim()));
     }
     return lines.join("\n");
   }
@@ -612,8 +628,9 @@
     curThumbs = v ? v.thumbs.slice() : []; curPick = v ? v.thumbPick : 0;
     curChaps = v ? v.chapters.map(c => ({ ...c })) : [];
     curProjectId = v ? v.projectId : "";
-    curChars = v ? v.chars.map(c => ({ ...c })) : [];
-    curScenes = v ? v.scenes.map(s => ({ ...s })) : [];
+    curChars = v ? v.chars.map(c => ({ ...c, imgs: (c.imgs || []).slice() })) : [];
+    curScenes = v ? v.scenes.map(s => ({ ...s, imgs: (s.imgs || []).slice() })) : [];
+    curObjects = v ? (v.objects || []).map(o => ({ ...o, imgs: (o.imgs || []).slice() })) : [];
     curRefs = v ? v.refs.slice() : [];
     $("#vfStyle").value = v ? v.style : "";
     $("#vfDesc").value = v ? v.desc : "";
@@ -623,7 +640,7 @@
     $("#vDupBtn").style.display = v ? "" : "none";
     $("#vNextEp").style.display = v && v.series ? "" : "none";
     renderTodos(); renderLinked(); renderThumbs(); renderChaps(); renderThumb(v ? v.ytId : "");
-    clCharEd.render(); clSceneEd.render(); refEd.render(); renderBibleProj();
+    clCharEd.render(); clSceneEd.render(); clObjEd.render(); refEd.render(); renderBibleProj();
     $$("#vEditor .block").forEach(b => b.classList.toggle("closed", b.id !== "vBlkScript"));
     editorDirty = false;
     showDraftBar(v ? v.id : null);   // 若有上次未儲存的草稿，跳出「恢復」列
@@ -645,7 +662,8 @@
   function draftSnapshot() {
     const v = collect();
     return { at: Date.now(), forId: editingId || null, title: v.title || v.series || "",
-      data: Object.assign({}, v, { thumbs: [], refs: [] }) };   // 圖片不進草稿（省空間；恢復時保留記錄裡原本的圖）
+      // 圖片不進草稿（省空間）；恢復時人物／場景／物件的參考圖由 applyDraft 依名字沿用記錄裡原本的
+      data: Object.assign({}, v, { thumbs: [], refs: [], chars: stripNamed(v.chars), scenes: stripNamed(v.scenes), objects: stripNamed(v.objects) }) };
   }
   function saveDraftNow() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(draftSnapshot())); } catch (e) {} }
   function clearDraft() { try { localStorage.removeItem(DRAFT_KEY); } catch (e) {} }
@@ -674,11 +692,14 @@
     $("#vfUrl").value = x.url || ""; $("#vfTags").value = (x.tags || []).join(", ");
     $("#vfOutline").value = x.outline || ""; $("#vfScript").value = x.script || ""; $("#vfNotes").value = x.notes || "";
     $("#vfDesc").value = x.desc || ""; $("#vfHash").value = x.hashtags || ""; $("#vfPlaylist").value = x.playlist || ""; $("#vfStyle").value = x.style || "";
+    // 草稿沒存圖：依名字把「開啟時載入的參考圖」接回來，才不會恢復後圖不見
+    const keepImgs = (draftArr, curArr) => (draftArr || []).map(d => { const m = (curArr || []).find(c => c.name === d.name); return { name: d.name, desc: d.desc, imgs: m && m.imgs ? m.imgs.slice() : [] }; });
     curTodos = (x.todos || []).map(t => ({ ...t })); curLinks = (x.links || []).slice();
-    curChaps = (x.chapters || []).map(c => ({ ...c })); curChars = (x.chars || []).map(c => ({ ...c })); curScenes = (x.scenes || []).map(s => ({ ...s }));
+    curChaps = (x.chapters || []).map(c => ({ ...c }));
+    curChars = keepImgs(x.chars, curChars); curScenes = keepImgs(x.scenes, curScenes); curObjects = keepImgs(x.objects, curObjects);
     curProjectId = x.projectId || "";
-    // 圖片（縮圖／參考圖）不在草稿裡：沿用開啟時從記錄載入的 curThumbs/curRefs
-    renderTodos(); renderLinked(); renderChaps(); clCharEd.render(); clSceneEd.render(); updBibleCount(); renderBibleProj(); renderThumb(ytIdFrom(x.url || ""));
+    // 縮圖／參考圖不在草稿裡：沿用開啟時從記錄載入的 curThumbs/curRefs
+    renderTodos(); renderLinked(); renderChaps(); clCharEd.render(); clSceneEd.render(); clObjEd.render(); updBibleCount(); renderBibleProj(); renderThumb(ytIdFrom(x.url || ""));
   }
   $("#vDraftRestore").addEventListener("click", () => {
     const d = getDraft(); if (!d) { $("#vDraftBar").hidden = true; return; }
@@ -811,8 +832,9 @@
       chapters: curChaps.filter(c => c.t.trim() || c.n.trim()).sort((a, b) => secOf(a.t) - secOf(b.t)),
       projectId: curProjectId,
       style: $("#vfStyle").value.trim(),
-      chars: curChars.filter(c => c.name.trim() || c.desc.trim()),
-      scenes: curScenes.filter(s => s.name.trim() || s.desc.trim()),
+      chars: curChars.filter(c => c.name.trim() || c.desc.trim() || (c.imgs && c.imgs.length)),
+      scenes: curScenes.filter(s => s.name.trim() || s.desc.trim() || (s.imgs && s.imgs.length)),
+      objects: curObjects.filter(o => o.name.trim() || o.desc.trim() || (o.imgs && o.imgs.length)),
       refs: curRefs.slice()
     };
     const old = videos.find(x => x.id === v.id);
@@ -1183,7 +1205,7 @@
     const eff = pick > 0 && vars[pick - 1] ? vars[pick - 1].prompt : (p.prompt || "");
     const tabs = `<div class="vd-as-tabs"><span class="vd-as-tl">版本</span>
       <button type="button" class="vd-as-tab${pick === 0 ? " on" : ""}" data-astab="0" data-shot="${id}">原始</button>
-      ${vars.map((vr, i) => `<button type="button" class="vd-as-tab${pick === i + 1 ? " on" : ""}" data-astab="${i + 1}" data-shot="${id}" title="${esc(vr.note || "變體 " + (i + 1))}">${i + 1}<span class="x" data-asvdel="${i}" data-shot="${id}" title="刪除此變體">×</span></button>`).join("")}</div>`;
+      ${vars.map((vr, i) => `<button type="button" class="vd-as-tab${pick === i + 1 ? " on" : ""}" data-astab="${i + 1}" data-shot="${id}" title="${esc(vr.note || "變體 " + (i + 1))}">${i + 1}</button>`).join("")}</div>`;
     return `<div class="vd-as-shot" data-shot="${id}">
       <div class="vd-as-h"><b>鏡 ${(p.sb && (+p.sb.ord + 1)) || idx}</b> <span class="vd-as-t">${esc(p.title || "未命名")}</span>${chips}
         <span class="sp" style="flex:1 1 auto"></span>
@@ -1197,6 +1219,7 @@
           <div class="vd-as-vargen">
             <input class="vd-as-mod" data-asmod="${id}" placeholder="要改什麼（例：改成夜晚、加上雨、鏡頭拉近）">
             <button type="button" class="vd-as-b vgen" data-asvargen="${id}">✨ 生成變體</button>
+            ${pick > 0 ? `<button type="button" class="vd-as-b" data-asvdel="${pick - 1}" data-shot="${id}" style="color:var(--danger)">🗑 刪這個變體</button>` : ""}
           </div>
           ${p.notes ? `<p class="vd-note">旁白／備註：${esc(p.notes)}</p>` : ""}
           ${resImg}
@@ -1256,12 +1279,34 @@
       const r = await aiCall(VAR_SYS, "【原始 prompt】\n" + (p.prompt || "") + "\n\n【要修改的方向】\n" + mod + "\n\n" + langLine(), VAR_SCHEMA);
       const np = String(r.prompt || "").trim(); if (!np) throw new Error("AI 沒有回傳 prompt");
       const a = shotAssetOf(v, id); a.variants.push({ note: mod, prompt: np }); a.pick = a.variants.length;
-      asSave(); renderAssets(); toast(`已生成變體 ${a.variants.length}（已切到這個版本）`);
+      asSave();
+      vaultAddVariant(id, { label: "變體 · " + mod.slice(0, 12), prompt: np, note: mod });   // 也存進 Prompt 庫該則的變體
+      renderAssets(); toast(`已生成變體 ${a.variants.length}（已切到這個版本，也存進 Prompt 庫）`);
     } catch (e) { btn.disabled = false; btn.textContent = old; toast("生成失敗：" + e.message); }
   }
+  // 把變體也寫進 Prompt 庫該則記錄的 variants（形狀跟庫裡一致：{id,label,prompt,note}）
+  function vaultAddVariant(recId, variant) {
+    const run = async () => {
+      let arr = await idbGet("data");
+      if (!Array.isArray(arr)) { try { arr = JSON.parse(localStorage.getItem("promptvault.v2")) || []; } catch (e) { arr = []; } }
+      const rec = (arr || []).find(x => x.id === recId); if (!rec) return;
+      rec.variants = Array.isArray(rec.variants) ? rec.variants : [];
+      rec.variants.push({ id: "v_" + uid(), label: variant.label || "變體", prompt: variant.prompt || "", note: variant.note || "" });
+      rec.edited = Date.now();
+      await idbSet("data", arr);
+      try { localStorage.setItem("promptvault.v2", JSON.stringify(arr.map(p => Object.assign({}, p, { imgs: [] })))); localStorage.setItem("promptvault.updated", String(Date.now())); } catch (e) {}
+      prompts = arr;
+    };
+    vaultLock = vaultLock.then(run, run); return vaultLock;
+  }
   $("#vAsBody").addEventListener("click", e => {
-    const vdl = e.target.closest("[data-asvdel]");   // 刪某個變體（在 tab 上的 ✕，要先攔）
-    if (vdl) { e.stopPropagation(); const a = shotAssetOf(asVideo(), vdl.dataset.shot), i = +vdl.dataset.asvdel; a.variants.splice(i, 1); if (a.pick > i) a.pick = Math.max(0, a.pick - 1); asSave(); renderAssets(); return; }
+    const vdl = e.target.closest("[data-asvdel]");   // 刪某個變體（要先攔）
+    if (vdl) {
+      e.stopPropagation();
+      if (!confirm("刪除這個變體？（Prompt 庫裡先前存的那則變體會保留，可到庫裡找回）")) return;
+      const a = shotAssetOf(asVideo(), vdl.dataset.shot), i = +vdl.dataset.asvdel;
+      a.variants.splice(i, 1); if (a.pick > i) a.pick = Math.max(0, a.pick - 1); asSave(); renderAssets(); return;
+    }
     const tab = e.target.closest("[data-astab]");
     if (tab) { shotAssetOf(asVideo(), tab.dataset.shot).pick = +tab.dataset.astab; asSave(); renderAssets(); return; }
     const vg = e.target.closest("[data-asvargen]"); if (vg) { genVariant(vg.dataset.asvargen, vg); return; }
@@ -2353,43 +2398,51 @@
     const sc = shotSchema();
     const cn = ((b && b.chars) || []).map(c => c.name).filter(Boolean);
     const sn = ((b && b.scenes) || []).map(s => s.name).filter(Boolean);
+    const on = ((b && b.objects) || []).map(o => o.name).filter(Boolean);
     const props = sc.properties.shots.items.properties;
     if (cn.length) props.castNames = { type: "ARRAY", items: { type: "STRING", enum: cn } };
     if (sn.length) props.sceneNames = { type: "ARRAY", items: { type: "STRING", enum: sn } };
+    if (on.length) props.objNames = { type: "ARRAY", items: { type: "STRING", enum: on } };
     return sc;
   }
   function bibleAsk(b) {
     const cn = ((b && b.chars) || []).map(c => c.name).filter(Boolean);
     const sn = ((b && b.scenes) || []).map(s => s.name).filter(Boolean);
-    if (!cn.length && !sn.length) return "";   // 沒有固定角色／場景就不必加這段（風格另外處理）
+    const on = ((b && b.objects) || []).map(o => o.name).filter(Boolean);
+    if (!cn.length && !sn.length && !on.length) return "";   // 沒有固定角色／場景／物件就不必加這段
     const lines = [];
     const brief = bibleBrief(b);
     if (brief) lines.push(brief);
     if (cn.length) lines.push("【固定角色清單】castNames 只能從這裡挑：" + cn.join("、"));
     if (sn.length) lines.push("【固定場景清單】sceneNames 只能從這裡挑：" + sn.join("、"));
-    lines.push("每個鏡頭：castNames 填入這一鏡實際出現的角色（沒有就空陣列）、sceneNames 填入場景；prompt 專心寫動作／構圖／鏡頭運動／氛圍，**不要自己重寫角色外型或場景細節**——系統會把上面的固定設定自動接到每一鏡的最前面，確保跨鏡一致。");
+    if (on.length) lines.push("【固定物件清單】objNames 只能從這裡挑：" + on.join("、"));
+    lines.push("每個鏡頭：castNames／sceneNames／objNames 分別填入這一鏡實際出現的角色／場景／物件（沒有就空陣列）；prompt 專心寫動作／構圖／鏡頭運動／氛圍，**不要自己重寫角色外型、場景或物件細節**——系統會把上面的固定設定自動接到每一鏡的最前面，確保跨鏡一致。");
     return lines.join("\n\n");
   }
-  // 判斷這一鏡帶入哪些固定角色／場景：優先用 AI 標的 castNames／sceneNames，沒有就用名字在文字裡出現與否；
+  // 判斷這一鏡帶入哪些固定角色／場景／物件：優先用 AI 標的名字，沒有就用名字在文字裡出現與否；
   // 只有一位主角時，沒標到也預設整片都出現（單主角系列的常見情況）。
   function bibleHits(shot, b) {
     const cast = Array.isArray(shot.castNames) ? shot.castNames : [];
     const scn = Array.isArray(shot.sceneNames) ? shot.sceneNames : [];
+    const obn = Array.isArray(shot.objNames) ? shot.objNames : [];
     const hay = ((shot.prompt || "") + " " + (shot.narration || "") + " " + (shot.title || "")).toLowerCase();
     const hit = (name, tagged) => tagged.includes(name) || (name && hay.includes(name.toLowerCase()));
     let chars = ((b && b.chars) || []).filter(c => c.name && hit(c.name, cast));
     if (!chars.length && ((b && b.chars) || []).length === 1) chars = b.chars.slice();
     const scenes = ((b && b.scenes) || []).filter(s => s.name && hit(s.name, scn));
-    return { chars, scenes };
+    const objects = ((b && b.objects) || []).filter(o => o.name && hit(o.name, obn));
+    return { chars, scenes, objects };
   }
   function composeShotPrompt(shot, b) {
     if (!b) return String(shot.prompt || "").trim();
-    const { chars, scenes } = bibleHits(shot, b);
+    const { chars, scenes, objects } = bibleHits(shot, b);
     const zh = promptLang() !== "en";
-    const L = zh ? { c: "角色：", s: "場景：", st: "風格：" } : { c: "Characters: ", s: "Scene: ", st: "Style: " };
+    const L = zh ? { c: "角色：", s: "場景：", o: "物件：", st: "風格：" } : { c: "Characters: ", s: "Scene: ", o: "Objects: ", st: "Style: " };
+    const named = arr => arr.map(x => x.desc ? `${x.name}（${x.desc}）` : x.name).join("; ");
     const bits = [];
-    if (chars.length) bits.push(L.c + chars.map(c => c.desc ? `${c.name}（${c.desc}）` : c.name).join("; "));
-    if (scenes.length) bits.push(L.s + scenes.map(s => s.desc ? `${s.name}（${s.desc}）` : s.name).join("; "));
+    if (chars.length) bits.push(L.c + named(chars));
+    if (scenes.length) bits.push(L.s + named(scenes));
+    if (objects.length) bits.push(L.o + named(objects));
     if (b.style) bits.push(L.st + b.style);
     const prefix = bits.length ? bits.join(zh ? "。" : ". ") + (zh ? "。" : ". ") : "";
     return prefix + String(shot.prompt || "").trim();
@@ -2398,7 +2451,7 @@
   function editorProbe() {
     return {
       projectId: curProjectId, series: $("#vfSeries").value.trim(),
-      style: $("#vfStyle").value.trim(), chars: curChars, scenes: curScenes, refs: curRefs
+      style: $("#vfStyle").value.trim(), chars: curChars, scenes: curScenes, objects: curObjects, refs: curRefs
     };
   }
   function curEditorBible() { return effBible(editorProbe()); }
@@ -3198,6 +3251,24 @@
   /* =========================================================================
      製作聖經 — 人物／場景清單控制項（編輯器與企劃視窗共用同一套渲染）
      ========================================================================= */
+  // 人物／場景／物件清單控制項：每一項可名稱＋描述＋多張參考圖（可拖曳加入）
+  let nlImgTarget = null;
+  const nlFile = (() => {
+    const i = document.createElement("input"); i.type = "file"; i.accept = "image/*"; i.multiple = true; i.style.display = "none";
+    document.body.appendChild(i);
+    i.addEventListener("change", async e => {
+      const files = [...e.target.files]; e.target.value = "";
+      if (!nlImgTarget) return;
+      const it = nlImgTarget.get()[nlImgTarget.idx];
+      if (it) { await addImgsTo(it, files); nlImgTarget.render(); nlImgTarget.touched(); }
+    });
+    return i;
+  })();
+  async function addImgsTo(item, files) {
+    item.imgs = item.imgs || []; let n = 0;
+    for (const f of files) { if (!/^image\//.test(f.type)) continue; try { item.imgs.push(await downscale(f, 1024)); n++; } catch (e) {} }
+    return n;
+  }
   function namedListCtl(sel, get, ph, onChange) {
     const el = $(sel);
     const touched = () => { if (onChange) onChange(); };
@@ -3205,9 +3276,15 @@
       const arr = get();
       el.innerHTML = arr.map((c, i) => `
         <div class="vd-nl-row" data-i="${i}">
-          <input class="nl-name" data-k="name" value="${esc(c.name || "")}" placeholder="名稱">
-          <input class="nl-desc" data-k="desc" value="${esc(c.desc || "")}" placeholder="${esc(ph)}">
-          <button type="button" class="del" data-del="${i}" title="刪除">✕</button>
+          <div class="vd-nl-top">
+            <input class="nl-name" data-k="name" value="${esc(c.name || "")}" placeholder="名稱">
+            <input class="nl-desc" data-k="desc" value="${esc(c.desc || "")}" placeholder="${esc(ph)}">
+            <button type="button" class="del" data-del="${i}" title="刪除這一項">✕</button>
+          </div>
+          <div class="vd-nl-imgs" data-drop="${i}" title="參考圖（可拖曳圖片進來）">
+            ${(c.imgs || []).map((src, j) => `<div class="vd-thumb-item"><img src="${src}" alt=""><button type="button" class="x" data-imgdel="${i}" data-j="${j}" title="移除">×</button></div>`).join("")}
+            <button type="button" class="vd-nl-imgadd" data-imgadd="${i}" title="上傳參考圖（也可以拖曳）">＋圖</button>
+          </div>
         </div>`).join("") || `<p class="hint" style="margin:0">還沒有項目 — 按下面新增。</p>`;
     }
     el.addEventListener("input", e => {
@@ -3215,10 +3292,27 @@
       const k = e.target.dataset.k; if (k) { get()[+row.dataset.i][k] = e.target.value; touched(); }
     });
     el.addEventListener("click", e => {
-      const d = e.target.closest("[data-del]"); if (!d) return;
-      get().splice(+d.dataset.del, 1); render(); touched();
+      const idj = e.target.closest("[data-imgdel]");
+      if (idj) { const it = get()[+idj.dataset.imgdel]; (it.imgs || []).splice(+idj.dataset.j, 1); render(); touched(); return; }
+      const ia = e.target.closest("[data-imgadd]");
+      if (ia) { nlImgTarget = { get, idx: +ia.dataset.imgadd, render, touched }; nlFile.click(); return; }
+      const d = e.target.closest("[data-del]");
+      if (d) { get().splice(+d.dataset.del, 1); render(); touched(); return; }
     });
-    return { render, add() { get().push({ name: "", desc: "" }); render(); touched(); } };
+    el.addEventListener("dragover", e => {
+      const dz = e.target.closest("[data-drop]"); if (!dz) return;
+      if (![...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files")) return;
+      e.preventDefault(); dz.classList.add("drag-over");
+    });
+    el.addEventListener("dragleave", e => { const dz = e.target.closest("[data-drop]"); if (dz && !dz.contains(e.relatedTarget)) dz.classList.remove("drag-over"); });
+    el.addEventListener("drop", async e => {
+      const dz = e.target.closest("[data-drop]"); if (!dz) return;
+      e.preventDefault(); dz.classList.remove("drag-over");
+      const it = get()[+dz.dataset.drop]; if (!it) return;
+      const n = await addImgsTo(it, [...(e.dataTransfer.files || [])]);
+      if (n) { render(); touched(); }
+    });
+    return { render, add() { get().push({ name: "", desc: "", imgs: [] }); render(); touched(); } };
   }
   function refListCtl(listSel, fileSel, get, onChange) {
     const el = $(listSel);
@@ -3246,13 +3340,15 @@
   function updBibleCount() { $("#vBibleCount").textContent = bibleCount(); }
   const clCharEd = namedListCtl("#vCharList", () => curChars, "外型、服裝、特徵…", updBibleCount);
   const clSceneEd = namedListCtl("#vSceneList", () => curScenes, "地點、氛圍、時間…", updBibleCount);
+  const clObjEd = namedListCtl("#vObjList", () => curObjects, "車輛、道具、外型…", updBibleCount);
   const refEd = refListCtl("#vRefList", "#vRefFile", () => curRefs, updBibleCount);
   $("#vCharAdd").addEventListener("click", () => clCharEd.add());
   $("#vSceneAdd").addEventListener("click", () => clSceneEd.add());
+  $("#vObjAdd").addEventListener("click", () => clObjEd.add());
   $("#vRefAdd").addEventListener("click", () => $("#vRefFile").click());
   function bibleCount() {
-    return curChars.filter(c => c.name || c.desc).length + curScenes.filter(s => s.name || s.desc).length
-      + curRefs.length + ($("#vfStyle").value.trim() ? 1 : 0);
+    const cnt = a => a.filter(x => x.name || x.desc || (x.imgs && x.imgs.length)).length;
+    return cnt(curChars) + cnt(curScenes) + cnt(curObjects) + curRefs.length + ($("#vfStyle").value.trim() ? 1 : 0);
   }
   function renderBibleProj() {
     const v = editingId ? videos.find(x => x.id === editingId) : null;
@@ -3268,6 +3364,7 @@
           ${p.style ? `<span class="vd-chip">🎨 有整體風格</span>` : ""}
           <span class="vd-chip">🎭 ${p.chars.length} 人物</span>
           <span class="vd-chip">🏞 ${p.scenes.length} 場景</span>
+          <span class="vd-chip">🚗 ${(p.objects || []).length} 物件</span>
           <span class="vd-chip">🖼 ${p.refs.length} 參考圖</span></div>`;
       $("#vfStyle").placeholder = p.style ? p.style.slice(0, 60) : "（沿用企劃風格）";
     } else {
@@ -3289,13 +3386,14 @@
   /* =========================================================================
      AI 依大綱設計人物造型／服裝／場景／風格 —— 只在使用者按下才跑，不進任何自動流程
      ========================================================================= */
-  const DESIGN_SYS = "你是影片美術指導與角色設計師。根據使用者給的大綱與劇情，設計這支影片會登場的人物造型與主要場景，並定調整體視覺風格。回傳 JSON：style＝整體視覺風格（依指定的描述語言，供生成模型用）；chars＝登場人物陣列，每個 name 給簡短的繁體中文名稱或代稱、desc 給可直接放進生成提示詞的視覺描述（外型、年齡、髮型、服裝、氣質等具體關鍵詞，精簡一行，依指定的描述語言）；scenes＝主要場景陣列，name 繁中、desc 依指定描述語言的視覺描述（地點、氛圍、光線、時間）。只設計大綱／劇情裡實際會出現的，不要硬湊、不要超過必要數量；使用者已經有的角色／場景（會附在下面）不要重複。只回 JSON，不要多餘文字。";
+  const DESIGN_SYS = "你是影片美術指導與角色設計師。根據使用者給的大綱與劇情，設計這支影片會登場的人物造型、主要場景、以及會出現的重要物件（車輛、道具等），並定調整體視覺風格。回傳 JSON：style＝整體視覺風格（依指定的描述語言，供生成模型用）；chars＝登場人物陣列，每個 name 給簡短的繁體中文名稱或代稱、desc 給可直接放進生成提示詞的視覺描述（外型、年齡、髮型、服裝、氣質等具體關鍵詞，精簡一行，依指定的描述語言）；scenes＝主要場景陣列，name 繁中、desc 依指定描述語言的視覺描述（地點、氛圍、光線、時間）；objects＝重要物件陣列（車輛、道具、標誌物等），name 繁中、desc 依指定描述語言的視覺描述（外型、顏色、材質、特徵）。只設計大綱／劇情裡實際會出現的，不要硬湊、不要超過必要數量；使用者已經有的角色／場景／物件（會附在下面）不要重複。只回 JSON，不要多餘文字。";
   const DESIGN_SCHEMA = {
     type: "OBJECT",
     properties: {
       style: { type: "STRING" },
       chars: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } }, required: ["name", "desc"] } },
-      scenes: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } }, required: ["name", "desc"] } }
+      scenes: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } }, required: ["name", "desc"] } },
+      objects: { type: "ARRAY", items: { type: "OBJECT", properties: { name: { type: "STRING" }, desc: { type: "STRING" } }, required: ["name", "desc"] } }
     },
     required: ["chars"]
   };
@@ -3309,8 +3407,9 @@
       $("#vfScript").value.trim() ? "【腳本／劇情】\n" + $("#vfScript").value.trim().slice(0, 4000) : "",
       b.chars.length ? "【已有的角色（不要重複）】" + b.chars.map(c => c.name).filter(Boolean).join("、") : "",
       b.scenes.length ? "【已有的場景（不要重複）】" + b.scenes.map(s => s.name).filter(Boolean).join("、") : "",
+      (b.objects || []).length ? "【已有的物件（不要重複）】" + b.objects.map(o => o.name).filter(Boolean).join("、") : "",
       b.style ? "【已定的整體風格】" + b.style : "",
-      "【描述語言】" + (promptLang() === "en" ? "chars／scenes 的 desc、style 都用英文視覺關鍵詞。" : "chars／scenes 的 desc、style 都用繁體中文視覺描述（可保留必要的英文專有名詞）。")
+      "【描述語言】" + (promptLang() === "en" ? "chars／scenes／objects 的 desc、style 都用英文視覺關鍵詞。" : "chars／scenes／objects 的 desc、style 都用繁體中文視覺描述（可保留必要的英文專有名詞）。")
     ].filter(Boolean).join("\n\n");
   }
   function openDesign() {
@@ -3347,7 +3446,7 @@
     aiCall(DESIGN_SYS, designAsk(), DESIGN_SCHEMA).then(r => {
       stop(); $("#vDesignGo").disabled = false;
       const clean = arr => (Array.isArray(arr) ? arr : []).map(x => ({ name: String(x.name || "").trim(), desc: String(x.desc || "").trim() })).filter(x => x.name || x.desc);
-      designRes = { style: String(r.style || "").trim(), chars: clean(r.chars), scenes: clean(r.scenes) };
+      designRes = { style: String(r.style || "").trim(), chars: clean(r.chars), scenes: clean(r.scenes), objects: clean(r.objects) };
       renderDesign();
     }).catch(e => { stop(); $("#vDesignGo").disabled = false; $("#vDesignStatus").textContent = "失敗：" + e.message; toast("設計失敗：" + e.message); });
   });
@@ -3355,11 +3454,13 @@
     if (!designRes) { $("#vDesignResult").innerHTML = ""; $("#vDesignFoot").hidden = true; return; }
     const styleRow = designRes.style
       ? `<div class="vd-dz-sec"><label class="vd-dz-row"><input type="checkbox" data-dz="style" checked><span class="dzn">🎨 整體風格</span><span class="dzd">${esc(designRes.style)}</span></label></div>` : "";
-    const list = (arr, dz, ico) => arr.map((c, i) => `<label class="vd-dz-row"><input type="checkbox" data-dz="${dz}" data-i="${i}" checked><span class="dzn">${ico} ${esc(c.name || (dz === "char" ? "角色" : "場景"))}</span><span class="dzd">${esc(c.desc)}</span></label>`).join("");
+    const dzName = dz => dz === "char" ? "角色" : (dz === "scene" ? "場景" : "物件");
+    const list = (arr, dz, ico) => arr.map((c, i) => `<label class="vd-dz-row"><input type="checkbox" data-dz="${dz}" data-i="${i}" checked><span class="dzn">${ico} ${esc(c.name || dzName(dz))}</span><span class="dzd">${esc(c.desc)}</span></label>`).join("");
     const charSec = designRes.chars.length ? `<p class="vd-dz-h">人物造型（${designRes.chars.length}）</p><div class="vd-dz-sec">${list(designRes.chars, "char", "🎭")}</div>` : "";
     const sceneSec = designRes.scenes.length ? `<p class="vd-dz-h">場景（${designRes.scenes.length}）</p><div class="vd-dz-sec">${list(designRes.scenes, "scene", "🏞")}</div>` : "";
-    $("#vDesignResult").innerHTML = (styleRow + charSec + sceneSec) || `<p class="vd-note">AI 這次沒有設計出內容，換個大綱或腳本再試。</p>`;
-    $("#vDesignFoot").hidden = !(designRes.style || designRes.chars.length || designRes.scenes.length);
+    const objSec = (designRes.objects || []).length ? `<p class="vd-dz-h">物件（${designRes.objects.length}）</p><div class="vd-dz-sec">${list(designRes.objects, "obj", "🚗")}</div>` : "";
+    $("#vDesignResult").innerHTML = (styleRow + charSec + sceneSec + objSec) || `<p class="vd-note">AI 這次沒有設計出內容，換個大綱或腳本再試。</p>`;
+    $("#vDesignFoot").hidden = !(designRes.style || designRes.chars.length || designRes.scenes.length || (designRes.objects || []).length);
   }
   $("#vDesignApply").addEventListener("click", () => {
     if (!designRes) return;
@@ -3368,37 +3469,39 @@
     const styleOn = !!(styleEl && styleEl.checked && designRes.style);
     const chars = on("char").map(x => designRes.chars[+x.dataset.i]);
     const scenes = on("scene").map(x => designRes.scenes[+x.dataset.i]);
-    if (!styleOn && !chars.length && !scenes.length) { toast("沒有勾選任何項目"); return; }
+    const objects = on("obj").map(x => (designRes.objects || [])[+x.dataset.i]);
+    if (!styleOn && !chars.length && !scenes.length && !objects.length) { toast("沒有勾選任何項目"); return; }
+    const push = (dst, src) => src.forEach(c => { if (c && !dst.some(x => x.name === c.name)) { dst.push({ name: c.name, desc: c.desc, imgs: [] }); } });
     if (designTarget === "proj") {
       const p = projOfVideo(editorProbe());
       if (!p) { toast("尚未連結企劃，已改成加到這一集"); designTarget = "ep"; }
       else {
-        let n = 0;
-        chars.forEach(c => { if (!p.chars.some(x => x.name === c.name)) { p.chars.push({ name: c.name, desc: c.desc, ref: "" }); n++; } });
-        scenes.forEach(s => { if (!p.scenes.some(x => x.name === s.name)) { p.scenes.push({ name: s.name, desc: s.desc }); n++; } });
-        if (styleOn) { p.style = designRes.style; n++; }
+        const before = p.chars.length + p.scenes.length + (p.objects || []).length + (p.style ? 1 : 0);
+        push(p.chars, chars); push(p.scenes, scenes); p.objects = p.objects || []; push(p.objects, objects);
+        if (styleOn) p.style = designRes.style;
+        const n = p.chars.length + p.scenes.length + p.objects.length + (p.style ? 1 : 0) - before + (styleOn ? 0 : 0);
         p.edited = Date.now(); saveProjects(); renderBibleProj();
-        toast(`已加到企劃「${p.name}」（${n} 項）`); closeDesign(); return;
+        toast(`已加到企劃「${p.name}」`); closeDesign(); return;
       }
     }
     // 加到這一集（本集追加）：只改編輯器狀態，隨影片一起存
-    let n = 0;
-    chars.forEach(c => { if (!curChars.some(x => x.name === c.name)) { curChars.push({ name: c.name, desc: c.desc }); n++; } });
-    scenes.forEach(s => { if (!curScenes.some(x => x.name === s.name)) { curScenes.push({ name: s.name, desc: s.desc }); n++; } });
-    if (styleOn) { $("#vfStyle").value = designRes.style; n++; }
-    clCharEd.render(); clSceneEd.render(); updBibleCount(); renderBibleProj();
-    toast(`已加到這一集（${n} 項）— 記得按儲存`); closeDesign();
+    push(curChars, chars); push(curScenes, scenes); push(curObjects, objects);
+    if (styleOn) $("#vfStyle").value = designRes.style;
+    clCharEd.render(); clSceneEd.render(); clObjEd.render(); updBibleCount(); renderBibleProj();
+    toast("已加到這一集 — 記得按儲存"); closeDesign();
   });
 
   /* =========================================================================
      企劃視窗（新增／編輯系列共用設定＋一次建立多集）
      ========================================================================= */
-  let projEditingId = null, projChars = [], projScenes = [], projRefs = [], projLinkVideoId = null, projEps = [];
+  let projEditingId = null, projChars = [], projScenes = [], projObjects = [], projRefs = [], projLinkVideoId = null, projEps = [];
   const clCharPj = namedListCtl("#vpCharList", () => projChars, "外型、服裝、特徵…");
   const clScenePj = namedListCtl("#vpSceneList", () => projScenes, "地點、氛圍、時間…");
+  const clObjPj = namedListCtl("#vpObjList", () => projObjects, "車輛、道具、外型…");
   const refPj = refListCtl("#vpRefList", "#vpRefFile", () => projRefs);
   $("#vpCharAdd").addEventListener("click", () => clCharPj.add());
   $("#vpSceneAdd").addEventListener("click", () => clScenePj.add());
+  $("#vpObjAdd").addEventListener("click", () => clObjPj.add());
   $("#vpRefAdd").addEventListener("click", () => $("#vpRefFile").click());
 
   function blankEp(ep) { return { title: "", ep: ep || "", outline: "", script: "", split: false }; }
@@ -3447,10 +3550,11 @@
     $("#vpKind").value = project ? project.kind : (opts.kind || "long");
     $("#vpStyle").value = project ? project.style : "";
     $("#vpNotes").value = project ? project.notes : "";
-    projChars = project ? project.chars.map(c => ({ ...c })) : [];
-    projScenes = project ? project.scenes.map(s => ({ ...s })) : [];
+    projChars = project ? project.chars.map(c => ({ ...c, imgs: (c.imgs || []).slice() })) : [];
+    projScenes = project ? project.scenes.map(s => ({ ...s, imgs: (s.imgs || []).slice() })) : [];
+    projObjects = project ? (project.objects || []).map(o => ({ ...o, imgs: (o.imgs || []).slice() })) : [];
     projRefs = project ? project.refs.slice() : [];
-    clCharPj.render(); clScenePj.render(); refPj.render();
+    clCharPj.render(); clScenePj.render(); clObjPj.render(); refPj.render();
     const existing = project ? videos.filter(v => v.projectId === project.id || (!v.projectId && v.series === project.name)).length : 0;
     $("#vpEpExisting").textContent = project ? `此企劃已有 ${existing} 集${existing ? "（下面新增的是額外的集）" : ""}` : "";
     $("#vpEpTitle").textContent = project ? "新增更多集數" : "集數清單";
@@ -3473,8 +3577,9 @@
       name: $("#vpName").value.trim(),
       kind: $("#vpKind").value,
       style: $("#vpStyle").value.trim(),
-      chars: projChars.filter(c => c.name.trim() || c.desc.trim()),
-      scenes: projScenes.filter(s => s.name.trim() || s.desc.trim()),
+      chars: projChars.filter(c => c.name.trim() || c.desc.trim() || (c.imgs && c.imgs.length)),
+      scenes: projScenes.filter(s => s.name.trim() || s.desc.trim() || (s.imgs && s.imgs.length)),
+      objects: projObjects.filter(o => o.name.trim() || o.desc.trim() || (o.imgs && o.imgs.length)),
       refs: projRefs.slice(),
       notes: $("#vpNotes").value.trim()
     });
