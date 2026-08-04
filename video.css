@@ -517,3 +517,5 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 .vd-rule-text { width: 100%; font: inherit; font-size: 12.5px; line-height: 1.55; color: var(--ink-2);
   border: 1px solid var(--line); border-radius: 8px; background: var(--paper); padding: 7px 9px; resize: vertical; }
 .vd-rule-text:focus { outline: none; border-color: var(--accent, var(--ink-3)); }
+#vTplText { width: 100%; font: inherit; font-size: 12.5px; line-height: 1.6; resize: vertical; }
+#vSetTplBlock :disabled { opacity: .45; cursor: not-allowed; }

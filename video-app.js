@@ -2505,6 +2505,7 @@
   // 預設拆鏡規則（恢復預設會還原成這一份）。label＝選單顯示名；text＝實際送給 AI 的規則內容。
   const SCR_RULES_DEF = [
     { id: "cam",     label: "鏡頭語言（基本）",       text: "prompt 寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍。" },
+    { id: "cine",    label: "電影感與文學筆觸（避免生硬）", text: "prompt 要像電影分鏡描述加上文學場景，用連貫、具體、有畫面的句子把鏡頭寫成一段能直接想像的畫面，不要生硬地堆疊關鍵字或寫成乾巴巴的條列；多用具體名詞與感官動詞（滑落、滲出、搖曳、蜷縮、繃緊、垂落），少用空泛形容詞（很恐怖、很漂亮）；每一鏡都要營造明確的情緒與氛圍，讓人讀完腦中立刻浮現這個畫面。" },
     { id: "novel",   label: "動作與情緒細節（小說式描寫）", text: "像小說場景那樣把細節寫飽滿——角色的具體動作與細微肢體語言（手勢、視線、步態、呼吸、表情的細微變化）、當下流露的情緒與心理張力（用看得見的表情、姿態、力度去呈現，而不是只寫「難過」「生氣」這種抽象詞）、以及場景的環境與感官氛圍（時間、天氣、光影變化、材質質感、空氣感，以及飄落物／塵埃／風等動態元素）都要帶進畫面，讓每一鏡有臨場感與情緒。" },
     { id: "space",   label: "物件位置與空間邏輯",     text: "明確標出每個主體與物件在畫面中的相對位置與空間關係（左／右／畫面中央、前景／中景／背景、誰在誰的哪一側、彼此的距離與朝向），位置與動線要符合現實邏輯與物理常識（例如乘客從公車右側車門上下車、駕駛坐左前方、影子方向與光源一致、物體受重力合理擺放、車輛行進方向與車道一致），同一場景跨鏡之間的空間關係也要保持一致、不要無故左右翻轉。" },
     { id: "consist", label: "跨鏡一致性",             text: "同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格。" },
@@ -2521,13 +2522,49 @@
   }
   let scrRuleList = loadScrRules();
   function persistScrRules() { try { localStorage.setItem(SCR_RULES_KEY, JSON.stringify(scrRuleList)); } catch (e) {} }
-  // 依目前啟用的規則組出完整系統提示詞
+
+  /* ---------- 拆鏡範本（風格套組，與上面的「拆鏡規則」是分開的兩套） ---------- */
+  // 每個範本＝一整套「風格設定 ＋ few-shot 示範」，套用哪個範本，AI 就往那個風格與筆觸寫。
+  const SCR_TPL_DEF = [
+    {
+      id: "jhorror", name: "古典日式恐怖民俗",
+      text: `【風格設定】古典日式恐怖民俗風格，昭和以前的鄉野傳說感、神社禁忌、山村封閉感、儀式性與宿命感。場景：被濃霧包圍的偏遠山村，潮濕沉重的夜、不斷落下的細雨、長滿青苔的石階、年久失修的舊木造神社、發出微弱昏黃光的紙燈籠、積著黑水的稻田，遠處傳來風鈴、木魚、犬吠與若有若無的低語。主角：一名年輕女子，身形纖細，穿樸素深色和服，黑髮長直略顯凌亂，臉色蒼白，神情壓抑而警覺，手中緊握一枚褪色護身符，是被迫踏入這場古老儀式的外來者。配角：沉默的老巫女，穿黑白層疊巫女服，站在神社陰影邊緣，目光空洞，像早已知曉結局。整體要有電影感、壓迫感、濃厚民俗怪談氣氛，安靜卻不安，像一則將要被說完的禁忌傳說。
+
+【few-shot 示範：敘述 → 理想鏡頭 prompt】
+敘述：年輕女子站在村口的鳥居前，雨水從朱紅木柱滑落，村民早已熄燈，只有窗紙後浮出幾張無聲的臉。
+理想 prompt：電影感中景。濃霧籠罩的偏遠山村入口，一座斑駁褪色的朱紅色鳥居矗立於畫面右側，細雨順著木柱緩緩滑落，在燈下拉出細長如血痕的水線；鳥居正下方站著一名身形纖細、黑髮長直略顯凌亂的年輕女子，穿樸素深色和服，臉色蒼白，雙手在胸前緊握一枚褪色護身符，肩膀微微繃緊，視線警覺地望向村內深處。她左後方的遠景是低矮的木造屋舍，門窗緊閉、燈火全熄，只有幾張蒼白無聲的臉緊貼在窗紙後方，模糊而靜止。潮濕沉重的夜色、昏黃紙燈籠的微光、地面積水的冷反光；壓迫、安靜、不祥的民俗怪談氛圍，昭和以前鄉野傳說質感，35mm 電影攝影、淺景深、低調冷色調。
+
+敘述：她在枯井旁俯身探看，井壁倒映出一張貼在她身後、無聲微笑的蒼白臉孔，而現實中她背後空無一人。
+理想 prompt：電影感過肩俯視鏡頭。畫面下半部是一口青苔遍布的廢棄枯井，井口木框腐朽濕黑；年輕女子在畫面中央偏左俯身向井內探看，深色和服的衣袖垂落，黑髮滑向臉頰遮住半邊蒼白側臉，右手仍緊握護身符。井內是深不見底、彷彿會吞掉視線的濃黑，靠近井壁的水面倒映出一張浮腫濕透的陌生臉孔，正貼在她右後方無聲地咧嘴微笑，而她背後的現實空間空無一人。冷冽的藍灰色調，微弱昏黃的燈籠光自畫面左上斜射，雨絲在光束中清晰可見；極度壓迫、脊背發涼的驚悚瞬間，寂靜到能聽見水滴回聲。`
+    }
+  ];
+  const SCR_TPL_KEY = "videodesk.scrtpls";
+  function loadScrTpls() {
+    try {
+      const j = JSON.parse(localStorage.getItem(SCR_TPL_KEY) || "null");
+      if (j && Array.isArray(j.list) && j.list.length) {
+        const list = j.list.map(t => ({ id: t.id || uid(), name: String(t.name || "範本").slice(0, 40), text: String(t.text || "") }));
+        const active = list.some(t => t.id === j.active) ? j.active : "";
+        return { active, list };
+      }
+    } catch (e) {}
+    return { active: SCR_TPL_DEF[0].id, list: SCR_TPL_DEF.map(t => ({ ...t })) };
+  }
+  let scrTpls = loadScrTpls();
+  function persistScrTpls() { try { localStorage.setItem(SCR_TPL_KEY, JSON.stringify(scrTpls)); } catch (e) {} }
+  function activeTpl() { return scrTpls.list.find(t => t.id === scrTpls.active) || null; }
+
+  // 系統提示詞＝固定底稿 ＋ 拆鏡規則（怎麼寫得好） ＋ 拆鏡範本（寫成什麼風格），兩套分開附上、不混在一起
   function scrSys() {
     const on = scrRuleList.filter(r => r.on && r.text.trim());
-    const body = on.length
+    const rules = on.length
       ? "\n\n【提示詞寫作規則】每個鏡頭的 prompt 都必須全部遵守：\n" + on.map((r, i) => `${i + 1}. ${r.text.trim()}`).join("\n")
       : "";
-    return SCR_SYS_BASE + body;
+    const t = activeTpl();
+    const tpl = (t && t.text.trim())
+      ? "\n\n【拆鏡範本：" + t.name + "】這支影片套用以下風格套組。讓每一鏡 prompt 的筆觸、具體度與氛圍都達到示範的水準——學它的寫法與風格，內容仍依實際腳本，不要照抄示範的文字：\n" + t.text.trim()
+      : "";
+    return SCR_SYS_BASE + rules + tpl;
   }
   let scrShots = [], scrMeta = null, scrJob = null;
   function openScriptSplit() {
@@ -3225,6 +3262,49 @@
     scrRuleList = SCR_RULES_DEF.map(r => ({ ...r, on: true }));
     persistScrRules(); renderScrRules(); toast("已恢復預設拆鏡規則");
   });
+
+  /* ---------- 拆鏡範本管理（設定選單，與規則分開） ---------- */
+  function renderTpls() {
+    const sel = $("#vTplActive"); if (!sel) return;
+    sel.innerHTML = `<option value="">（不套用範本）</option>` +
+      scrTpls.list.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join("");
+    sel.value = scrTpls.active || "";
+    const t = activeTpl();
+    $("#vTplName").value = t ? t.name : "";
+    $("#vTplText").value = t ? t.text : "";
+    ["#vTplName", "#vTplText", "#vTplDup", "#vTplDel"].forEach(s => { $(s).disabled = !t; });
+    $("#vTplState").textContent = t ? "套用：" + t.name : "未套用";
+  }
+  $("#vTplActive").addEventListener("change", e => { scrTpls.active = e.target.value || ""; persistScrTpls(); renderTpls(); });
+  $("#vTplName").addEventListener("input", e => {
+    const t = activeTpl(); if (!t) return;
+    t.name = e.target.value.slice(0, 40); persistScrTpls();
+    const opt = $("#vTplActive").querySelector(`option[value="${t.id}"]`); if (opt) opt.textContent = t.name;
+    $("#vTplState").textContent = "套用：" + t.name;
+  });
+  $("#vTplText").addEventListener("input", e => { const t = activeTpl(); if (t) { t.text = e.target.value; persistScrTpls(); } });
+  $("#vTplAdd").addEventListener("click", () => {
+    const t = { id: uid(), name: "新範本", text: "" };
+    scrTpls.list.push(t); scrTpls.active = t.id; persistScrTpls(); renderTpls();
+    setTimeout(() => $("#vTplText").focus(), 30);
+  });
+  $("#vTplDup").addEventListener("click", () => {
+    const t = activeTpl(); if (!t) return;
+    const c = { id: uid(), name: (t.name + " 複製").slice(0, 40), text: t.text };
+    scrTpls.list.push(c); scrTpls.active = c.id; persistScrTpls(); renderTpls();
+  });
+  $("#vTplDel").addEventListener("click", () => {
+    const t = activeTpl(); if (!t) return;
+    if (!confirm(`刪除範本「${t.name}」？`)) return;
+    scrTpls.list = scrTpls.list.filter(x => x.id !== t.id);
+    scrTpls.active = scrTpls.list[0] ? scrTpls.list[0].id : "";
+    persistScrTpls(); renderTpls();
+  });
+  $("#vTplReset").addEventListener("click", () => {
+    if (!confirm("恢復成內建的預設範本？你新增或修改過的範本會被覆蓋。")) return;
+    scrTpls = { active: SCR_TPL_DEF[0].id, list: SCR_TPL_DEF.map(t => ({ ...t })) };
+    persistScrTpls(); renderTpls(); toast("已恢復預設拆鏡範本");
+  });
   function saveSettings() {
     setCfg({
       channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
@@ -3244,6 +3324,7 @@
     cloudInfo();
     loadAiFields();
     renderScrRules();
+    renderTpls();
     // 預設全部收起來；被叫來填金鑰時就只把 AI 那一段打開
     $$("#vSetOv .block").forEach(b => b.classList.toggle("closed", focusAi ? b.id !== "vSetAiBlock" : false));
     $("#vSetOv").classList.add("show");
