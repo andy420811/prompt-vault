@@ -99,6 +99,8 @@
   function setCfg(o) { try { localStorage.setItem(KEY_CFG, JSON.stringify(Object.assign(cfg(), o))); } catch (e) {} }
   // 系統生成的 prompt 用哪個語言（預設中文；可在設定改英文）
   const promptLang = () => cfg().promptLang === "en" ? "en" : "zh";
+  // 設定（角色/場景/物件/風格）在每一鏡 prompt 裡的擺法：ref＝設定優先（預設，放動作前面），action＝動作優先（設定當參考放後面）
+  const bibleMode = () => cfg().bibleMode === "action" ? "action" : "ref";
   const langLine = () => promptLang() === "en"
     ? "【prompt 語言】所有 prompt 一律用英文書寫。"
     : "【prompt 語言】所有 prompt 一律用繁體中文書寫（給中文生成模型用），保留必要的英文專有名詞即可。";
@@ -2392,8 +2394,9 @@
       required: ["shots"]
     };
   }
-  /* 企劃製作聖經 → 拆分鏡：讓每一鏡把「該鏡出現的角色＋場景＋整體風格」的固定設定接到 prompt 最前面，
-     這樣送去生成時角色外型／場景／色調跨鏡一致。castNames／sceneNames 由 AI 標（只能挑清單裡的名字）。 */
+  /* 企劃製作聖經 → 拆分鏡：讓每一鏡把「該鏡出現的角色＋場景＋整體風格」的固定設定接到 prompt（預設動作優先、
+     設定當一致性參考放後面；可在設定切成設定優先），這樣送去生成時角色外型／場景／色調跨鏡一致。
+     castNames／sceneNames 由 AI 標（只能挑清單裡的名字）。 */
   function shotSchemaFor(b) {
     const sc = shotSchema();
     const cn = ((b && b.chars) || []).map(c => c.name).filter(Boolean);
@@ -2416,7 +2419,7 @@
     if (cn.length) lines.push("【固定角色清單】castNames 只能從這裡挑：" + cn.join("、"));
     if (sn.length) lines.push("【固定場景清單】sceneNames 只能從這裡挑：" + sn.join("、"));
     if (on.length) lines.push("【固定物件清單】objNames 只能從這裡挑：" + on.join("、"));
-    lines.push("每個鏡頭：castNames／sceneNames／objNames 分別填入這一鏡實際出現的角色／場景／物件（沒有就空陣列）；prompt 依上面的「提示詞寫作規則」寫這一鏡的動作、情緒、空間與畫面，但**不要自己重寫角色外型、場景或物件的固定外觀細節**——那些系統會把上面的固定設定自動接到每一鏡的最前面，確保跨鏡一致，你只寫「他們在這一鏡做什麼、情緒如何、環境當下的樣子」。");
+    lines.push("每個鏡頭：castNames／sceneNames／objNames 分別填入這一鏡實際出現的角色／場景／物件（沒有就空陣列）；prompt 依上面的「提示詞寫作規則」寫這一鏡的動作、情緒、空間與畫面，但**不要自己重寫角色外型、場景或物件的固定外觀細節**——那些系統會把上面的固定設定自動接到每一鏡當一致性參考，確保跨鏡一致，你只寫「他們在這一鏡做什麼、情緒如何、環境當下的樣子」，讓這一鏡的動作與畫面成為 prompt 的重點。");
     return lines.join("\n\n");
   }
   // 判斷這一鏡帶入哪些固定角色／場景／物件：優先用 AI 標的名字，沒有就用名字在文字裡出現與否；
@@ -2434,18 +2437,30 @@
     return { chars, scenes, objects };
   }
   function composeShotPrompt(shot, b) {
-    if (!b) return String(shot.prompt || "").trim();
+    const body = String(shot.prompt || "").trim();
+    if (!b) return body;
     const { chars, scenes, objects } = bibleHits(shot, b);
     const zh = promptLang() !== "en";
-    const L = zh ? { c: "角色：", s: "場景：", o: "物件：", st: "風格：" } : { c: "Characters: ", s: "Scene: ", o: "Objects: ", st: "Style: " };
     const named = arr => arr.map(x => x.desc ? `${x.name}（${x.desc}）` : x.name).join("; ");
-    const bits = [];
-    if (chars.length) bits.push(L.c + named(chars));
-    if (scenes.length) bits.push(L.s + named(scenes));
-    if (objects.length) bits.push(L.o + named(objects));
-    if (b.style) bits.push(L.st + b.style);
-    const prefix = bits.length ? bits.join(zh ? "。" : ". ") + (zh ? "。" : ". ") : "";
-    return prefix + String(shot.prompt || "").trim();
+    // 只放這一鏡實際出現的角色／場景／物件，＋整體風格，當「維持一致」的參考
+    const refBits = [];
+    if (chars.length) refBits.push((zh ? "角色：" : "Characters: ") + named(chars));
+    if (scenes.length) refBits.push((zh ? "場景：" : "Scene: ") + named(scenes));
+    if (objects.length) refBits.push((zh ? "物件：" : "Objects: ") + named(objects));
+    const styleBit = b.style ? (zh ? "整體風格：" + b.style : "Overall style: " + b.style) : "";
+    const all = refBits.concat(styleBit ? [styleBit] : []);
+    if (!all.length) return body;
+    const sep = zh ? "。" : ". ";
+    const ref = all.join(sep);
+    // 動作優先：這一鏡的動作先寫，設定用一句參考說明接在後面
+    if (bibleMode() === "action") {
+      const lead = zh
+        ? "（以下為維持跨鏡一致的設定參考，沿用其外觀即可，非本鏡重點——" + ref + "）"
+        : "(Consistency reference — keep their look, not the focus of this shot: " + ref + ")";
+      return body + " " + lead;
+    }
+    // 預設「設定優先」：角色／場景／物件／風格的固定設定放前面當基準，這一鏡的動作接在後面
+    return ref + sep + body;
   }
   // 編輯器目前這支影片的有效製作聖經（企劃共用 ⊕ 本集追加），未存檔也能用
   function editorProbe() {
@@ -2505,7 +2520,7 @@
   // 預設拆鏡規則（恢復預設會還原成這一份）。label＝選單顯示名；text＝實際送給 AI 的規則內容。
   const SCR_RULES_DEF = [
     { id: "cam",     label: "鏡頭語言（基本）",       text: "prompt 寫成可直接餵給生成模型的高品質提示詞，具體描述主體、動作、場景、構圖、鏡頭運動、風格、光線與氛圍。" },
-    { id: "cine",    label: "電影感與文學筆觸（避免生硬）", text: "prompt 要像電影分鏡描述加上文學場景，用連貫、具體、有畫面的句子把鏡頭寫成一段能直接想像的畫面，不要生硬地堆疊關鍵字或寫成乾巴巴的條列；多用具體名詞與感官動詞（滑落、滲出、搖曳、蜷縮、繃緊、垂落），少用空泛形容詞（很恐怖、很漂亮）；每一鏡都要營造明確的情緒與氛圍，讓人讀完腦中立刻浮現這個畫面。" },
+    { id: "cine",    label: "小說式文學筆觸（避免生硬）", text: "把每一鏡的動作描述寫成一段沉浸式的小說段落，篇幅要足夠鋪陳環境、光影、動作與情緒層次，不要只寫一兩句就帶過，也不要生硬地堆疊關鍵字或寫成乾巴巴的條列；用連貫、具體、有畫面的句子把鏡頭寫成一段能直接想像的畫面；多用具體名詞與感官動詞（滑落、滲出、顫抖、拉出光痕），少用空泛形容詞（很恐怖、很漂亮）；情緒一律用看得見的表情、姿態與力度呈現，讓人讀完腦中立刻浮現這個畫面。" },
     { id: "novel",   label: "動作與情緒細節（小說式描寫）", text: "像小說場景那樣把細節寫飽滿——角色的具體動作與細微肢體語言（手勢、視線、步態、呼吸、表情的細微變化）、當下流露的情緒與心理張力（用看得見的表情、姿態、力度去呈現，而不是只寫「難過」「生氣」這種抽象詞）、以及場景的環境與感官氛圍（時間、天氣、光影變化、材質質感、空氣感，以及飄落物／塵埃／風等動態元素）都要帶進畫面，讓每一鏡有臨場感與情緒。" },
     { id: "space",   label: "物件位置與空間邏輯",     text: "明確標出每個主體與物件在畫面中的相對位置與空間關係（左／右／畫面中央、前景／中景／背景、誰在誰的哪一側、彼此的距離與朝向），位置與動線要符合現實邏輯與物理常識（例如乘客從公車右側車門上下車、駕駛坐左前方、影子方向與光源一致、物體受重力合理擺放、車輛行進方向與車道一致），同一場景跨鏡之間的空間關係也要保持一致、不要無故左右翻轉。" },
     { id: "consist", label: "跨鏡一致性",             text: "同一支影片的所有鏡頭要維持一致的角色外型、色調與視覺風格。" },
@@ -2527,20 +2542,18 @@
   // 每個範本＝一整套「風格設定 ＋ few-shot 示範」，套用哪個範本，AI 就往那個風格與筆觸寫。
   const SCR_TPL_DEF = [
     {
-      id: "filmic", name: "電影感敘事筆觸（通用）",
-      text: `【描述手法】不論題材是什麼（溫馨、動作、科幻、懸疑、紀實…都一樣），每一鏡的 prompt 都用這套方法寫：
-1. 像小說場景加電影分鏡：用連貫、具體、有畫面的句子，把鏡頭寫成一段能直接在腦中浮現的畫面，不要堆疊乾巴巴的關鍵字或寫成條列。
-2. 具體名詞加感官動詞：多用「滑落、滲出、搖曳、蜷縮、繃緊、垂落、濺起」這類動詞和明確的物件、材質、光影，少用「很美、很可怕、很熱鬧」這種空泛形容詞。
-3. 情緒用「看得見的樣子」呈現：透過表情、姿態、肢體動作與力度去傳達角色當下的情緒與心理，而不是直接寫「他很緊張」。
-4. 明確空間與物理邏輯：標出每個主體與物件在畫面中的相對位置（左／右／畫面中央、前景／中景／背景、誰在誰的哪一側、朝向與動線），而且要符合現實邏輯與物理常識（例如乘客從公車右側車門上下車、影子方向與光源一致、物體受重力合理擺放）；同一場景跨鏡之間的空間關係要保持一致。
-5. 交代光線、色調、氛圍與鏡頭語言（景別、視角、鏡頭運動、景深），讓整體有電影感。
+      id: "filmic", name: "小說式沉浸描述（通用）",
+      text: `【描述手法】不論題材是什麼（溫馨、動作、科幻、懸疑、紀實…都一樣），把每一鏡的動作描述寫成一段「沉浸式的小說場景」，而不是一兩句乾巴巴的分鏡說明。要求：
+1. 篇幅充足、像小說段落：充分鋪陳環境與氛圍（時間、天氣、光影、聲音、空氣感）、人物的動作與細微肢體、以及情緒的層次與轉折，讓讀的人像在讀小說一樣看見整個畫面；不要只寫「特寫某物、某人做某事」就帶過。
+2. 具體名詞加感官動詞：多用「滑落、滲出、顫抖、泛黃、拉出光痕、吞回肚子裡」這類具體動詞與物件材質，少用「很累、很可怕、很感人」這種空泛形容詞。
+3. 情緒用「看得見的樣子」呈現：透過表情、姿態、肢體動作、呼吸與力度去傳達角色當下的情緒與心理，而不是直接寫「他很緊張」。
+4. 明確空間與物理邏輯：交代人與物件在畫面中的相對位置（左／右／前景／背景、誰在誰的哪一側、朝向與動線），且符合現實邏輯（例如乘客從公車右側車門上下車、影子與光源方向一致）；同一場景跨鏡的空間要一致。
+5. 帶到光線、色調、鏡頭語言與整體氛圍，讓畫面有電影感。前面若已附上角色／場景／物件的固定設定，就不必再重列完整外型，把力氣花在「這一鏡發生什麼、氣氛如何」。
 
-【示範：敘述 → 理想鏡頭 prompt】（示範的是「描述手法與邏輯」，題材不限，換成任何內容都用同樣的寫法與具體度）
-敘述：清晨巷口的早餐店，老闆娘把熱豆漿倒進紙杯，一名趕上班的上班族在旁等候。
-理想 prompt：電影感中近景。清晨微光下的老式巷口早餐店，畫面右側是冒著白色蒸氣的不鏽鋼豆漿桶，一位圍著沾了麵粉圍裙的中年老闆娘站在桶後，雙手穩穩地將滾燙的豆漿注入紙杯，熱氣在斜射的晨光中清晰上升；畫面左前方一名穿襯衫、肩背公事包的年輕上班族側身等候，重心微微前傾，視線不時瞟向手錶，透出趕時間的焦躁；背景是還沒完全拉開的鐵捲門與被夜雨打濕、反著微光的柏油路面。暖色調、清晨柔和的側逆光、淺景深、濃厚生活感的寫實氛圍。
+【示範：把生硬的分鏡動作，改寫成小說式描述】（示範的是「筆觸與鋪陳手法」，題材不限）
+〔生硬版〕公車內燈光閃爍一下。特寫儀表板旁的老舊印表機，它突然啟動，發出尖銳運轉聲，吐出一張紙條落在副駕座。林國維瞥向紙條，特寫紙條文字：「乘客：周啟明。座位：3 號。」林國維抬頭透過後照鏡看向周啟明，周啟明望著窗外低聲說「你就說，我有努力回家。」林國維錯愕。
 
-敘述：驟雨中的球場，少年全力追著滾遠的籃球，水花四濺。
-理想 prompt：電影感低角度跟拍。傍晚驟雨中的露天籃球場，積水的水泥地面反射著昏黃場燈；畫面中央一名穿濕透連帽衫的少年全力衝刺，追著一顆正朝畫面右側滾遠的籃球，右腳蹬地濺起大片水花，手臂前伸、上身壓低，臉上混著雨水與不服輸的專注；他身後的籃球架與空盪看台在雨幕中模糊成剪影。冷藍色調搭配暖黃場燈、雨絲在逆光中清晰可見、高速快門凝結飛濺的水珠、動感十足的運動氛圍。`
+〔小說版〕午夜的板橋，雨沒有停過。車廂裡只剩引擎低沉的震動，還有那種深夜才會出現、讓人心口發悶的安靜；頭頂的日光燈忽明忽暗，像隨時會熄滅。副駕旁那台泛黃的老舊熱感應印表機忽然發出尖銳刺耳的運轉聲，像一枚針硬生生劃破夜的寂靜，紙匣顫了一下，隨即吐出一張窄窄的白色紙條，輕飄飄落在副駕座上。林國維的視線慢慢移過去——紙條上只有幾個黑字，卻讓他的呼吸瞬間停住：「乘客：周啟明。座位：3 號。」他猛地抬眼，透過後照鏡看向車廂後方；周啟明坐在靠窗的位置，被雨淋透的深色西裝貼在身上，懷裡緊緊抱著一個白色蛋糕盒，臉色在忽明忽暗的燈光下越來越蒼白，像一個把話吞回肚子裡的人。他望著窗外被雨打散的街景，低聲開口，輕得幾乎聽不清：「你就說，我有努力回家。」那句話讓整節車廂都慢了一拍。林國維握著方向盤的手沒有動，整個人卻像被狠狠撞了一下；路燈在濕透的擋風玻璃上拉出一條條昏黃光痕，紅綠交錯的儀表板光映在他錯愕的臉上——他第一次意識到，這趟末班車載著的，根本不只是乘客。`
     }
   ];
   const SCR_TPL_KEY = "videodesk.scrtpls";
@@ -2577,11 +2590,12 @@
     $("#vScrName").value = $("#vfTitle").value.trim().slice(0, 40);
     const eb = curEditorBible();
     $("#vScrStatus").textContent = (eb.chars.length || eb.scenes.length || eb.style)
-      ? `會自動把企劃設定（${eb.chars.length} 人物／${eb.scenes.length} 場景${eb.style ? "／風格" : ""}）接到每一鏡 prompt 的最前面`
+      ? `會自動把企劃設定（${eb.chars.length} 人物／${eb.scenes.length} 場景${eb.style ? "／風格" : ""}）接到每一鏡當一致性參考（${bibleMode() === "ref" ? "放在動作前面" : "動作優先，設定放後面"}）`
       : "";
     scrShots = []; scrMeta = null; scrJob = null;
     $("#vScrGo").disabled = false;
     $("#vScrResult").innerHTML = ""; $("#vScrFoot").hidden = true;
+    hideCut(); cutSentences = []; cutAt = new Set();
     $("#vScrOv").classList.add("show");
     setTimeout(() => $("#vScrText").focus(), 60);
   }
@@ -2657,6 +2671,28 @@
     // 標題還空著就先用 AI 給的整支標題填上（不覆蓋已經寫好的）
     if (!$("#vfTitle").value.trim() && res.name) { $("#vfTitle").value = res.name; toast("影片標題已自動填入：" + res.name); }
   }
+  // 送 AI 拆鏡（自動拆與手動切分鏡共用同一條路）
+  function launchSplit(f, ask, b) {
+    scrShots = []; $("#vScrResult").innerHTML = ""; $("#vScrFoot").hidden = true;
+    $("#vScrGo").disabled = true; $("#vCutGo").disabled = true;
+    const stop = busy($("#vScrStatus"), "AI 拆鏡中（可以按 ⤓ 縮到右下角）");
+    scrJob = jobRun({
+      title: "拆鏡：" + (f.name || f.text.slice(0, 12)), icon: "🎞", vid: editingId, form: Object.assign({}, f, { bible: b }),
+      work: async () => {
+        const r = await aiCall(scrSys(), ask, shotSchemaFor(b));
+        const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
+        if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
+        return { shots, name: (f.name || String(r.title || "").trim() || "腳本分鏡").slice(0, 40) };
+      },
+      after: j => {
+        stop(); $("#vScrGo").disabled = false; $("#vCutGo").disabled = false;
+        if (j.state === "err" && scrJob === j && $("#vScrOv").classList.contains("show")) $("#vScrStatus").textContent = "失敗：" + j.err;
+      },
+      // 視窗還開著、而且還停在同一次拆鏡＝直接顯示，不用留膠囊
+      autoApply: j => $("#vScrOv").classList.contains("show") && scrJob === j && editingId === j.vid,
+      open: showShots
+    });
+  }
   $("#vScrGo").addEventListener("click", () => {
     const f = scrForm();
     if (!f.text) { toast("請先貼上腳本或旁白"); return; }
@@ -2672,25 +2708,85 @@
       "【分鏡類型】" + (f.type === "video" ? "影片動態鏡頭" : "靜態畫面"),
       langLine()
     ].filter(Boolean).join("\n\n");
-    scrShots = []; $("#vScrResult").innerHTML = ""; $("#vScrFoot").hidden = true;
-    $("#vScrGo").disabled = true;
-    const stop = busy($("#vScrStatus"), "AI 拆鏡中（可以按 ⤓ 縮到右下角）");
-    scrJob = jobRun({
-      title: "拆鏡：" + (f.name || f.text.slice(0, 12)), icon: "🎞", vid: editingId, form: Object.assign({}, f, { bible: b }),
-      work: async () => {
-        const r = await aiCall(scrSys(), ask, shotSchemaFor(b));
-        const shots = (Array.isArray(r.shots) ? r.shots : []).filter(s => s && String(s.prompt || "").trim());
-        if (!shots.length) throw new Error("AI 沒有回傳任何分鏡");
-        return { shots, name: (f.name || String(r.title || "").trim() || "腳本分鏡").slice(0, 40) };
-      },
-      after: j => {
-        stop(); $("#vScrGo").disabled = false;
-        if (j.state === "err" && scrJob === j && $("#vScrOv").classList.contains("show")) $("#vScrStatus").textContent = "失敗：" + j.err;
-      },
-      // 視窗還開著、而且還停在同一次拆鏡＝直接顯示，不用留膠囊
-      autoApply: j => $("#vScrOv").classList.contains("show") && scrJob === j && editingId === j.vid,
-      open: showShots
+    launchSplit(f, ask, b);
+  });
+
+  /* ---------- 手動切分鏡：使用者自己決定每一鏡從哪句到哪句 ---------- */
+  let cutSentences = [], cutAt = new Set();   // cutAt 存「在第 i 句之前切一刀」的索引
+  function splitSentences(text) {
+    const t = String(text || "").replace(/\r/g, ""), out = [], closers = "」』）】〕》”’\"')]";
+    let buf = "";
+    for (let i = 0; i < t.length; i++) {
+      const ch = t[i];
+      if (ch === "\n") { if (buf.trim()) out.push(buf.trim()); buf = ""; continue; }
+      buf += ch;
+      if ("。！？!?…".includes(ch)) {
+        while (i + 1 < t.length && closers.includes(t[i + 1])) buf += t[++i];
+        out.push(buf.trim()); buf = "";
+      }
+    }
+    if (buf.trim()) out.push(buf.trim());
+    return out;
+  }
+  function cutGroups() {
+    if (!cutSentences.length) return [];
+    const groups = []; let cur = [];
+    cutSentences.forEach((s, i) => { if (i > 0 && cutAt.has(i)) { groups.push(cur); cur = []; } cur.push(s); });
+    if (cur.length) groups.push(cur);
+    return groups;
+  }
+  function renderCut() {
+    let html = "", shotNo = 0;
+    cutSentences.forEach((s, i) => {
+      const isStart = i === 0 || cutAt.has(i);
+      if (i > 0) {
+        const on = cutAt.has(i);
+        html += `<div class="vd-cut-div${on ? " on" : ""}" data-cut="${i}" title="${on ? "取消這一刀" : "在這裡切一刀"}">${on ? "✂ 這裡切鏡" : "＋ 在這裡切"}</div>`;
+      }
+      if (isStart) shotNo++;
+      html += `<div class="vd-cut-sent${isStart ? " start" : ""}" data-si="${i}">${isStart ? `<span class="vd-cut-no">鏡 ${shotNo}</span>` : ""}<span class="vd-cut-tx">${esc(s)}</span></div>`;
     });
+    $("#vCutList").innerHTML = html || `<p class="vd-note">這段腳本切不出句子，先在上面貼點內容。</p>`;
+    const n = cutSentences.length ? cutGroups().length : 0;
+    $("#vCutStat").textContent = cutSentences.length ? `${cutSentences.length} 句 → 切成 ${n} 鏡` : "沒有內容";
+  }
+  function toggleCut(i) { if (i <= 0) return; cutAt.has(i) ? cutAt.delete(i) : cutAt.add(i); renderCut(); }
+  function openCut() {
+    const text = $("#vScrText").value.trim();
+    if (!text) { toast("先在上面貼腳本或旁白"); return; }
+    cutSentences = splitSentences(text);
+    cutAt = new Set(cutSentences.map((_, i) => i).filter(i => i > 0));   // 預設每句一鏡，讓使用者把要合併的切點取消
+    renderCut();
+    $("#vCutPanel").hidden = false;
+    $("#vCutToggle").textContent = "✂ 收起手動切分鏡";
+  }
+  function hideCut() { $("#vCutPanel").hidden = true; $("#vCutToggle").textContent = "✂ 手動切分鏡"; }
+  $("#vCutToggle").addEventListener("click", () => { $("#vCutPanel").hidden ? openCut() : hideCut(); });
+  $("#vCutList").addEventListener("click", e => {
+    const div = e.target.closest("[data-cut]");
+    if (div) { toggleCut(+div.dataset.cut); return; }
+    const sent = e.target.closest("[data-si]");
+    if (sent) toggleCut(+sent.dataset.si);
+  });
+  $("#vCutEach").addEventListener("click", () => { cutAt = new Set(cutSentences.map((_, i) => i).filter(i => i > 0)); renderCut(); });
+  $("#vCutMerge").addEventListener("click", () => { cutAt = new Set(); renderCut(); });
+  $("#vCutReload").addEventListener("click", openCut);
+  $("#vCutGo").addEventListener("click", () => {
+    const groups = cutGroups();
+    if (!groups.length) { toast("先貼腳本，並切出至少一鏡"); return; }
+    if (!needKey()) return;
+    const f = scrForm();
+    const b = curEditorBible();
+    const list = groups.map((g, i) => `鏡${i + 1}：${g.join("")}`).join("\n");
+    const ask = [
+      "【已切好的分鏡（使用者手動切的，務必照做）】以下每一組就是一鏡，請照組數與順序一鏡對一鏡展開成完整 prompt，narration 放該組的原文照抄；**絕對不要合併、拆開、增加或刪減鏡頭，總共必須剛好 " + groups.length + " 鏡**：\n" + list,
+      f.style ? "【視覺方向】" + f.style + "（每一鏡的 prompt 都要吃到這個風格）" : "",
+      bibleAsk(b),
+      f.dur ? "【每鏡預設秒數】約 " + f.dur + " 秒，長短依內容微調" : "",
+      "【分鏡類型】" + (f.type === "video" ? "影片動態鏡頭" : "靜態畫面"),
+      langLine()
+    ].filter(Boolean).join("\n\n");
+    launchSplit(Object.assign({}, f, { text: groups.map(g => g.join("")).join("\n") }), ask, b);
   });
   // ⤓ 縮到右下角：跑到一半照跑，跑完的結果也能收起來等一下再看
   $("#vScrMin").addEventListener("click", () => {
@@ -3197,6 +3293,7 @@
     const p = proxyCfg();
     $("#vaiProxy").value = p.url; $("#vaiProxyPw").value = p.pw;
     $("#vPromptLang").value = promptLang();
+    $("#vBibleMode").value = bibleMode();
     aiState();
   }
   function aiState() {
@@ -3314,7 +3411,8 @@
     setCfg({
       channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
       autoFill: $("#vAutoFill").checked,
-      promptLang: $("#vPromptLang").value === "en" ? "en" : "zh"
+      promptLang: $("#vPromptLang").value === "en" ? "en" : "zh",
+      bibleMode: $("#vBibleMode").value === "ref" ? "ref" : "action"
     });
     saveAiFields();
   }

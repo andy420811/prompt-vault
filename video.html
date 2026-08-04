@@ -430,6 +430,8 @@
             <div class="field"><label for="vaiProxyPw">代理密碼 <span class="opt">選填</span></label><input id="vaiProxyPw" type="password"></div>
             <div class="field"><label for="vPromptLang">生成的 prompt 語言 <span class="opt">拆分鏡／變體／設計</span></label>
               <select id="vPromptLang"><option value="zh">繁體中文</option><option value="en">English</option></select></div>
+            <div class="field"><label for="vBibleMode">設定（人物／場景／物件／風格）擺法 <span class="opt">避免長描述蓋過重點</span></label>
+              <select id="vBibleMode"><option value="ref">設定優先（放動作前面，推薦）</option><option value="action">動作優先（設定當參考放後面）</option></select></div>
           </div>
           <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink-2);cursor:pointer">
             <input type="checkbox" id="vAutoFill" style="width:16px;height:16px"> 儲存影片時自動補完空的標題／大綱／說明欄／hashtag／標籤
@@ -456,7 +458,7 @@
           <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="m6 9 6 6 6-6"/></svg>
         </div>
         <div class="block-body">
-          <p class="hint">範本是一套「描述手法＋範例示範（few-shot）」——套用哪個範本，AI 就照那套手法與筆觸寫每一鏡，解決 prompt 生硬的問題。預設是通用的電影感敘事筆觸（題材不限）；也可以自己做成特定風格。<b>這跟上面的「拆鏡規則」是分開的兩套</b>：規則管『怎麼寫得好』，範本管『用什麼描述手法與風格』。可切換、編輯、新增，改完自動存，只影響之後新拆的分鏡。</p>
+          <p class="hint">範本是一套「描述手法＋範例示範（few-shot）」——套用哪個範本，AI 就照那套手法與筆觸寫每一鏡，解決 prompt 生硬的問題。預設是通用的「小說式沉浸描述」（把每一鏡寫成小說段落、題材不限）；也可以自己做成特定風格。<b>這跟上面的「拆鏡規則」是分開的兩套</b>：規則管『怎麼寫得好』，範本管『用什麼描述手法與風格』。可切換、編輯、新增，改完自動存，只影響之後新拆的分鏡。</p>
           <div class="field"><label for="vTplActive">目前套用的範本 <span class="opt">選「不套用」就完全不加範本</span></label>
             <select id="vTplActive"></select></div>
           <div class="field"><label for="vTplName">範本名稱</label><input id="vTplName" maxlength="40" placeholder="範本名稱"></div>
@@ -561,8 +563,24 @@
       </div>
       <div class="pk-actions">
         <button type="button" class="btn primary" id="vScrGo" style="padding:9px 18px">🎬 開始拆鏡</button>
+        <button type="button" class="btn ghost" id="vCutToggle" style="padding:9px 14px">✂ 手動切分鏡</button>
         <button type="button" class="link-btn" id="vScrMin" style="color:var(--ink-3)">⤓ 縮到右下角背景跑</button>
         <span class="vd-note" id="vScrStatus"></span>
+      </div>
+      <div class="vd-cut-panel" id="vCutPanel" hidden>
+        <div class="vd-cut-head">
+          <span class="vd-cut-stat" id="vCutStat"></span>
+          <div class="vd-cut-tools">
+            <button type="button" class="link-btn" id="vCutEach">每句一鏡</button>
+            <button type="button" class="link-btn" id="vCutMerge">合併成一鏡</button>
+            <button type="button" class="link-btn" id="vCutReload">↻ 重讀腳本</button>
+          </div>
+        </div>
+        <p class="hint">自己決定每一鏡從哪句切到哪句：點句子之間的「＋ 在這裡切」新增一刀，點「✂」取消（點句子本身也可以切在它前面）。畫面會即時顯示切成幾鏡。切好按下面按鈕，AI 會照你的切法一鏡一鏡把每組句子展開成完整 prompt，不會自己改鏡數。</p>
+        <div class="vd-cut-list" id="vCutList"></div>
+        <div class="pk-actions">
+          <button type="button" class="btn primary" id="vCutGo" style="padding:9px 18px">🎬 依這個切法拆鏡</button>
+        </div>
       </div>
       <div class="vd-shots" id="vScrResult"></div>
     </div>

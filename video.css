@@ -519,3 +519,20 @@ body > .overlay, body > .toast { flex: 0 0 auto; }
 .vd-rule-text:focus { outline: none; border-color: var(--accent, var(--ink-3)); }
 #vTplText { width: 100%; font: inherit; font-size: 12.5px; line-height: 1.6; resize: vertical; }
 #vSetTplBlock :disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---- 手動切分鏡 ---- */
+.vd-cut-panel { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 4px 0 6px; background: var(--surface-2); }
+.vd-cut-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.vd-cut-stat { font-size: 13px; font-weight: 600; color: var(--ink); }
+.vd-cut-tools { display: flex; gap: 4px; flex-wrap: wrap; }
+.vd-cut-list { max-height: 44vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--paper); padding: 6px; }
+.vd-cut-sent { border-radius: 7px; padding: 6px 9px; font-size: 13px; line-height: 1.6; color: var(--ink-2); cursor: pointer; }
+.vd-cut-sent:hover { background: var(--surface-2); }
+.vd-cut-sent.start { background: var(--accent-tint, var(--surface-2)); }
+.vd-cut-no { display: inline-block; font-size: 11px; font-weight: 700; color: var(--accent); margin-right: 7px; padding: 1px 7px;
+  border: 1px solid var(--accent); border-radius: 999px; vertical-align: middle; }
+.vd-cut-tx { vertical-align: middle; }
+.vd-cut-div { text-align: center; font-size: 11px; color: var(--ink-3); cursor: pointer; padding: 2px 0; margin: 1px 0;
+  border-top: 1px dashed transparent; user-select: none; }
+.vd-cut-div:hover { color: var(--accent); }
+.vd-cut-div.on { color: var(--accent); font-weight: 700; }
