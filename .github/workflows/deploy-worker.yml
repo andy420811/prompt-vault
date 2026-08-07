@@ -5,8 +5,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'prompt-vault-proxy.js'
-      - 'wrangler.toml'
+      - 'worker/**'
       - '.github/workflows/deploy-worker.yml'
   workflow_dispatch: {}   # 也可在 GitHub Actions 頁面手動按一下部署
 
@@ -20,3 +19,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
