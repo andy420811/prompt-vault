@@ -97,8 +97,16 @@
     try { return JSON.parse(localStorage.getItem(KEY_CFG)) || {}; } catch (e) { return {}; }
   }
   function setCfg(o) { try { localStorage.setItem(KEY_CFG, JSON.stringify(Object.assign(cfg(), o))); } catch (e) {} }
-  // 系統生成的 prompt 用哪個語言（預設中文；可在設定改英文）
-  const promptLang = () => cfg().promptLang === "en" ? "en" : "zh";
+  // 系統生成的 prompt 用哪個語言（預設中文；與 Prompt 庫共用同一個開關 promptvault.promptlang）
+  const PLANG_KEY = "promptvault.promptlang";
+  const promptLang = () => {
+    let v = localStorage.getItem(PLANG_KEY);
+    if (v == null && cfg().promptLang) {   // 沿用舊的 videodesk.cfg.promptLang，遷移到共用 key
+      v = cfg().promptLang === "en" ? "en" : "zh";
+      try { localStorage.setItem(PLANG_KEY, v); } catch (e) {}
+    }
+    return v === "en" ? "en" : "zh";
+  };
   // 設定（角色/場景/物件/風格）在每一鏡 prompt 裡的擺法：ref＝設定優先（預設，放動作前面），action＝動作優先（設定當參考放後面）
   const bibleMode = () => cfg().bibleMode === "action" ? "action" : "ref";
   const langLine = () => promptLang() === "en"
@@ -3408,10 +3416,10 @@
     persistScrTpls(); renderTpls(); toast("已恢復預設拆鏡範本");
   });
   function saveSettings() {
+    try { localStorage.setItem(PLANG_KEY, $("#vPromptLang").value === "en" ? "en" : "zh"); } catch (e) {}
     setCfg({
       channel: $("#vfChannel").value.trim(), apiKey: $("#vfApiKey").value.trim(),
       autoFill: $("#vAutoFill").checked,
-      promptLang: $("#vPromptLang").value === "en" ? "en" : "zh",
       bibleMode: $("#vBibleMode").value === "ref" ? "ref" : "action"
     });
     saveAiFields();

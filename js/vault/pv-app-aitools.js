@@ -2,9 +2,18 @@
    Classic script：與其他 pv-app-*.js 共用同一全域範疇，載入順序即原執行順序，不可調換。
    載入序：pv-app-inspire.js 之後、board 之前。 */
 "use strict";
-  // ---------- AI enhance (zh → pro English prompt) ----------
+  // 系統生成的 prompt 用哪個語言（預設中文；與影片製作台共用同一個開關 promptvault.promptlang）
+  const promptLang = () => localStorage.getItem("promptvault.promptlang") === "en" ? "en" : "zh";
+  const langWord = () => promptLang() === "en" ? "英文" : "繁體中文";
+  // 設定選單的語言開關：開窗時回填、改動即存（與影片製作台共用 promptvault.promptlang）
+  $("#menuBtn").addEventListener("click", () => { const s = $("#promptLang"); if (s) s.value = promptLang(); });
+  $("#promptLang").addEventListener("change", e => {
+    localStorage.setItem("promptvault.promptlang", e.target.value === "en" ? "en" : "zh");
+    toast("系統生成 prompt 語言：" + (e.target.value === "en" ? "English" : "繁體中文"));
+  });
+  // ---------- AI enhance (依預設語言改寫) ----------
   const ENH_SCHEMA = { type: "OBJECT", properties: { prompt: { type: "STRING" }, note: { type: "STRING" } }, required: ["prompt"] };
-  const ENH_SYS = "你是資深提示詞工程師。將使用者的生成提示詞改寫為高品質英文提示詞：完整保留原始意圖與所有硬性要求（如「不要修改人物」、需附參考圖、比例參數）；畫面中要顯示的標題或文字內容保持原語言、不翻譯；補足具體視覺細節（光線、構圖、材質、色調），但不加入與原意矛盾的元素。輸出 prompt（改寫後的英文提示詞）與 note（一句繁體中文，說明主要強化了什麼）。";
+  const ENH_SYS = () => "你是資深提示詞工程師。將使用者的生成提示詞改寫為高品質" + langWord() + "提示詞：完整保留原始意圖與所有硬性要求（如「不要修改人物」、需附參考圖、比例參數）；畫面中要顯示的標題或文字內容保持原語言、不翻譯；補足具體視覺細節（光線、構圖、材質、色調），但不加入與原意矛盾的元素。輸出 prompt（改寫後的" + langWord() + "提示詞）與 note（一句繁體中文，說明主要強化了什麼）。";
   $("#enhanceBtn").addEventListener("click", () => {
     const raw = $("#fPrompt").value.trim();
     if (!raw) { toast("請先輸入提示詞"); return; }
@@ -16,7 +25,7 @@
     setTimeout(() => { btn.innerHTML = old; btn.disabled = false; }, 1500);
     window.jobTray.run({
       title: "AI 強化：" + title.slice(0, 12), icon: "✨",
-      work: () => aiCall(ENH_SYS, raw, ENH_SCHEMA).then(r => { if (!r.prompt) throw new Error("空結果"); return r; }),
+      work: () => aiCall(ENH_SYS(), raw, ENH_SCHEMA).then(r => { if (!r.prompt) throw new Error("空結果"); return r; }),
       autoApply: same,   // 編輯器沒動過就直接換上去；動過或關掉就留在右下角當候選，不會偷改你正在寫的東西
       open: r => {
         if (same()) {
@@ -26,7 +35,7 @@
           $("#fPrompt").value = r.prompt;
           curVars = []; curVarsAnalyzed = false; renderVarFields();
           $("#blkVars").classList.add("closed");
-          toast(r.note ? "已強化：" + r.note : "已強化為英文提示詞，原文存為變體");
+          toast(r.note ? "已強化：" + r.note : "已強化為" + langWord() + "提示詞，原文存為變體");
         } else {
           const rec = rid ? data.find(x => x.id === rid) : null;
           window.ideaShowResults(rec || { id: rid, title: title, prompt: raw },
@@ -136,7 +145,7 @@
   const REV_SCHEMA = JSON.parse(JSON.stringify(AI_SCHEMA));
   REV_SCHEMA.properties.prompt = { type: "STRING" };
   REV_SCHEMA.required = ["type", "prompt"];
-  const REV_SYS = "你是頂尖的 AI 影像分析師與提示詞工程師。請像鑑識專家一樣鉅細靡遺觀察使用者提供的圖片，反推出一則能高度重現該圖的高品質【英文】生成提示詞填入 prompt 欄。prompt 用逗號分隔、關鍵字要豐富且具體，依序涵蓋（有才寫）：主體（人數／年齡／性別／髮型髮色／表情／姿勢／視線／服裝與配件）、次要元素與前景、場景與背景細節、時間與天氣、光線（來源／方向／軟硬／色溫，如 rim light、golden hour、softbox lighting）、色調與調色（palette、teal and orange、pastel 等）、藝術風格與媒材（photorealistic、cinematic、3D render、anime、oil painting、Unreal Engine 等）、鏡頭（機位角度／景別／焦段／景深，如 low angle、close-up、85mm、shallow depth of field、bokeh）、構圖（rule of thirds、centered、symmetry）、材質與質感、氛圍情緒，最後可加畫質詞（8k、ultra detailed、sharp focus）。盡量精準辨識畫面中可見的具體對象（名人／品牌／角色／地標／可讀文字）並寫入 prompt。其餘欄位依 schema：type 通常 image（明顯為動態影格才 video）；camera/style/light/shot 從允許清單挑出【所有】明顯符合的（可多選、寧多勿漏）；tags 給【5~10】個繁體中文主題標籤（涵蓋主體、風格、色調、場景、用途等不同面向）；title 給 16 字內、具體描述畫面的繁中標題；neg 可留空；constraint 留空。只輸出符合 schema 的 JSON。";
+  const REV_SYS = () => "你是頂尖的 AI 影像分析師與提示詞工程師。請像鑑識專家一樣鉅細靡遺觀察使用者提供的圖片，反推出一則能高度重現該圖的高品質【" + langWord() + "】生成提示詞填入 prompt 欄。prompt 用逗號分隔、關鍵字要豐富且具體，依序涵蓋（有才寫）：主體（人數／年齡／性別／髮型髮色／表情／姿勢／視線／服裝與配件）、次要元素與前景、場景與背景細節、時間與天氣、光線（來源／方向／軟硬／色溫，如 rim light、golden hour、softbox lighting）、色調與調色（palette、teal and orange、pastel 等）、藝術風格與媒材（photorealistic、cinematic、3D render、anime、oil painting、Unreal Engine 等）、鏡頭（機位角度／景別／焦段／景深，如 low angle、close-up、85mm、shallow depth of field、bokeh）、構圖（rule of thirds、centered、symmetry）、材質與質感、氛圍情緒，最後可加畫質詞（8k、ultra detailed、sharp focus）。盡量精準辨識畫面中可見的具體對象（名人／品牌／角色／地標／可讀文字）並寫入 prompt。其餘欄位依 schema：type 通常 image（明顯為動態影格才 video）；camera/style/light/shot 從允許清單挑出【所有】明顯符合的（可多選、寧多勿漏）；tags 給【5~10】個繁體中文主題標籤（涵蓋主體、風格、色調、場景、用途等不同面向）；title 給 16 字內、具體描述畫面的繁中標題；neg 可留空；constraint 留空。只輸出符合 schema 的 JSON。";
   let revImgs = [];   // [{img: dataURI, desc: 個別補充}]
   const revOv = $("#revOverlay");
   function renderRevDrop() {
@@ -223,7 +232,7 @@
     revImgs = []; $("#revDesc").value = ""; closeRev();
     window.jobTray.run({
       title: "圖片反推 prompt", icon: "🔍",
-      work: () => aiCall(REV_SYS, revParts(img, desc), REV_SCHEMA),
+      work: () => aiCall(REV_SYS(), revParts(img, desc), REV_SCHEMA),
       open: r => {
         openEditor();
         $("#fPrompt").value = r.prompt || "";
@@ -274,7 +283,7 @@
       const rec = data.find(p => p.id === ids[i]);
       if (!rec) continue;   // 這張已被使用者刪除 → 跳過
       try {
-        applyRevToRec(rec, await aiCall(REV_SYS, revParts(items[i].img, mergeDesc(common, items[i].desc)), REV_SCHEMA));
+        applyRevToRec(rec, await aiCall(REV_SYS(), revParts(items[i].img, mergeDesc(common, items[i].desc)), REV_SCHEMA));
         ok++;
       } catch (e) {
         rec.title = `⚠ 反推失敗（${i + 1}）`;
@@ -327,7 +336,7 @@
   VREV_SCHEMA.properties.prompt = { type: "STRING" };
   VREV_SCHEMA.properties.type = { type: "STRING", enum: ["video"] };
   VREV_SCHEMA.required = ["type", "prompt"];
-  const VREV_SYS = "你是資深影片生成提示詞工程師。使用者提供的多張圖片是同一段影片依時間先後抽取的連續影格（第一張最早、最後一張最晚）。請比較影格間的變化，反推出一則能重現該影片的高品質英文影片生成提示詞，填入 prompt 欄：具體描述主體與其動作、鏡頭運動（如 slow pan、dolly in、handheld、orbit、static shot）、場景轉換與節奏、風格、光線、色調與氛圍；把動態與時間演變寫清楚，而非只描述單一靜態畫面。其餘欄位依 schema：type 一律 video；camera/style/light/shot 只從允許清單挑明顯符合的；tags 給 2~5 個繁體中文主題標籤；title 給 12 字內的繁中標題；ar/duration/fps 參考使用者提供的影片實際參數；constraint 留空。";
+  const VREV_SYS = () => "你是資深影片生成提示詞工程師。使用者提供的多張圖片是同一段影片依時間先後抽取的連續影格（第一張最早、最後一張最晚）。請比較影格間的變化，反推出一則能重現該影片的高品質" + langWord() + "影片生成提示詞，填入 prompt 欄：具體描述主體與其動作、鏡頭運動（如 slow pan、dolly in、handheld、orbit、static shot）、場景轉換與節奏、風格、光線、色調與氛圍；把動態與時間演變寫清楚，而非只描述單一靜態畫面。其餘欄位依 schema：type 一律 video；camera/style/light/shot 只從允許清單挑明顯符合的；tags 給 2~5 個繁體中文主題標籤；title 給 12 字內的繁中標題；ar/duration/fps 參考使用者提供的影片實際參數；constraint 留空。";
 
   const VREV_FRAMES = 4;          // 抽取影格數
   let vrevFrames = [];            // dataURI[]
@@ -461,7 +470,7 @@
     // 丟到背景執行，完成後在右下角點開（帶著結果開編輯器）
     window.jobTray.run({
       title: "影片反推 prompt", icon: "🎬",
-      work: () => aiCall(VREV_SYS, parts, VREV_SCHEMA).then(r => {
+      work: () => aiCall(VREV_SYS(), parts, VREV_SCHEMA).then(r => {
         r.type = "video";
         if (!r.duration && meta.dur) r.duration = String(Math.round(meta.dur));
         if (!r.ar && meta.ar) r.ar = meta.ar;
